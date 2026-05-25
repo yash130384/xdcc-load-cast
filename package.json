@@ -1,0 +1,26 @@
+{
+  "name": "xdcc-load-cast",
+  "version": "1.0.0",
+  "description": "Local web-based XDCC search, transfer, and cast client",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev:backend": "node server.js",
+    "dev:frontend": "npm run dev --prefix client",
+    "build:frontend": "npm run build --prefix client",
+    "dev": "concurrently \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "postinstall": "cd client && npm install"
+  },
+  "dependencies": {
+    "axios": "^1.6.8",
+    "cheerio": "^1.0.0-rc.12",
+    "chromecast-api": "^0.4.2",
+    "dotenv": "^16.4.5",
+    "express": "^4.19.2",
+    "ws": "^8.16.0"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  }
+}
