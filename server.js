@@ -457,6 +457,241 @@ app.post('/api/settings', (req, res) => {
   return res.json(appConfig);
 });
 
+async function findAndExtractRarFiles(dir, sendLog) {
+  const rarFiles = [];
+  
+  async function findRar(currentDir) {
+    if (!fs.existsSync(currentDir)) return;
+    const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(currentDir, entry.name);
+      if (entry.isDirectory()) {
+        await findRar(fullPath);
+      } else if (entry.isFile()) {
+        const ext = path.extname(entry.name).toLowerCase();
+        if (ext === '.rar') {
+          // Verify if it is currently being written to by another download in downloadQueue
+          let isCurrentlyDownloading = false;
+          for (const item of downloadQueue.values()) {
+            if (item.downloader && item.downloader.status === 'dcc_downloading' && item.downloader.filePath === fullPath) {
+              isCurrentlyDownloading = true;
+              break;
+            }
+          }
+          if (!isCurrentlyDownloading) {
+            rarFiles.push(fullPath);
+          }
+        }
+      }
+    }
+  }
+  
+  await findRar(dir);
+  
+  if (rarFiles.length === 0) {
+    return false;
+  }
+  
+  const rarsToExtract = rarFiles.filter(filePath => {
+    const filename = path.basename(filePath).toLowerCase();
+    const partMatch = filename.match(/part(\d+)\.rar$/);
+    if (partMatch) {
+      const partNum = parseInt(partMatch[1], 10);
+      return partNum === 1; // Only extract part 1
+    }
+    return true;
+  });
+
+  if (rarsToExtract.length === 0) {
+    return false;
+  }
+  
+  sendLog(`Gefundene RAR-Archive: ${rarsToExtract.length}. Entpacken gestartet...`);
+  let extractedAny = false;
+
+  for (const rarPath of rarsToExtract) {
+    const rarDir = path.dirname(rarPath);
+    sendLog(`Entpacke RAR-Datei: ${path.basename(rarPath)}...`);
+    
+    const success = await new Promise((resolve) => {
+      execFile('unrar', ['x', '-o+', rarPath, rarDir], (unrarErr) => {
+        if (!unrarErr) {
+          sendLog(`Erfolgreich entpackt mit unrar!`);
+          resolve(true);
+        } else {
+          sendLog(`unrar nicht verfügbar oder fehlgeschlagen. Versuche 7z...`);
+          execFile('7z', ['x', '-y', `-o${rarDir}`, rarPath], (sevenzErr) => {
+            if (!sevenzErr) {
+              sendLog(`Erfolgreich entpackt mit 7z!`);
+              resolve(true);
+            } else {
+              sendLog(`Fehler beim Entpacken von ${path.basename(rarPath)}: unrar & 7z fehlgeschlagen.`);
+              resolve(false);
+            }
+          });
+        }
+      });
+    });
+
+    if (success) {
+      extractedAny = true;
+      // Delete all archive parts and verification files for this specific RAR archive
+      const filename = path.basename(rarPath);
+      let prefix = filename;
+      if (filename.toLowerCase().endsWith('.part1.rar')) {
+        prefix = filename.slice(0, -10);
+      } else if (filename.toLowerCase().endsWith('.rar')) {
+        prefix = filename.slice(0, -4);
+      }
+
+      try {
+        const dirEntries = await fs.promises.readdir(rarDir, { withFileTypes: true });
+        for (const entry of dirEntries) {
+          if (entry.isFile()) {
+            const entryName = entry.name;
+            if (entryName.toLowerCase().startsWith(prefix.toLowerCase())) {
+              const entryExt = path.extname(entryName).toLowerCase();
+              const isArchivePart = entryExt === '.rar' || 
+                                   /^\.r\d+$/.test(entryExt) || 
+                                   entryExt === '.sfv' ||
+                                   /\.part\d+\.rar$/i.test(entryName);
+              if (isArchivePart) {
+                const partPath = path.join(rarDir, entryName);
+                try {
+                  await fs.promises.unlink(partPath);
+                  console.log(`[Extraction] Archive-Teil gelöscht: ${partPath}`);
+                } catch (unlinkErr) {
+                  console.error(`[Extraction] Fehler beim Löschen von ${partPath}:`, unlinkErr.message);
+                }
+              }
+            }
+          }
+        }
+      } catch (dirErr) {
+        console.error(`[Extraction] Fehler beim Bereinigen von RAR-Verzeichnis ${rarDir}:`, dirErr.message);
+      }
+    }
+  }
+
+  return extractedAny;
+}
+
+async function flattenAndCleanupMedia(downloadDir) {
+  try {
+    const baseDir = path.resolve(downloadDir);
+    
+    async function traverse(currentDir) {
+      const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          await traverse(fullPath);
+        } else if (entry.isFile()) {
+          if (path.resolve(currentDir) !== baseDir) {
+            const ext = path.extname(entry.name).toLowerCase();
+            let targetPath = path.join(baseDir, entry.name);
+            
+            if (fs.existsSync(targetPath)) {
+              const nameWithoutExt = path.parse(entry.name).name;
+              let counter = 1;
+              while (fs.existsSync(targetPath)) {
+                targetPath = path.join(baseDir, `${nameWithoutExt}_${counter}${ext}`);
+                counter++;
+              }
+            }
+            
+            await fs.promises.rename(fullPath, targetPath);
+            console.log(`[Relocation] Moved file from ${fullPath} to ${targetPath}`);
+          }
+        }
+      }
+    }
+    
+    await traverse(baseDir);
+    
+    async function cleanEmptyDirs(currentDir) {
+      const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          await cleanEmptyDirs(fullPath);
+          const subEntries = await fs.promises.readdir(fullPath);
+          if (subEntries.length === 0) {
+            await fs.promises.rmdir(fullPath);
+            console.log(`[Relocation] Cleaned empty directory: ${fullPath}`);
+          }
+        }
+      }
+    }
+    
+    await cleanEmptyDirs(baseDir);
+  } catch (err) {
+    console.error('[Relocation] Fehler beim Verschieben/Bereinigen der Dateien:', err);
+  }
+}
+
+async function handleDownloadPostProcessing(id, downloader) {
+  const filePath = downloader.filePath;
+  const downloadDir = downloader.downloadDir;
+  const lowerFile = downloader.filename.toLowerCase();
+  
+  const isArchive = lowerFile.endsWith('.tar') || 
+                    lowerFile.endsWith('.tar.gz') || 
+                    lowerFile.endsWith('.tgz') || 
+                    lowerFile.endsWith('.rar');
+                    
+  if (isArchive) {
+    downloadQueue.set(id, { downloader, statusOverride: 'extracting' });
+    broadcastStatus(id);
+  }
+
+  const sendLog = (text) => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) {
+        client.send(JSON.stringify({ type: 'message', data: { id, text: `[Entpacken] ${text}` } }));
+      }
+    });
+  };
+
+  try {
+    if (lowerFile.endsWith('.tar') || lowerFile.endsWith('.tar.gz') || lowerFile.endsWith('.tgz')) {
+      sendLog(`Entpacken der TAR-Datei gestartet...`);
+      await new Promise((resolve) => {
+        execFile('tar', ['-xf', filePath, '-C', downloadDir], (error) => {
+          if (error) {
+            console.error(`[Extraction] TAR-Fehler:`, error);
+            sendLog(`Fehler beim TAR-Entpacken: ${error.message}`);
+            resolve(false);
+          } else {
+            sendLog(`TAR erfolgreich entpackt.`);
+            fs.unlink(filePath, (err) => {
+              if (err) console.error(`[Extraction] Konnte TAR nicht löschen:`, err);
+              else sendLog(`Originale TAR-Datei gelöscht.`);
+              resolve(true);
+            });
+          }
+        });
+      });
+    }
+
+    // Now check for RAR files (both if downloaded RAR or extracted from TAR)
+    await findAndExtractRarFiles(downloadDir, sendLog);
+    
+    // Flatten any subdirectories (move media files to root, delete empty subdirs)
+    sendLog(`Bereinige Verzeichnisstruktur...`);
+    await flattenAndCleanupMedia(downloadDir);
+    sendLog(`Dateien erfolgreich verarbeitet.`);
+    
+  } catch (err) {
+    console.error(`[PostProcessing] Fehler:`, err);
+    sendLog(`Fehler bei der Nachverarbeitung: ${err.message}`);
+  } finally {
+    // Clear override to finish
+    downloadQueue.set(id, { downloader, statusOverride: null });
+    broadcastStatus(id);
+  }
+}
+
 // 4. Download operations
 app.post('/api/download', (req, res) => {
   const { server, port, useSSL, channel, botName, packNumber, filename, expectedSize } = req.body;
@@ -497,48 +732,11 @@ app.post('/api/download', (req, res) => {
 
   downloader.on('progress', (data) => {
     if (data.status === 'completed' && !downloader._extractionStarted) {
-      const lowerFile = downloader.filename.toLowerCase();
-      if (lowerFile.endsWith('.tar') || lowerFile.endsWith('.tar.gz') || lowerFile.endsWith('.tgz')) {
-        downloader._extractionStarted = true;
-        downloadQueue.set(id, { downloader, statusOverride: 'extracting' });
-        broadcastStatus(id);
-        
-        const sendLog = (text) => {
-          wss.clients.forEach((client) => {
-            if (client.readyState === 1) {
-              client.send(JSON.stringify({ type: 'message', data: { id, text: `[Entpacken] ${text}` } }));
-            }
-          });
-        };
-
-        sendLog(`Entpacken der Archivdatei gestartet...`);
-
-        execFile('tar', ['-xf', downloader.filePath, '-C', downloader.downloadDir], (error) => {
-          if (error) {
-            console.error(`[Extraction] Fehler beim Entpacken von ${downloader.filePath}:`, error);
-            sendLog(`Fehler beim Entpacken: ${error.message}`);
-            downloadQueue.set(id, { downloader, statusOverride: null });
-            broadcastStatus(id);
-          } else {
-            console.log(`[Extraction] Entpacken erfolgreich abgeschlossen: ${downloader.filePath}`);
-            sendLog(`Erfolgreich entpackt!`);
-            
-            fs.unlink(downloader.filePath, (unlinkErr) => {
-              if (unlinkErr) {
-                console.error(`[Extraction] Konnte Archiv nicht löschen:`, unlinkErr);
-              } else {
-                console.log(`[Extraction] Archiv gelöscht: ${downloader.filePath}`);
-                sendLog(`Originales Archiv gelöscht.`);
-              }
-              downloadQueue.set(id, { downloader, statusOverride: null });
-              broadcastStatus(id);
-            });
-          }
-        });
-        return;
-      }
+      downloader._extractionStarted = true;
+      handleDownloadPostProcessing(id, downloader);
+    } else {
+      broadcastStatus(id);
     }
-    broadcastStatus(id);
   });
 
   downloader.on('message', (data) => {
