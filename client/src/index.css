@@ -443,6 +443,7 @@ button, input, select {
   transition: all 0.2s;
   position: relative;
   overflow: hidden;
+  flex-shrink: 0;
 }
 
 .download-item.active {
