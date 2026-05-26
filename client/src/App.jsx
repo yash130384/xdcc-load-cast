@@ -1140,28 +1140,9 @@ function App() {
                                 </button>
                               )}
                               
-                              {/* Volume Icon + Slider */}
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto', marginRight: '0.5rem' }}>
-                                <span style={{ fontSize: '0.75rem' }}>🔊</span>
-                                <input 
-                                  type="range"
-                                  min={0}
-                                  max={1}
-                                  step={0.05}
-                                  value={activeCastForFile.volume !== undefined ? activeCastForFile.volume : 1}
-                                  onChange={(e) => handleCastControl(activeCastForFile.device, 'volume', e.target.value)}
-                                  style={{
-                                    width: '60px',
-                                    accentColor: 'var(--accent-cyan)',
-                                    cursor: 'pointer',
-                                    height: '3px'
-                                  }}
-                                />
-                              </div>
-
                               <button 
                                 className="btn btn-danger" 
-                                style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                                style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
                                 onClick={() => stopCast(activeCastForFile.device)}
                               >
                                 Stoppen
@@ -1470,28 +1451,9 @@ function App() {
                                     </button>
                                   )}
                                   
-                                  {/* Volume Icon + Slider */}
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto', marginRight: '0.5rem' }}>
-                                    <span style={{ fontSize: '0.75rem' }}>🔊</span>
-                                    <input 
-                                      type="range"
-                                      min={0}
-                                      max={1}
-                                      step={0.05}
-                                      value={activeCastForFile.volume !== undefined ? activeCastForFile.volume : 1}
-                                      onChange={(e) => handleCastControl(activeCastForFile.device, 'volume', e.target.value)}
-                                      style={{
-                                        width: '60px',
-                                        accentColor: 'var(--accent-cyan)',
-                                        cursor: 'pointer',
-                                        height: '3px'
-                                      }}
-                                    />
-                                  </div>
-
                                   <button 
                                     className="btn btn-danger" 
-                                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
                                     onClick={() => stopCast(activeCastForFile.device)}
                                   >
                                     Stoppen
