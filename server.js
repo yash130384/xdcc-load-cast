@@ -922,6 +922,28 @@ app.delete('/api/download/:id', async (req, res) => {
 
 // Media Library Scanner and Endpoints
 
+function checkAudioTranscodeNeeded(filePath) {
+  return new Promise((resolve) => {
+    execFile('ffprobe', [
+      '-v', 'error',
+      '-select_streams', 'a:0',
+      '-show_entries', 'stream=codec_name',
+      '-of', 'default=noprint_wrappers=1:nokey=1',
+      filePath
+    ], (err, stdout) => {
+      if (err) {
+        console.error('[probe] ffprobe failed:', err.message);
+        resolve(false); // Fallback to direct streaming
+        return;
+      }
+      const codec = stdout.trim().toLowerCase();
+      console.log(`[probe] Detected audio codec for ${path.basename(filePath)}: ${codec}`);
+      const needsTranscode = ['dts', 'ac3', 'eac3', 'truehd', 'dca'].includes(codec);
+      resolve(needsTranscode);
+    });
+  });
+}
+
 function getSafeFilePath(filename) {
   if (!filename) return null;
   const baseDir = path.resolve(appConfig.downloadDir);
@@ -1058,7 +1080,7 @@ app.post('/api/media-library/play-local', (req, res) => {
   });
 });
 
-app.post('/api/media-library/cast/play', (req, res) => {
+app.post('/api/media-library/cast/play', async (req, res) => {
   const { filename, deviceName } = req.body;
   if (!filename || !deviceName) {
     return res.status(400).json({ error: 'Parameter filename und deviceName fehlen' });
@@ -1082,7 +1104,10 @@ app.post('/api/media-library/cast/play', (req, res) => {
   // Determine mime type
   let contentType = 'video/mp4';
   const ext = path.extname(filename).toLowerCase();
-  if (ext === '.mkv') contentType = 'video/x-matroska';
+  if (ext === '.mkv') {
+    const needsTranscode = await checkAudioTranscodeNeeded(filePath);
+    contentType = needsTranscode ? 'video/mp4' : 'video/x-matroska';
+  }
   else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
@@ -1229,7 +1254,7 @@ setInterval(() => {
   }
 }, 8000);
 
-app.post('/api/chromecast/play', (req, res) => {
+app.post('/api/chromecast/play', async (req, res) => {
   const { downloadId, deviceName } = req.body;
   if (!downloadId || !deviceName) {
     return res.status(400).json({ error: 'Parameter downloadId und deviceName fehlen' });
@@ -1255,7 +1280,10 @@ app.post('/api/chromecast/play', (req, res) => {
   // Determine mime type
   let contentType = 'video/mp4';
   const ext = path.extname(filename).toLowerCase();
-  if (ext === '.mkv') contentType = 'video/x-matroska';
+  if (ext === '.mkv') {
+    const needsTranscode = await checkAudioTranscodeNeeded(item.downloader.filePath);
+    contentType = needsTranscode ? 'video/mp4' : 'video/x-matroska';
+  }
   else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
@@ -1372,7 +1400,7 @@ app.get('/api/chromecast/active', (req, res) => {
 });
 
 // Serving local media files with HTTP Range Requests for streaming and seeking support
-app.get('/api/media/*', (req, res) => {
+app.get('/api/media/*', async (req, res) => {
   const filename = req.params[0];
   const filePath = getSafeFilePath(filename);
 
@@ -1412,6 +1440,41 @@ app.get('/api/media/*', (req, res) => {
       }
     });
     return;
+  }
+
+  if (ext === '.mkv') {
+    const needsTranscode = await checkAudioTranscodeNeeded(filePath);
+    if (needsTranscode) {
+      console.log(`[Playback] Audio-Transcodierung läuft (on-the-fly) für MKV-Datei: ${filePath}`);
+      res.writeHead(200, {
+        'Content-Type': 'video/mp4',
+        'Transfer-Encoding': 'chunked'
+      });
+      
+      const ffmpeg = spawn('ffmpeg', [
+        '-i', filePath,
+        '-vcodec', 'copy',
+        '-acodec', 'aac',
+        '-f', 'mp4',
+        '-movflags', 'frag_keyframe+empty_moov',
+        'pipe:1'
+      ]);
+      
+      ffmpeg.stdout.pipe(res);
+      
+      req.on('close', () => {
+        console.log(`[Playback] Client-Verbindung geschlossen, beende ffmpeg für: ${filePath}`);
+        ffmpeg.kill('SIGKILL');
+      });
+      
+      ffmpeg.on('error', (err) => {
+        console.error(`[Playback] ffmpeg-Fehler für ${filePath}:`, err);
+        if (!res.headersSent) {
+          res.status(500).send('Fehler bei der Audio-Transkodierung');
+        }
+      });
+      return;
+    }
   }
 
   const stat = fs.statSync(filePath);
