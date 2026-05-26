@@ -7,7 +7,7 @@ import os from 'os';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import tls from 'tls';
-import { execFile } from 'child_process';
+import { execFile, spawn } from 'child_process';
 import ChromecastAPI from 'chromecast-api';
 import { IrcDccDownloader } from './irc-dcc-client.js';
 
@@ -786,7 +786,7 @@ app.post('/api/media-library/cast/play', (req, res) => {
   let contentType = 'video/mp4';
   const ext = path.extname(filename).toLowerCase();
   if (ext === '.mkv') contentType = 'video/x-matroska';
-  else if (ext === '.avi') contentType = 'video/x-msvideo';
+  else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
 
@@ -951,7 +951,7 @@ app.post('/api/chromecast/play', (req, res) => {
   let contentType = 'video/mp4';
   const ext = path.extname(filename).toLowerCase();
   if (ext === '.mkv') contentType = 'video/x-matroska';
-  else if (ext === '.avi') contentType = 'video/x-msvideo';
+  else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
 
@@ -1008,14 +1008,46 @@ app.get('/api/media/*', (req, res) => {
     return res.status(404).send('Datei nicht gefunden');
   }
 
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.avi') {
+    console.log(`[Playback] Transcodierung läuft (on-the-fly) für AVI-Datei: ${filePath}`);
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Transfer-Encoding': 'chunked'
+    });
+    
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', filePath,
+      '-vcodec', 'libx264',
+      '-preset', 'ultrafast',
+      '-acodec', 'aac',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov',
+      'pipe:1'
+    ]);
+    
+    ffmpeg.stdout.pipe(res);
+    
+    req.on('close', () => {
+      console.log(`[Playback] Client-Verbindung geschlossen, beende ffmpeg für: ${filePath}`);
+      ffmpeg.kill('SIGKILL');
+    });
+    
+    ffmpeg.on('error', (err) => {
+      console.error(`[Playback] ffmpeg-Fehler für ${filePath}:`, err);
+      if (!res.headersSent) {
+        res.status(500).send('Fehler bei der Transkodierung');
+      }
+    });
+    return;
+  }
+
   const stat = fs.statSync(filePath);
   const fileSize = stat.size;
   const range = req.headers.range;
 
   let contentType = 'video/mp4';
-  const ext = path.extname(filePath).toLowerCase();
   if (ext === '.mkv') contentType = 'video/x-matroska';
-  else if (ext === '.avi') contentType = 'video/x-msvideo';
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
 
