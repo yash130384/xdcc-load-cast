@@ -24,23 +24,11 @@ jobs:
       - name: Build frontend
         run: npm run build:frontend
 
-      - name: Stop existing server
-        run: |
-          echo "Stopping server running on port 3000..."
-          # Kill process listening on port 3000 if it exists
-          PID=$(lsof -t -i:3000)
-          if [ ! -z "$PID" ]; then
-            echo "Killing process $PID"
-            kill -9 $PID
-          else
-            echo "No process running on port 3000"
-          fi
-
-      - name: Start server in background
+      - name: Start/Restart server with PM2
         env:
-          RUNNER_TRACKING_ID: "" # Prevents GitHub Actions from killing the background server process when the job completes
+          RUNNER_TRACKING_ID: ""
         run: |
-          echo "Starting server..."
-          nohup npm start > server.log 2>&1 &
-          sleep 2 # Give it a moment to spin up
-          cat server.log
+          echo "Starting/Restarting server via PM2..."
+          npx pm2 restart xdcc-load-cast || npx pm2 start server.js --name xdcc-load-cast
+          npx pm2 save
+
