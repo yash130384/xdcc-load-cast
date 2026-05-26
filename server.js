@@ -992,20 +992,22 @@ app.post('/api/chromecast/stop', (req, res) => {
     return res.status(400).json({ error: 'Parameter deviceName fehlt' });
   }
 
+  // Always delete and broadcast first to ensure UI resets immediately
+  activeCasts.delete(deviceName);
+  broadcastActiveCasts();
+
   const device = discoveredChromecasts.get(deviceName);
-  if (!device) {
-    return res.status(404).json({ error: 'Gerät nicht gefunden' });
+  if (device && typeof device.stop === 'function') {
+    device.stop((err) => {
+      if (err) {
+        console.error(`[Chromecast] Fehler beim Hintergrund-Stoppen auf ${deviceName}:`, err.message);
+      }
+    });
+  } else {
+    console.log(`[Chromecast] Gerät "${deviceName}" für Stop nicht in Entdeckungsliste.`);
   }
 
-  device.stop((err) => {
-    if (err) {
-      console.error(`[Chromecast] Fehler beim Stoppen auf ${deviceName}:`, err);
-      return res.status(500).json({ error: `Fehler beim Stoppen des Streams: ${err.message}` });
-    }
-    activeCasts.delete(deviceName);
-    broadcastActiveCasts();
-    return res.json({ success: true });
-  });
+  return res.json({ success: true });
 });
 
 app.post('/api/chromecast/control', (req, res) => {
