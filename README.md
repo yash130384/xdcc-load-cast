@@ -21,7 +21,23 @@
 ## 🛠️ Installation & Schnellstart
 
 ### Voraussetzungen
-Du brauchst [Node.js](https://nodejs.org/) (aktuelle LTS-Version empfohlen).
+1. **Node.js**: Aktuelle LTS-Version empfohlen.
+2. **System-Utilities**: Da das Tool heruntergeladene Archive entpackt, Medien transkodiert und Audio-Codecs analysiert, müssen folgende Pakete auf dem Betriebssystem installiert sein:
+   - **`tar`**: Zum Entpacken von `.tar`, `.tar.gz` und `.tgz` Archiven.
+   - **`unrar`** (oder **`7z` / `p7zip`**): Zum Entpacken von `.rar` Archiven.
+   - **`ffmpeg`** & **`ffprobe`**: Zur Analyse von Audio-Codecs und für die On-the-Fly Video- und Audio-Transkodierung (z.B. AVI zu MP4, oder DTS/AC-3 zu AAC für Chromecast).
+
+#### Installation unter Linux (Raspberry Pi OS / Debian / Ubuntu):
+```bash
+sudo apt update
+sudo apt install tar unrar p7zip-full ffmpeg
+```
+*(Hinweis: Falls `unrar` nicht in den Standardquellen enthalten ist, aktiviere die `non-free` Repositories oder nutze `7z` als automatischen Fallback).*
+
+#### Installation unter macOS (Homebrew):
+```bash
+brew install tar unrar p7zip ffmpeg
+```
 
 ### Setup in 3 Schritten:
 
