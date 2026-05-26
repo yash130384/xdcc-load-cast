@@ -731,6 +731,8 @@ app.post('/api/media-library/cast/play', (req, res) => {
       return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
     }
     activeCasts.set(deviceName, { downloadId: null, filename: safeFilename });
+    attachDeviceStatusListeners(device, deviceName);
+    broadcastActiveCasts();
     return res.json({ success: true, deviceName, filename: safeFilename });
   });
 });
@@ -788,6 +790,72 @@ function getLocalIp() {
 
 const activeCasts = new Map();
 
+// Helper to listen to device status and connection errors
+function attachDeviceStatusListeners(device, deviceName) {
+  device.removeAllListeners('status');
+  device.on('status', (status) => {
+    console.log(`[Chromecast] Status update on ${deviceName}:`, status?.playerState);
+    if (status && status.playerState === 'IDLE') {
+      console.log(`[Chromecast] Playback IDLE on ${deviceName}. Clearing active cast.`);
+      if (activeCasts.has(deviceName)) {
+        activeCasts.delete(deviceName);
+        broadcastActiveCasts();
+      }
+    }
+  });
+
+  if (device.client) {
+    device.client.removeAllListeners('close');
+    device.client.removeAllListeners('error');
+    
+    device.client.on('close', () => {
+      console.log(`[Chromecast] Client connection closed for ${deviceName}`);
+      if (activeCasts.has(deviceName)) {
+        activeCasts.delete(deviceName);
+        broadcastActiveCasts();
+      }
+    });
+    
+    device.client.on('error', (err) => {
+      console.error(`[Chromecast] Client error on ${deviceName}:`, err.message);
+      if (activeCasts.has(deviceName)) {
+        activeCasts.delete(deviceName);
+        broadcastActiveCasts();
+      }
+    });
+  }
+}
+
+// Periodic status check (every 8 seconds) to verify active casts are still playing
+setInterval(() => {
+  if (activeCasts.size === 0) return;
+  
+  for (const [deviceName, castInfo] of activeCasts.entries()) {
+    const device = discoveredChromecasts.get(deviceName);
+    if (!device) {
+      console.log(`[Chromecast Check] Active device "${deviceName}" is no longer in discovered list. Clearing.`);
+      activeCasts.delete(deviceName);
+      broadcastActiveCasts();
+      continue;
+    }
+    
+    device.getStatus((err, status) => {
+      if (err) {
+        console.log(`[Chromecast Check] Failed to get status for "${deviceName}": ${err.message}. Clearing active cast.`);
+        activeCasts.delete(deviceName);
+        broadcastActiveCasts();
+        return;
+      }
+      
+      if (!status || status.playerState === 'IDLE') {
+        console.log(`[Chromecast Check] Device "${deviceName}" is IDLE or has no status. Clearing active cast.`);
+        activeCasts.delete(deviceName);
+        broadcastActiveCasts();
+      }
+    });
+  }
+}, 8000);
+
 app.post('/api/chromecast/play', (req, res) => {
   const { downloadId, deviceName } = req.body;
   if (!downloadId || !deviceName) {
@@ -828,6 +896,8 @@ app.post('/api/chromecast/play', (req, res) => {
       return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
     }
     activeCasts.set(deviceName, { downloadId, filename });
+    attachDeviceStatusListeners(device, deviceName);
+    broadcastActiveCasts();
     return res.json({ success: true, deviceName, filename });
   });
 });
@@ -849,6 +919,7 @@ app.post('/api/chromecast/stop', (req, res) => {
       return res.status(500).json({ error: `Fehler beim Stoppen des Streams: ${err.message}` });
     }
     activeCasts.delete(deviceName);
+    broadcastActiveCasts();
     return res.json({ success: true });
   });
 });
@@ -921,6 +992,20 @@ app.get('*', (req, res) => {
   }
 });
 
+// Broadcast active casts to all connected WS clients
+function broadcastActiveCasts() {
+  const list = Array.from(activeCasts.entries()).map(([device, info]) => ({
+    device,
+    ...info
+  }));
+  const message = JSON.stringify({ type: 'activeCasts', data: list });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(message);
+    }
+  });
+}
+
 // Integrate WS protocol handshake
 server.on('upgrade', (request, socket, head) => {
   const { pathname } = new URL(request.url, `http://${request.headers.host}`);
@@ -939,6 +1024,13 @@ wss.on('connection', (ws) => {
   // Send current queue status on connection
   const currentList = Array.from(downloadQueue.keys()).map(id => getDownloadDetails(id));
   ws.send(JSON.stringify({ type: 'init', data: currentList }));
+
+  // Send current active casts on connection
+  const activeList = Array.from(activeCasts.entries()).map(([device, info]) => ({
+    device,
+    ...info
+  }));
+  ws.send(JSON.stringify({ type: 'activeCasts', data: activeList }));
 
   ws.on('close', () => {
     console.log('WS Client disconnected.');

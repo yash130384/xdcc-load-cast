@@ -110,6 +110,7 @@ function App() {
   const [chromecastDevices, setChromecastDevices] = useState([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [activeCasts, setActiveCasts] = useState([]);
+  const [pendingCasts, setPendingCasts] = useState({});
   const [mediaLibrary, setMediaLibrary] = useState([]);
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
@@ -205,6 +206,19 @@ function App() {
             const copy = { ...prev };
             delete copy[id];
             return copy;
+          });
+        } else if (message.type === 'activeCasts') {
+          setActiveCasts(message.data);
+          setPendingCasts(prev => {
+            let changed = false;
+            const copy = { ...prev };
+            message.data.forEach(c => {
+              if (copy[c.filename]) {
+                delete copy[c.filename];
+                changed = true;
+              }
+            });
+            return changed ? copy : prev;
           });
         }
       };
@@ -458,6 +472,22 @@ function App() {
   };
 
   const startCast = (downloadId, deviceName) => {
+    const item = downloads.find(d => d.id === downloadId);
+    if (!item) return;
+    const filename = item.filename;
+
+    setPendingCasts(prev => ({ ...prev, [filename]: true }));
+    setTimeout(() => {
+      setPendingCasts(prev => {
+        if (prev[filename]) {
+          const copy = { ...prev };
+          delete copy[filename];
+          return copy;
+        }
+        return prev;
+      });
+    }, 12000);
+
     fetch('/api/chromecast/play', {
       method: 'POST',
       headers: {
@@ -469,6 +499,11 @@ function App() {
         if (!res.ok) {
           const errData = await res.json();
           alert(`Streaming konnte nicht gestartet werden: ${errData.error}`);
+          setPendingCasts(prev => {
+            const copy = { ...prev };
+            delete copy[filename];
+            return copy;
+          });
         } else {
           fetchActiveCasts();
           setCastingItem(null);
@@ -476,6 +511,11 @@ function App() {
       })
       .catch(err => {
         alert(`Streaming-Fehler: ${err.message}`);
+        setPendingCasts(prev => {
+          const copy = { ...prev };
+          delete copy[filename];
+          return copy;
+        });
       });
   };
 
@@ -534,6 +574,18 @@ function App() {
   };
 
   const startCastLibrary = (filename, deviceName) => {
+    setPendingCasts(prev => ({ ...prev, [filename]: true }));
+    setTimeout(() => {
+      setPendingCasts(prev => {
+        if (prev[filename]) {
+          const copy = { ...prev };
+          delete copy[filename];
+          return copy;
+        }
+        return prev;
+      });
+    }, 12000);
+
     fetch('/api/media-library/cast/play', {
       method: 'POST',
       headers: {
@@ -545,6 +597,11 @@ function App() {
         if (!res.ok) {
           const errData = await res.json();
           alert(`Streaming konnte nicht gestartet werden: ${errData.error}`);
+          setPendingCasts(prev => {
+            const copy = { ...prev };
+            delete copy[filename];
+            return copy;
+          });
         } else {
           fetchActiveCasts();
           setCastingItem(null);
@@ -552,6 +609,11 @@ function App() {
       })
       .catch(err => {
         alert(`Streaming-Fehler: ${err.message}`);
+        setPendingCasts(prev => {
+          const copy = { ...prev };
+          delete copy[filename];
+          return copy;
+        });
       });
   };
 
@@ -911,6 +973,7 @@ function App() {
                     const logs = downloadLogs[item.id] || [];
                     const isExpanded = !!expandedLogs[item.id];
                     const activeCastForFile = activeCasts.find(c => c.downloadId === item.id);
+                    const isPending = !!pendingCasts[item.filename];
 
                     return (
                       <div key={item.id} className={`download-item ${item.status}`}>
@@ -1033,6 +1096,26 @@ function App() {
                           </div>
                         )}
 
+                        {/* Pending Casting status */}
+                        {isPending && !activeCastForFile && (
+                          <div style={{
+                            background: 'rgba(0, 242, 254, 0.05)',
+                            border: '1px solid rgba(0, 242, 254, 0.2)',
+                            borderRadius: '8px',
+                            padding: '0.6rem 0.85rem',
+                            fontSize: '0.8rem',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'space-between',
+                            marginTop: '0.5rem',
+                            color: 'var(--text-secondary)'
+                          }}>
+                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                              <span className="spinner">⏳</span> Verbindung wird aufgebaut...
+                            </span>
+                          </div>
+                        )}
+
                         {/* Collapsible logs */}
                         <div className="log-accordion">
                           <div className="log-accordion-header" onClick={() => toggleLogs(item.id)}>
@@ -1106,12 +1189,13 @@ function App() {
                                 className="btn btn-secondary btn-icon-only" 
                                 style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
                                 title="Auf Chromecast streamen"
+                                disabled={isPending}
                                 onClick={() => {
                                   setCastingItem(item);
                                   fetchDevices();
                                 }}
                               >
-                                <CastIcon />
+                                {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
                               </button>
                             </>
                           )}
@@ -1199,6 +1283,7 @@ function App() {
                   <div className="downloads-list" style={{ maxHeight: '650px' }}>
                     {mediaLibrary.map((item, idx) => {
                       const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
+                      const isPending = !!pendingCasts[item.filename];
                       const isMusic = ['.mp3', '.wav', '.m4a', '.flac'].includes(item.filename.slice(item.filename.lastIndexOf('.')).toLowerCase());
                       
                       return (
@@ -1243,6 +1328,24 @@ function App() {
                             </div>
                           )}
 
+                          {/* Pending Casting status */}
+                          {isPending && !activeCastForFile && (
+                            <div style={{
+                              background: 'rgba(0, 242, 254, 0.05)',
+                              border: '1px solid rgba(0, 242, 254, 0.2)',
+                              borderRadius: '8px',
+                              padding: '0.5rem 0.75rem',
+                              fontSize: '0.8rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              marginTop: '0.25rem',
+                              color: 'var(--text-secondary)'
+                            }}>
+                              <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
+                            </div>
+                          )}
+
                           <div className="download-actions" style={{ marginTop: '0.25rem' }}>
                             <button 
                               className="btn btn-danger btn-icon-only" 
@@ -1264,12 +1367,13 @@ function App() {
                               className="btn btn-secondary btn-icon-only" 
                               style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
                               title="Auf Chromecast streamen"
+                              disabled={isPending}
                               onClick={() => {
                                 setCastingItem(item);
                                 fetchDevices();
                               }}
                             >
-                              <CastIcon />
+                              {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
                             </button>
                           </div>
                         </div>
