@@ -798,7 +798,15 @@ app.post('/api/media-library/cast/play', (req, res) => {
       console.error(`[Chromecast] Fehler beim Abspielen der Library-Datei auf ${deviceName}:`, err);
       return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
     }
-    activeCasts.set(deviceName, { downloadId: null, filename: filename });
+    activeCasts.set(deviceName, {
+      downloadId: null,
+      filename: filename,
+      playerState: 'BUFFERING',
+      currentTime: 0,
+      duration: 0,
+      volume: 1,
+      muted: false
+    });
     attachDeviceStatusListeners(device, deviceName);
     broadcastActiveCasts();
     return res.json({ success: true, deviceName, filename: filename });
@@ -963,7 +971,15 @@ app.post('/api/chromecast/play', (req, res) => {
       console.error(`[Chromecast] Fehler beim Abspielen auf ${deviceName}:`, err);
       return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
     }
-    activeCasts.set(deviceName, { downloadId, filename });
+    activeCasts.set(deviceName, {
+      downloadId,
+      filename,
+      playerState: 'BUFFERING',
+      currentTime: 0,
+      duration: 0,
+      volume: 1,
+      muted: false
+    });
     attachDeviceStatusListeners(device, deviceName);
     broadcastActiveCasts();
     return res.json({ success: true, deviceName, filename });
@@ -990,6 +1006,63 @@ app.post('/api/chromecast/stop', (req, res) => {
     broadcastActiveCasts();
     return res.json({ success: true });
   });
+});
+
+app.post('/api/chromecast/control', (req, res) => {
+  const { deviceName, action, value } = req.body;
+  if (!deviceName || !action) {
+    return res.status(400).json({ error: 'Parameter deviceName und action fehlen' });
+  }
+
+  const device = discoveredChromecasts.get(deviceName);
+  if (!device) {
+    return res.status(404).json({ error: 'Gerät nicht gefunden' });
+  }
+
+  const callback = (err) => {
+    if (err) {
+      console.error(`[Chromecast Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
+      return res.status(500).json({ error: `Steuerung fehlgeschlagen: ${err.message}` });
+    }
+    
+    // Fetch and broadcast the updated status immediately
+    device.getStatus((statusErr, status) => {
+      if (!statusErr && status) {
+        const castInfo = activeCasts.get(deviceName);
+        if (castInfo) {
+          castInfo.playerState = status.playerState;
+          castInfo.currentTime = status.currentTime || 0;
+          castInfo.duration = status.media?.duration || 0;
+          castInfo.volume = status.volume?.level || 1;
+          castInfo.muted = !!status.volume?.muted;
+          activeCasts.set(deviceName, castInfo);
+          broadcastActiveCasts();
+        }
+      }
+    });
+    return res.json({ success: true });
+  };
+
+  switch (action) {
+    case 'pause':
+      device.pause(callback);
+      break;
+    case 'resume':
+      if (typeof device.resume === 'function') {
+        device.resume(callback);
+      } else {
+        device.play(callback);
+      }
+      break;
+    case 'seek':
+      device.seek(parseFloat(value), callback);
+      break;
+    case 'volume':
+      device.setVolume(parseFloat(value), callback);
+      break;
+    default:
+      return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
+  }
 });
 
 app.get('/api/chromecast/active', (req, res) => {

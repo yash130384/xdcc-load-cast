@@ -541,6 +541,23 @@ function App() {
       });
   };
 
+  const handleCastControl = (deviceName, action, value) => {
+    fetch('/api/chromecast/control', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ deviceName, action, value })
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json();
+          console.error(`Control error for ${action}:`, errData.error);
+        }
+      })
+      .catch(err => console.error('Connection error during control:', err));
+  };
+
   const fetchMediaLibrary = () => {
     setLoadingLibrary(true);
     fetch('/api/media-library')
@@ -1059,27 +1076,97 @@ function App() {
                         {/* Casting status */}
                         {activeCastForFile && (
                           <div style={{
-                            background: 'rgba(0, 242, 254, 0.1)',
-                            border: '1px solid rgba(0, 242, 254, 0.3)',
-                            borderRadius: '8px',
-                            padding: '0.6rem 0.85rem',
-                            fontSize: '0.8rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
+                            background: 'rgba(0, 242, 254, 0.08)',
+                            border: '1px solid rgba(0, 242, 254, 0.25)',
+                            borderRadius: '10px',
+                            padding: '0.75rem 1rem',
                             marginTop: '0.5rem',
-                            color: 'var(--accent-cyan)'
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: '0.5rem',
+                            color: 'var(--text-primary)'
                           }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                              📺 Streaming auf <strong>{activeCastForFile.device}</strong>
-                            </span>
-                            <button 
-                              className="btn btn-danger" 
-                              style={{ padding: '0.2rem 0.6rem', fontSize: '0.7rem' }}
-                              onClick={() => stopCast(activeCastForFile.device)}
-                            >
-                              Stoppen
-                            </button>
+                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                              <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                                📺 Streamt auf {activeCastForFile.device}
+                              </span>
+                              <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                                {activeCastForFile.playerState || 'Verbinden'}
+                              </span>
+                            </div>
+
+                            {/* Progress bar and time labels */}
+                            {activeCastForFile.duration > 0 && (
+                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                <input 
+                                  type="range"
+                                  min={0}
+                                  max={activeCastForFile.duration}
+                                  value={activeCastForFile.currentTime || 0}
+                                  onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                                  style={{
+                                    width: '100%',
+                                    accentColor: 'var(--accent-cyan)',
+                                    cursor: 'pointer',
+                                    height: '4px'
+                                  }}
+                                />
+                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                  <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                                  <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                                </div>
+                              </div>
+                            )}
+
+                            {/* Control Buttons */}
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
+                              {activeCastForFile.playerState === 'PAUSED' ? (
+                                <button 
+                                  className="btn btn-secondary btn-icon-only" 
+                                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                  onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
+                                  title="Wiedergabe fortsetzen"
+                                >
+                                  <PlayIcon />
+                                </button>
+                              ) : (
+                                <button 
+                                  className="btn btn-secondary btn-icon-only" 
+                                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                  onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
+                                  title="Wiedergabe pausieren"
+                                >
+                                  <PauseIcon />
+                                </button>
+                              )}
+                              
+                              {/* Volume Icon + Slider */}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto', marginRight: '0.5rem' }}>
+                                <span style={{ fontSize: '0.75rem' }}>🔊</span>
+                                <input 
+                                  type="range"
+                                  min={0}
+                                  max={1}
+                                  step={0.05}
+                                  value={activeCastForFile.volume !== undefined ? activeCastForFile.volume : 1}
+                                  onChange={(e) => handleCastControl(activeCastForFile.device, 'volume', e.target.value)}
+                                  style={{
+                                    width: '60px',
+                                    accentColor: 'var(--accent-cyan)',
+                                    cursor: 'pointer',
+                                    height: '3px'
+                                  }}
+                                />
+                              </div>
+
+                              <button 
+                                className="btn btn-danger" 
+                                style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                                onClick={() => stopCast(activeCastForFile.device)}
+                              >
+                                Stoppen
+                              </button>
+                            </div>
                           </div>
                         )}
 
@@ -1319,25 +1406,97 @@ function App() {
                             {/* Casting status */}
                             {activeCastForFile && (
                               <div style={{
-                                background: 'rgba(0, 242, 254, 0.1)',
-                                border: '1px solid rgba(0, 242, 254, 0.3)',
-                                borderRadius: '8px',
-                                padding: '0.5rem 0.75rem',
-                                fontSize: '0.8rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
+                                background: 'rgba(0, 242, 254, 0.08)',
+                                border: '1px solid rgba(0, 242, 254, 0.25)',
+                                borderRadius: '10px',
+                                padding: '0.75rem 1rem',
                                 marginTop: '0.25rem',
-                                color: 'var(--accent-cyan)'
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.5rem',
+                                color: 'var(--text-primary)'
                               }}>
-                                <span>📺 Streamt auf <strong>{activeCastForFile.device}</strong></span>
-                                <button 
-                                  className="btn btn-danger" 
-                                  style={{ padding: '0.15rem 0.5rem', fontSize: '0.65rem' }}
-                                  onClick={() => stopCast(activeCastForFile.device)}
-                                >
-                                  Stoppen
-                                </button>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                                    📺 Streamt auf {activeCastForFile.device}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                                    {activeCastForFile.playerState || 'Verbinden'}
+                                  </span>
+                                </div>
+
+                                {/* Progress bar and time labels */}
+                                {activeCastForFile.duration > 0 && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                    <input 
+                                      type="range"
+                                      min={0}
+                                      max={activeCastForFile.duration}
+                                      value={activeCastForFile.currentTime || 0}
+                                      onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        accentColor: 'var(--accent-cyan)',
+                                        cursor: 'pointer',
+                                        height: '4px'
+                                      }}
+                                    />
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                      <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                                      <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Control Buttons */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
+                                  {activeCastForFile.playerState === 'PAUSED' ? (
+                                    <button 
+                                      className="btn btn-secondary btn-icon-only" 
+                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                      onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
+                                      title="Wiedergabe fortsetzen"
+                                    >
+                                      <PlayIcon />
+                                    </button>
+                                  ) : (
+                                    <button 
+                                      className="btn btn-secondary btn-icon-only" 
+                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                      onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
+                                      title="Wiedergabe pausieren"
+                                    >
+                                      <PauseIcon />
+                                    </button>
+                                  )}
+                                  
+                                  {/* Volume Icon + Slider */}
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', marginLeft: 'auto', marginRight: '0.5rem' }}>
+                                    <span style={{ fontSize: '0.75rem' }}>🔊</span>
+                                    <input 
+                                      type="range"
+                                      min={0}
+                                      max={1}
+                                      step={0.05}
+                                      value={activeCastForFile.volume !== undefined ? activeCastForFile.volume : 1}
+                                      onChange={(e) => handleCastControl(activeCastForFile.device, 'volume', e.target.value)}
+                                      style={{
+                                        width: '60px',
+                                        accentColor: 'var(--accent-cyan)',
+                                        cursor: 'pointer',
+                                        height: '3px'
+                                      }}
+                                    />
+                                  </div>
+
+                                  <button 
+                                    className="btn btn-danger" 
+                                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem' }}
+                                    onClick={() => stopCast(activeCastForFile.device)}
+                                  >
+                                    Stoppen
+                                  </button>
+                                </div>
                               </div>
                             )}
 
