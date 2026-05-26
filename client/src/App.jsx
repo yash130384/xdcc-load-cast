@@ -464,16 +464,12 @@ function App() {
   };
 
   const playLocal = (id) => {
-    fetch(`/api/download/${encodeURIComponent(id)}/play-local`, { method: 'POST' })
-      .then(async (res) => {
-        if (!res.ok) {
-          const errData = await res.json();
-          alert(`Fehler beim Abspielen: ${errData.error}`);
-        }
-      })
-      .catch(err => {
-        alert(`Verbindungsfehler: ${err.message}`);
-      });
+    const item = downloads.find(d => d.id === id);
+    if (!item) {
+      alert('Datei in Warteschlange nicht gefunden.');
+      return;
+    }
+    window.open(`/api/media/${encodeURIComponent(item.filename)}`, '_blank');
   };
 
   const startCast = (downloadId, deviceName) => {
@@ -560,22 +556,7 @@ function App() {
   };
 
   const playLocalLibrary = (filename) => {
-    fetch('/api/media-library/play-local', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ filename })
-    })
-      .then(async (res) => {
-        if (!res.ok) {
-          const errData = await res.json();
-          alert(`Fehler beim Abspielen: ${errData.error}`);
-        }
-      })
-      .catch(err => {
-        alert(`Verbindungsfehler: ${err.message}`);
-      });
+    window.open(`/api/media/${encodeURIComponent(filename)}`, '_blank');
   };
 
   const startCastLibrary = (filename, deviceName) => {
