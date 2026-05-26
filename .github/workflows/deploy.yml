@@ -29,6 +29,12 @@ jobs:
           RUNNER_TRACKING_ID: ""
         run: |
           echo "Starting/Restarting server via PM2..."
-          npx pm2 restart xdcc-load-cast || npx pm2 start server.js --name xdcc-load-cast
-          npx pm2 save
+          if command -v pm2 >/dev/null 2>&1; then
+            pm2 restart xdcc-load-cast || pm2 start server.js --name xdcc-load-cast
+            pm2 save
+          else
+            echo "Global pm2 not found, falling back to npx pm2..."
+            npx pm2 restart xdcc-load-cast || npx pm2 start server.js --name xdcc-load-cast
+            npx pm2 save
+          fi
 
