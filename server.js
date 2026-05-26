@@ -785,7 +785,7 @@ app.post('/api/media-library/cast/play', (req, res) => {
   // Determine mime type
   let contentType = 'video/mp4';
   const ext = path.extname(filename).toLowerCase();
-  if (ext === '.mkv') contentType = 'video/x-matroska';
+  if (ext === '.mkv') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
@@ -958,7 +958,7 @@ app.post('/api/chromecast/play', (req, res) => {
   // Determine mime type
   let contentType = 'video/mp4';
   const ext = path.extname(filename).toLowerCase();
-  if (ext === '.mkv') contentType = 'video/x-matroska';
+  if (ext === '.mkv') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
@@ -1108,6 +1108,38 @@ app.get('/api/media/*', (req, res) => {
     
     ffmpeg.on('error', (err) => {
       console.error(`[Playback] ffmpeg-Fehler für ${filePath}:`, err);
+      if (!res.headersSent) {
+        res.status(500).send('Fehler bei der Transkodierung');
+      }
+    });
+    return;
+  }
+
+  if (ext === '.mkv') {
+    console.log(`[Playback] Audio-Transkodierung läuft (on-the-fly) für MKV-Datei: ${filePath}`);
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Transfer-Encoding': 'chunked'
+    });
+    
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', filePath,
+      '-vcodec', 'copy',
+      '-acodec', 'aac',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov',
+      'pipe:1'
+    ]);
+    
+    ffmpeg.stdout.pipe(res);
+    
+    req.on('close', () => {
+      console.log(`[Playback] Client-Verbindung geschlossen, beende ffmpeg für MKV: ${filePath}`);
+      ffmpeg.kill('SIGKILL');
+    });
+    
+    ffmpeg.on('error', (err) => {
+      console.error(`[Playback] ffmpeg-Fehler für MKV ${filePath}:`, err);
       if (!res.headersSent) {
         res.status(500).send('Fehler bei der Transkodierung');
       }
