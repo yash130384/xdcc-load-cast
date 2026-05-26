@@ -96,7 +96,7 @@ function getDownloadDetails(id) {
     bytesReceived: dl.bytesReceived,
     speed: dl.speed,
     eta: dl.eta,
-    status: dl.status,
+    status: item.statusOverride || dl.status,
     errorMessage: dl.errorMessage
   };
 }
@@ -496,6 +496,48 @@ app.post('/api/download', (req, res) => {
   });
 
   downloader.on('progress', (data) => {
+    if (data.status === 'completed' && !downloader._extractionStarted) {
+      const lowerFile = downloader.filename.toLowerCase();
+      if (lowerFile.endsWith('.tar') || lowerFile.endsWith('.tar.gz') || lowerFile.endsWith('.tgz')) {
+        downloader._extractionStarted = true;
+        downloadQueue.set(id, { downloader, statusOverride: 'extracting' });
+        broadcastStatus(id);
+        
+        const sendLog = (text) => {
+          wss.clients.forEach((client) => {
+            if (client.readyState === 1) {
+              client.send(JSON.stringify({ type: 'message', data: { id, text: `[Entpacken] ${text}` } }));
+            }
+          });
+        };
+
+        sendLog(`Entpacken der Archivdatei gestartet...`);
+
+        execFile('tar', ['-xf', downloader.filePath, '-C', downloader.downloadDir], (error) => {
+          if (error) {
+            console.error(`[Extraction] Fehler beim Entpacken von ${downloader.filePath}:`, error);
+            sendLog(`Fehler beim Entpacken: ${error.message}`);
+            downloadQueue.set(id, { downloader, statusOverride: null });
+            broadcastStatus(id);
+          } else {
+            console.log(`[Extraction] Entpacken erfolgreich abgeschlossen: ${downloader.filePath}`);
+            sendLog(`Erfolgreich entpackt!`);
+            
+            fs.unlink(downloader.filePath, (unlinkErr) => {
+              if (unlinkErr) {
+                console.error(`[Extraction] Konnte Archiv nicht löschen:`, unlinkErr);
+              } else {
+                console.log(`[Extraction] Archiv gelöscht: ${downloader.filePath}`);
+                sendLog(`Originales Archiv gelöscht.`);
+              }
+              downloadQueue.set(id, { downloader, statusOverride: null });
+              broadcastStatus(id);
+            });
+          }
+        });
+        return;
+      }
+    }
     broadcastStatus(id);
   });
 
@@ -583,33 +625,78 @@ const MEDIA_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.avi', '.mp3', '.wav', '.m4a', '.mov', '.flac', '.mpeg', '.mpg', '.webm', '.ogg', '.ts'
 ]);
 
+function getSafeFilePath(filename) {
+  if (!filename) return null;
+  const baseDir = path.resolve(appConfig.downloadDir);
+  const filePath = path.resolve(baseDir, filename);
+  if (!filePath.startsWith(baseDir)) {
+    return null;
+  }
+  return filePath;
+}
+
+async function deleteMediaFileAndCleanDirs(filename) {
+  const filePath = getSafeFilePath(filename);
+  if (!filePath || !fs.existsSync(filePath)) {
+    throw new Error('Datei existiert nicht auf dem Datenträger');
+  }
+
+  await fs.promises.unlink(filePath);
+  console.log(`[Media Library] Deleted file: ${filePath}`);
+
+  // Clean up empty directories up to downloadDir
+  let currentDir = path.dirname(filePath);
+  const baseDir = path.resolve(appConfig.downloadDir);
+  while (currentDir !== baseDir && currentDir.startsWith(baseDir)) {
+    try {
+      const files = await fs.promises.readdir(currentDir);
+      if (files.length === 0) {
+        await fs.promises.rmdir(currentDir);
+        console.log(`[Media Library] Removed empty directory: ${currentDir}`);
+        currentDir = path.dirname(currentDir);
+      } else {
+        break;
+      }
+    } catch (e) {
+      break;
+    }
+  }
+}
+
 async function scanDownloadDir() {
   const dir = appConfig.downloadDir;
   try {
     if (!fs.existsSync(dir)) {
       return [];
     }
-    const files = await fs.promises.readdir(dir);
     const mediaFiles = [];
     
-    for (const filename of files) {
-      const ext = path.extname(filename).toLowerCase();
-      if (MEDIA_EXTENSIONS.has(ext)) {
-        const filePath = path.join(dir, filename);
-        try {
-          const stat = await fs.promises.stat(filePath);
-          if (stat.isFile()) {
-            mediaFiles.push({
-              filename: filename,
-              sizeBytes: stat.size,
-              mtime: stat.mtime.getTime()
-            });
+    async function traverse(currentDir) {
+      const entries = await fs.promises.readdir(currentDir, { withFileTypes: true });
+      for (const entry of entries) {
+        const fullPath = path.join(currentDir, entry.name);
+        if (entry.isDirectory()) {
+          await traverse(fullPath);
+        } else if (entry.isFile()) {
+          const ext = path.extname(entry.name).toLowerCase();
+          if (MEDIA_EXTENSIONS.has(ext)) {
+            try {
+              const stat = await fs.promises.stat(fullPath);
+              const relativePath = path.relative(dir, fullPath);
+              mediaFiles.push({
+                filename: relativePath,
+                sizeBytes: stat.size,
+                mtime: stat.mtime.getTime()
+              });
+            } catch (e) {
+              // Ignore stats errors
+            }
           }
-        } catch (e) {
-          // Ignore stats errors
         }
       }
     }
+    
+    await traverse(dir);
     
     // Sort by modification time, newest first
     mediaFiles.sort((a, b) => b.mtime - a.mtime);
@@ -627,16 +714,8 @@ app.get('/api/media-library', async (req, res) => {
 
 app.delete('/api/media-library/:filename', async (req, res) => {
   const { filename } = req.params;
-  const safeFilename = path.basename(filename);
-  const filePath = path.join(appConfig.downloadDir, safeFilename);
-
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
-  }
-
   try {
-    await fs.promises.unlink(filePath);
-    console.log(`[Media Library] Deleted file: ${filePath}`);
+    await deleteMediaFileAndCleanDirs(filename);
     return res.json({ success: true });
   } catch (err) {
     console.error('[Media Library] Fehler beim Löschen der Datei:', err);
@@ -652,16 +731,9 @@ app.post('/api/media-library/bulk-delete', async (req, res) => {
 
   const results = { deleted: [], failed: [] };
   for (const filename of filenames) {
-    const safeFilename = path.basename(filename);
-    const filePath = path.join(appConfig.downloadDir, safeFilename);
     try {
-      if (fs.existsSync(filePath)) {
-        await fs.promises.unlink(filePath);
-        console.log(`[Media Library] Bulk deleted file: ${filePath}`);
-        results.deleted.push(filename);
-      } else {
-        results.failed.push({ filename, error: 'Datei existiert nicht' });
-      }
+      await deleteMediaFileAndCleanDirs(filename);
+      results.deleted.push(filename);
     } catch (err) {
       console.error(`[Media Library] Bulk delete failed for ${filename}:`, err);
       results.failed.push({ filename, error: err.message });
@@ -675,10 +747,8 @@ app.post('/api/media-library/play-local', (req, res) => {
   const { filename } = req.body;
   if (!filename) return res.status(400).json({ error: 'Parameter filename fehlt' });
   
-  const safeFilename = path.basename(filename);
-  const filePath = path.join(appConfig.downloadDir, safeFilename);
-  
-  if (!fs.existsSync(filePath)) {
+  const filePath = getSafeFilePath(filename);
+  if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
   }
   
@@ -697,10 +767,8 @@ app.post('/api/media-library/cast/play', (req, res) => {
     return res.status(400).json({ error: 'Parameter filename und deviceName fehlen' });
   }
 
-  const safeFilename = path.basename(filename);
-  const filePath = path.join(appConfig.downloadDir, safeFilename);
-
-  if (!fs.existsSync(filePath)) {
+  const filePath = getSafeFilePath(filename);
+  if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
   }
 
@@ -710,13 +778,13 @@ app.post('/api/media-library/cast/play', (req, res) => {
   }
 
   const localIp = getLocalIp();
-  const mediaUrl = `http://${localIp}:${PORT}/api/media/${encodeURIComponent(safeFilename)}`;
+  const mediaUrl = `http://${localIp}:${PORT}/api/media/${encodeURIComponent(filename)}`;
 
-  console.log(`[Chromecast] Casting Library file "${safeFilename}" to "${deviceName}" via ${mediaUrl}`);
+  console.log(`[Chromecast] Casting Library file "${filename}" to "${deviceName}" via ${mediaUrl}`);
 
   // Determine mime type
   let contentType = 'video/mp4';
-  const ext = path.extname(safeFilename).toLowerCase();
+  const ext = path.extname(filename).toLowerCase();
   if (ext === '.mkv') contentType = 'video/x-matroska';
   else if (ext === '.avi') contentType = 'video/x-msvideo';
   else if (ext === '.mp3') contentType = 'audio/mpeg';
@@ -730,10 +798,10 @@ app.post('/api/media-library/cast/play', (req, res) => {
       console.error(`[Chromecast] Fehler beim Abspielen der Library-Datei auf ${deviceName}:`, err);
       return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
     }
-    activeCasts.set(deviceName, { downloadId: null, filename: safeFilename });
+    activeCasts.set(deviceName, { downloadId: null, filename: filename });
     attachDeviceStatusListeners(device, deviceName);
     broadcastActiveCasts();
-    return res.json({ success: true, deviceName, filename: safeFilename });
+    return res.json({ success: true, deviceName, filename: filename });
   });
 });
 
@@ -932,12 +1000,11 @@ app.get('/api/chromecast/active', (req, res) => {
 });
 
 // Serving local media files with HTTP Range Requests for streaming and seeking support
-app.get('/api/media/:filename', (req, res) => {
-  const { filename } = req.params;
-  const safeFilename = path.basename(filename);
-  const filePath = path.join(appConfig.downloadDir, safeFilename);
+app.get('/api/media/*', (req, res) => {
+  const filename = req.params[0];
+  const filePath = getSafeFilePath(filename);
 
-  if (!fs.existsSync(filePath)) {
+  if (!filePath || !fs.existsSync(filePath)) {
     return res.status(404).send('Datei nicht gefunden');
   }
 

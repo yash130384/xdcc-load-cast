@@ -644,6 +644,7 @@ function App() {
       case 'confirm_filename': return 'Bestätigung erforderlich';
       case 'dcc_downloading': return 'Lädt herunter';
       case 'completed': return 'Fertiggestellt';
+      case 'extracting': return 'Entpacken...';
       case 'paused': return 'Pausiert';
       case 'error': return 'Fehler';
       case 'cancelled': return 'Abgebrochen';
@@ -955,7 +956,7 @@ function App() {
                     const isError = item.status === 'error';
                     const isCancelled = item.status === 'cancelled';
                     
-                    const showProgress = ['dcc_negotiating', 'dcc_downloading', 'completed', 'paused'].includes(item.status);
+                    const showProgress = ['dcc_negotiating', 'dcc_downloading', 'completed', 'paused', 'extracting'].includes(item.status);
                     const logs = downloadLogs[item.id] || [];
                     const isExpanded = !!expandedLogs[item.id];
                     const activeCastForFile = activeCasts.find(c => c.downloadId === item.id);

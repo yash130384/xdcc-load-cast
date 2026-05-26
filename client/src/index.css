@@ -494,6 +494,7 @@ button, input, select {
 .status-dcc_negotiating { background: rgba(0, 242, 254, 0.15); color: var(--accent-cyan); }
 .status-confirm_filename { background: rgba(255, 51, 102, 0.2); color: var(--accent-pink); border: 1px solid rgba(255, 51, 102, 0.4); }
 .status-dcc_downloading { background: rgba(79, 172, 254, 0.2); color: var(--accent-blue); }
+.status-extracting { background: rgba(255, 153, 0, 0.15); color: var(--accent-orange); }
 .status-completed { background: rgba(0, 255, 135, 0.15); color: var(--accent-green); box-shadow: var(--shadow-glow-green); }
 .status-paused { background: rgba(255, 255, 255, 0.1); color: var(--text-secondary); }
 .status-error { background: rgba(255, 51, 102, 0.15); color: var(--accent-red); }
