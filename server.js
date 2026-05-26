@@ -11,6 +11,10 @@ import { execFile, spawn } from 'child_process';
 import ChromecastAPI from 'chromecast-api';
 import { IrcDccDownloader } from './irc-dcc-client.js';
 
+const MEDIA_EXTENSIONS = new Set([
+  '.mp4', '.mkv', '.avi', '.mp3', '.wav', '.m4a', '.mov', '.flac', '.mpeg', '.mpg', '.webm', '.ogg', '.ts'
+]);
+
 // Setup default configuration
 const defaultDownloadDir = path.join(os.homedir(), 'Downloads');
 const CONFIG_FILE = path.join(os.tmpdir(), 'xdcc_downloader_config.json');
@@ -630,6 +634,72 @@ async function flattenAndCleanupMedia(downloadDir) {
   }
 }
 
+async function detectExtractedMedia(downloadDir, originalFilename, filesBefore) {
+  try {
+    const filesAfter = await fs.promises.readdir(downloadDir);
+    const newFiles = filesAfter.filter(f => !filesBefore.has(f));
+    const newMediaFiles = [];
+    
+    for (const file of newFiles) {
+      const ext = path.extname(file).toLowerCase();
+      if (MEDIA_EXTENSIONS.has(ext)) {
+        try {
+          const stat = await fs.promises.stat(path.join(downloadDir, file));
+          newMediaFiles.push({ filename: file, size: stat.size });
+        } catch (e) {}
+      }
+    }
+    
+    // Sort by size descending (largest first)
+    newMediaFiles.sort((a, b) => b.size - a.size);
+    
+    if (newMediaFiles.length > 0) {
+      return newMediaFiles[0].filename;
+    }
+    
+    // Fallback 1: Match by base name prefix
+    const archiveBase = path.parse(originalFilename).name.toLowerCase();
+    const cleanBase = archiveBase.replace(/\.part\d+$/, '').replace(/\.tar$/, '');
+    
+    const matchingMedia = [];
+    for (const file of filesAfter) {
+      const ext = path.extname(file).toLowerCase();
+      if (MEDIA_EXTENSIONS.has(ext)) {
+        if (file.toLowerCase().startsWith(cleanBase)) {
+          try {
+            const stat = await fs.promises.stat(path.join(downloadDir, file));
+            matchingMedia.push({ filename: file, size: stat.size });
+          } catch (e) {}
+        }
+      }
+    }
+    
+    matchingMedia.sort((a, b) => b.size - a.size);
+    if (matchingMedia.length > 0) {
+      return matchingMedia[0].filename;
+    }
+    
+    // Fallback 2: Find the absolute newest media file in downloadDir
+    const allMedia = [];
+    for (const file of filesAfter) {
+      const ext = path.extname(file).toLowerCase();
+      if (MEDIA_EXTENSIONS.has(ext)) {
+        try {
+          const stat = await fs.promises.stat(path.join(downloadDir, file));
+          allMedia.push({ filename: file, mtime: stat.mtimeMs });
+        } catch (e) {}
+      }
+    }
+    allMedia.sort((a, b) => b.mtime - a.mtime);
+    if (allMedia.length > 0) {
+      return allMedia[0].filename;
+    }
+  } catch (err) {
+    console.error('[Detection] Fehler bei der Mediendetektion:', err);
+  }
+  return null;
+}
+
 async function handleDownloadPostProcessing(id, downloader) {
   const filePath = downloader.filePath;
   const downloadDir = downloader.downloadDir;
@@ -652,6 +722,18 @@ async function handleDownloadPostProcessing(id, downloader) {
       }
     });
   };
+
+  const filesBefore = new Set();
+  try {
+    if (fs.existsSync(downloadDir)) {
+      const entries = await fs.promises.readdir(downloadDir);
+      for (const entry of entries) {
+        filesBefore.add(entry);
+      }
+    }
+  } catch (e) {
+    console.error('[PostProcessing] Konnte Verzeichnis vor Entpackung nicht lesen:', e);
+  }
 
   try {
     if (lowerFile.endsWith('.tar') || lowerFile.endsWith('.tar.gz') || lowerFile.endsWith('.tgz')) {
@@ -681,6 +763,26 @@ async function handleDownloadPostProcessing(id, downloader) {
     sendLog(`Bereinige Verzeichnisstruktur...`);
     await flattenAndCleanupMedia(downloadDir);
     sendLog(`Dateien erfolgreich verarbeitet.`);
+    
+    // Detect the extracted media file and update queue item
+    sendLog(`Suche nach entpackter Mediendatei...`);
+    const detected = await detectExtractedMedia(downloadDir, downloader.filename, filesBefore);
+    if (detected) {
+      const oldFilename = downloader.filename;
+      downloader.filename = detected;
+      downloader.filePath = path.join(downloadDir, detected);
+      
+      try {
+        const stat = await fs.promises.stat(downloader.filePath);
+        downloader.expectedSize = stat.size;
+        downloader.bytesReceived = stat.size;
+      } catch (e) {}
+      
+      sendLog(`Zugeordnetes File geändert auf: ${detected}`);
+      console.log(`[PostProcessing] Updated downloader ${id} filename from ${oldFilename} to ${detected}`);
+    } else {
+      sendLog(`Keine passende Mediendatei gefunden. Dateiname bleibt: ${downloader.filename}`);
+    }
     
   } catch (err) {
     console.error(`[PostProcessing] Fehler:`, err);
@@ -819,9 +921,6 @@ app.delete('/api/download/:id', async (req, res) => {
 });
 
 // Media Library Scanner and Endpoints
-const MEDIA_EXTENSIONS = new Set([
-  '.mp4', '.mkv', '.avi', '.mp3', '.wav', '.m4a', '.mov', '.flac', '.mpeg', '.mpg', '.webm', '.ogg', '.ts'
-]);
 
 function getSafeFilePath(filename) {
   if (!filename) return null;
