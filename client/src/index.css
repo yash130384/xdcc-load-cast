@@ -1309,6 +1309,7 @@ input:checked + .slider:before {
   grid-template-columns: repeat(auto-fill, minmax(170px, 1fr));
   gap: 1.25rem;
   padding-bottom: 1rem;
+  justify-items: center;
 }
 
 .media-card {
@@ -1321,6 +1322,9 @@ input:checked + .slider:before {
   transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
   position: relative;
   box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+  max-width: 200px;
+  width: 100%;
+  margin: 0 auto;
 }
 
 .media-card:hover {
