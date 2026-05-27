@@ -113,6 +113,7 @@ function App() {
   const [pendingCasts, setPendingCasts] = useState({});
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [mediaLibrary, setMediaLibrary] = useState([]);
+  const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0 });
@@ -407,9 +408,13 @@ function App() {
     return mediaLibrary.filter(item => item.mtime < cutoff);
   };
 
-  const filteredLibrary = mediaLibrary.filter(item =>
-    item.filename.toLowerCase().includes(librarySearchQuery.toLowerCase())
-  );
+  const filteredLibrary = mediaLibrary.filter(item => {
+    const matchesSearch = item.filename.toLowerCase().includes(librarySearchQuery.toLowerCase());
+    if (!matchesSearch) return false;
+    if (selectedCategory === 'all') return true;
+    const cat = item.metadata?.category || 'Sonstige';
+    return cat === selectedCategory;
+  });
 
   const handleBulkDeleteObsolete = () => {
     if (selectedObsoleteFiles.length === 0) {
@@ -1335,17 +1340,55 @@ function App() {
                     </div>
                   )}
 
-                  {/* Local Media Library Search */}
-                  <div className="search-input-wrapper" style={{ marginBottom: '0.25rem' }}>
-                    <span className="search-icon-placeholder"><SearchIcon /></span>
-                    <input
-                      type="text"
-                      className="search-input"
-                      style={{ padding: '0.55rem 1rem 0.55rem 2.5rem', fontSize: '0.85rem' }}
-                      placeholder="Mediathek nach Dateinamen filtern..."
-                      value={librarySearchQuery}
-                      onChange={(e) => setLibrarySearchQuery(e.target.value)}
-                    />
+                  {/* Local Media Library Search & Categories */}
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    <div className="search-input-wrapper" style={{ marginBottom: '0.25rem' }}>
+                      <span className="search-icon-placeholder"><SearchIcon /></span>
+                      <input
+                        type="text"
+                        className="search-input"
+                        style={{ padding: '0.55rem 1rem 0.55rem 2.5rem', fontSize: '0.85rem' }}
+                        placeholder="Mediathek nach Dateinamen filtern..."
+                        value={librarySearchQuery}
+                        onChange={(e) => setLibrarySearchQuery(e.target.value)}
+                      />
+                    </div>
+
+                    {/* Category Selection Tabs */}
+                    <div className="category-tabs-container">
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'all' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('all')}
+                      >
+                        📁 Alle ({mediaLibrary.length})
+                      </button>
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('Filme')}
+                      >
+                        🎬 Filme ({mediaLibrary.filter(item => (item.metadata?.category || 'Filme') === 'Filme').length})
+                      </button>
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('Serien')}
+                      >
+                        📺 Serien ({mediaLibrary.filter(item => item.metadata?.category === 'Serien').length})
+                      </button>
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'Musik' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('Musik')}
+                      >
+                        🎵 Musik ({mediaLibrary.filter(item => item.metadata?.category === 'Musik').length})
+                      </button>
+                      {mediaLibrary.some(item => item.metadata?.category === 'Sonstige') && (
+                        <button 
+                          className={`category-tab-btn ${selectedCategory === 'Sonstige' ? 'active' : ''}`}
+                          onClick={() => setSelectedCategory('Sonstige')}
+                        >
+                          📦 Sonstige ({mediaLibrary.filter(item => item.metadata?.category === 'Sonstige').length})
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   {filteredLibrary.length === 0 ? (
@@ -1360,28 +1403,59 @@ function App() {
                         Suche zurücksetzen
                       </button>
                     </div>
-                  ) : (
-                    <div className="downloads-list" style={{ maxHeight: '650px' }}>
+                  ) : selectedCategory === 'Musik' ? (
+                    /* Compact Music Track Item List */
+                    <div className="music-list" style={{ maxHeight: '650px', overflowY: 'auto' }}>
                       {filteredLibrary.map((item, idx) => {
                         const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
                         const isPending = !!pendingCasts[item.filename];
-                        const isMusic = ['.mp3', '.wav', '.m4a', '.flac'].includes(item.filename.slice(item.filename.lastIndexOf('.')).toLowerCase());
                         
                         return (
-                          <div key={idx} className="download-item completed" style={{ background: 'rgba(255, 255, 255, 0.01)', gap: '0.5rem' }}>
-                            <div className="download-item-header" style={{ gap: '0.5rem' }}>
-                              <div className="download-filename" title={item.filename} style={{ fontSize: '0.9rem', fontWeight: '500', maxWidth: '75%' }}>
-                                {isMusic ? '🎵' : '🎬'} {item.filename}
+                          <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                            <div className="music-item">
+                              <div className="music-info">
+                                <div className="music-icon">🎵</div>
+                                <div className="music-details">
+                                  <div className="music-title" title={item.filename}>
+                                    {item.metadata?.title || item.filename}
+                                  </div>
+                                  <div className="music-meta">
+                                    <span className="music-size">{formatBytes(item.sizeBytes)}</span>
+                                    <span>•</span>
+                                    <span>{new Date(item.mtime).toLocaleDateString()}</span>
+                                  </div>
+                                </div>
                               </div>
-                              <span className="download-status-badge status-completed" style={{ fontSize: '0.75rem', opacity: 0.8, whiteSpace: 'nowrap' }}>
-                                {formatBytes(item.sizeBytes)}
-                              </span>
-                            </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                              <span style={{ fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                Geändert: {new Date(item.mtime).toLocaleString()}
-                              </span>
+                              <div className="music-actions">
+                                <button 
+                                  className="btn btn-danger btn-icon-only" 
+                                  title="Datei von Festplatte löschen"
+                                  onClick={() => handleDeleteMediaFile(item.filename)}
+                                >
+                                  <TrashIcon />
+                                </button>
+                                <button 
+                                  className="btn btn-primary btn-icon-only" 
+                                  style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                                  title="Lokal abspielen"
+                                  onClick={() => playLocalLibrary(item.filename)}
+                                >
+                                  <PlayIcon />
+                                </button>
+                                <button 
+                                  className="btn btn-secondary btn-icon-only" 
+                                  style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+                                  title="Auf Chromecast streamen"
+                                  disabled={isPending}
+                                  onClick={() => {
+                                    setCastingItem(item);
+                                    fetchDevices();
+                                  }}
+                                >
+                                  {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+                                </button>
+                              </div>
                             </div>
 
                             {/* Casting status */}
@@ -1391,7 +1465,6 @@ function App() {
                                 border: '1px solid rgba(0, 242, 254, 0.25)',
                                 borderRadius: '10px',
                                 padding: '0.75rem 1rem',
-                                marginTop: '0.25rem',
                                 display: 'flex',
                                 flexDirection: 'column',
                                 gap: '0.5rem',
@@ -1462,7 +1535,6 @@ function App() {
                               </div>
                             )}
 
-                            {/* Pending Casting status */}
                             {isPending && !activeCastForFile && (
                               <div style={{
                                 background: 'rgba(0, 242, 254, 0.05)',
@@ -1473,43 +1545,189 @@ function App() {
                                 display: 'flex',
                                 alignItems: 'center',
                                 justifyContent: 'space-between',
-                                marginTop: '0.25rem',
                                 color: 'var(--text-secondary)'
                               }}>
                                 <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
                               </div>
                             )}
-
-                            <div className="download-actions" style={{ marginTop: '0.25rem' }}>
-                              <button 
-                                className="btn btn-danger btn-icon-only" 
-                                style={{ marginRight: 'auto' }}
-                                title="Datei von Festplatte löschen"
-                                onClick={() => handleDeleteMediaFile(item.filename)}
-                              >
-                                <TrashIcon />
-                              </button>
-                              <button 
-                                className="btn btn-primary btn-icon-only" 
-                                style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                title="Lokal abspielen"
-                                onClick={() => playLocalLibrary(item.filename)}
-                              >
-                                <PlayIcon />
-                              </button>
-                              <button 
-                                className="btn btn-secondary btn-icon-only" 
-                                style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                title="Auf Chromecast streamen"
-                                disabled={isPending}
-                                onClick={() => {
-                                  setCastingItem(item);
-                                  fetchDevices();
-                                }}
-                              >
-                                {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                              </button>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    /* Movies/Series Card Grid View */
+                    <div className="media-grid" style={{ maxHeight: '650px', overflowY: 'auto' }}>
+                      {filteredLibrary.map((item, idx) => {
+                        const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
+                        const isPending = !!pendingCasts[item.filename];
+                        
+                        const meta = item.metadata || {};
+                        const title = meta.title || item.filename;
+                        const posterUrl = meta.posterUrl;
+                        const year = meta.year || null;
+                        const cast = meta.cast || null;
+                        const isTv = meta.type === 'series' || meta.category === 'Serien';
+                        const imdbLink = meta.imdbId ? `https://www.imdb.com/title/${meta.imdbId}` : null;
+                        
+                        return (
+                          <div key={idx} className="media-card">
+                            <div className="media-poster-container">
+                              {posterUrl ? (
+                                <img src={posterUrl} alt={title} className="media-poster" loading="lazy" />
+                              ) : (
+                                <div className="media-poster-fallback">
+                                  <span className="media-poster-fallback-icon">{isTv ? '📺' : '🎬'}</span>
+                                  <span className="media-poster-fallback-title">{title}</span>
+                                </div>
+                              )}
+                              
+                              {/* Badges on Poster */}
+                              {year && <span className="media-badge-year">{year}</span>}
+                              <span className="media-badge-type">{isTv ? 'Serie' : 'Film'}</span>
+                              {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
                             </div>
+                            
+                            <div className="media-card-body">
+                              <div className="media-card-details">
+                                <div className="media-card-title" title={title}>
+                                  {title}
+                                </div>
+                                {cast && (
+                                  <div className="media-card-cast" title={cast}>
+                                    {cast}
+                                  </div>
+                                )}
+                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+                                  <span className="media-card-size">{formatBytes(item.sizeBytes)}</span>
+                                  {imdbLink && (
+                                    <a href={imdbLink} target="_blank" rel="noopener noreferrer" className="media-imdb-link">
+                                      ⭐ IMDb
+                                    </a>
+                                  )}
+                                </div>
+                              </div>
+                              
+                              <div className="media-card-actions">
+                                <button 
+                                  className="btn btn-danger btn-icon-only" 
+                                  title="Datei löschen"
+                                  onClick={() => handleDeleteMediaFile(item.filename)}
+                                >
+                                  <TrashIcon />
+                                </button>
+                                <button 
+                                  className="btn btn-primary btn-icon-only" 
+                                  style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                                  title="Lokal abspielen"
+                                  onClick={() => playLocalLibrary(item.filename)}
+                                >
+                                  <PlayIcon />
+                                </button>
+                                <button 
+                                  className="btn btn-secondary btn-icon-only" 
+                                  style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+                                  title="Auf Chromecast streamen"
+                                  disabled={isPending}
+                                  onClick={() => {
+                                    setCastingItem(item);
+                                    fetchDevices();
+                                  }}
+                                >
+                                  {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+                                </button>
+                              </div>
+                            </div>
+
+                            {/* Casting status */}
+                            {activeCastForFile && (
+                              <div style={{
+                                background: 'rgba(0, 242, 254, 0.08)',
+                                borderTop: '1px solid rgba(0, 242, 254, 0.25)',
+                                padding: '0.75rem',
+                                display: 'flex',
+                                flexDirection: 'column',
+                                gap: '0.5rem',
+                                color: 'var(--text-primary)'
+                              }}>
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                                    📺 {activeCastForFile.device}
+                                  </span>
+                                  <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                                    {activeCastForFile.playerState || 'Verbinden'}
+                                  </span>
+                                </div>
+
+                                {/* Progress bar and time labels */}
+                                {activeCastForFile.duration > 0 && (
+                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                    <input 
+                                      type="range"
+                                      min={0}
+                                      max={activeCastForFile.duration}
+                                      value={activeCastForFile.currentTime || 0}
+                                      onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                                      style={{
+                                        width: '100%',
+                                        accentColor: 'var(--accent-cyan)',
+                                        cursor: 'pointer',
+                                        height: '4px'
+                                      }}
+                                    />
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                      <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                                      <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                                    </div>
+                                  </div>
+                                )}
+
+                                {/* Control Buttons */}
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
+                                  {activeCastForFile.playerState === 'PAUSED' ? (
+                                    <button 
+                                      className="btn btn-secondary btn-icon-only" 
+                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                      onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
+                                      title="Wiedergabe fortsetzen"
+                                    >
+                                      <PlayIcon />
+                                    </button>
+                                  ) : (
+                                    <button 
+                                      className="btn btn-secondary btn-icon-only" 
+                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                      onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
+                                      title="Wiedergabe pausieren"
+                                    >
+                                      <PauseIcon />
+                                    </button>
+                                  )}
+                                  
+                                  <button 
+                                    className="btn btn-danger" 
+                                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
+                                    onClick={() => stopCast(activeCastForFile.device)}
+                                  >
+                                    Stoppen
+                                  </button>
+                                </div>
+                              </div>
+                            )}
+
+                            {isPending && !activeCastForFile && (
+                              <div style={{
+                                background: 'rgba(0, 242, 254, 0.05)',
+                                borderTop: '1px solid rgba(0, 242, 254, 0.2)',
+                                padding: '0.5rem 0.75rem',
+                                fontSize: '0.8rem',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                color: 'var(--text-secondary)'
+                              }}>
+                                <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
+                              </div>
+                            )}
                           </div>
                         );
                       })}

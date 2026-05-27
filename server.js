@@ -982,6 +982,197 @@ async function deleteMediaFileAndCleanDirs(filename) {
   }
 }
 
+const METADATA_CACHE_FILE = path.join(os.tmpdir(), 'xdcc_downloader_metadata_cache.json');
+let metadataCache = {};
+
+function loadMetadataCache() {
+  if (fs.existsSync(METADATA_CACHE_FILE)) {
+    try {
+      metadataCache = JSON.parse(fs.readFileSync(METADATA_CACHE_FILE, 'utf8'));
+    } catch (e) {
+      console.error('Error loading metadata cache:', e);
+    }
+  }
+}
+
+function saveMetadataCache() {
+  try {
+    fs.writeFileSync(METADATA_CACHE_FILE, JSON.stringify(metadataCache, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving metadata cache:', e);
+  }
+}
+
+loadMetadataCache();
+
+const MUSIC_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg']);
+
+function parseFilename(filename) {
+  const baseName = path.basename(filename);
+  let name = baseName;
+  const extIndex = name.lastIndexOf('.');
+  if (extIndex !== -1) {
+    name = name.slice(0, extIndex);
+  }
+  
+  name = name.replace(/[\._\-]/g, ' ');
+  
+  const seriesPattern = /\b(s\d{1,2}\s?e\d{1,2}|\b\d{1,2}x\d{1,2})\b/i;
+  const matchSeries = name.match(seriesPattern);
+  
+  const isSeries = !!matchSeries;
+  
+  const yearPattern = /\b(19\d{2}|20\d{2})\b/;
+  const matchYear = name.match(yearPattern);
+  const year = matchYear ? matchYear[1] : null;
+  
+  let cutIndex = name.length;
+  if (matchSeries) {
+    cutIndex = Math.min(cutIndex, name.indexOf(matchSeries[0]));
+  }
+  if (matchYear) {
+    cutIndex = Math.min(cutIndex, name.indexOf(matchYear[0]));
+  }
+  
+  const tags = ['1080p', '720p', '2160p', 'bluray', 'hdtv', 'webrip', 'web-dl', 'dvdrip', 'x264', 'h264', 'x265', 'h265', 'hevc', 'aac', 'dd5.1', 'dts', 'german', 'english', 'multi', 'dl', 'dubbed'];
+  for (const tag of tags) {
+    const tagPattern = new RegExp(`\\b${tag}\\b`, 'i');
+    const matchTag = name.match(tagPattern);
+    if (matchTag) {
+      cutIndex = Math.min(cutIndex, name.indexOf(matchTag[0]));
+    }
+  }
+  
+  let title = name.slice(0, cutIndex).trim();
+  title = title.replace(/\s+/g, ' ');
+  
+  return {
+    title: title || baseName,
+    year,
+    isSeries,
+    seasonEpisode: matchSeries ? matchSeries[0].toUpperCase() : null
+  };
+}
+
+function findBestMatch(suggestions, parsedInfo) {
+  if (!suggestions || suggestions.length === 0) return null;
+  
+  for (const s of suggestions) {
+    const isTv = s.qid === 'tvSeries' || s.qid === 'tvMiniSeries';
+    const isMovie = s.qid === 'movie' || s.qid === 'feature';
+    
+    const typeMatch = parsedInfo.isSeries ? isTv : isMovie;
+    const yearMatch = parsedInfo.year ? (Math.abs(s.y - parseInt(parsedInfo.year)) <= 1) : true;
+    
+    if (typeMatch && yearMatch) {
+      return s;
+    }
+  }
+  
+  for (const s of suggestions) {
+    const isTv = s.qid === 'tvSeries' || s.qid === 'tvMiniSeries';
+    const isMovie = s.qid === 'movie' || s.qid === 'feature';
+    
+    const typeMatch = parsedInfo.isSeries ? isTv : isMovie;
+    if (typeMatch) {
+      return s;
+    }
+  }
+  
+  if (parsedInfo.year) {
+    for (const s of suggestions) {
+      if (Math.abs(s.y - parseInt(parsedInfo.year)) <= 1) {
+        return s;
+      }
+    }
+  }
+  
+  for (const s of suggestions) {
+    if (['tvSeries', 'tvMiniSeries', 'movie', 'feature'].includes(s.qid)) {
+      return s;
+    }
+  }
+  
+  return suggestions[0];
+}
+
+async function fetchImdbMetadata(parsedInfo) {
+  try {
+    const query = parsedInfo.title.trim().toLowerCase();
+    if (!query) return null;
+    const firstChar = query[0];
+    const url = `https://v3.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(query)}.json`;
+    const res = await axios.get(url, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
+      },
+      timeout: 5000
+    });
+    
+    const suggestions = res.data?.d;
+    if (!suggestions || suggestions.length === 0) return null;
+    
+    const best = findBestMatch(suggestions, parsedInfo);
+    if (best) {
+      return {
+        imdbId: best.id,
+        title: best.l,
+        type: best.qid === 'tvSeries' || best.qid === 'tvMiniSeries' ? 'series' : 'movie',
+        year: best.y,
+        yearRange: best.yr || null,
+        cast: best.s || null,
+        posterUrl: best.i?.imageUrl || null
+      };
+    }
+  } catch (err) {
+    console.error(`[IMDb API] Error fetching for "${parsedInfo.title}":`, err.message);
+  }
+  return null;
+}
+
+async function getOrFetchMetadata(filename, ext) {
+  if (metadataCache[filename]) {
+    return metadataCache[filename];
+  }
+  
+  if (MUSIC_EXTENSIONS.has(ext)) {
+    const data = {
+      title: path.parse(filename).name,
+      category: 'Musik'
+    };
+    metadataCache[filename] = data;
+    saveMetadataCache();
+    return data;
+  }
+  
+  const parsed = parseFilename(filename);
+  const data = {
+    title: parsed.title,
+    year: parsed.year,
+    seasonEpisode: parsed.seasonEpisode,
+    isSeries: parsed.isSeries,
+    category: parsed.isSeries ? 'Serien' : 'Filme'
+  };
+  
+  const imdb = await fetchImdbMetadata(parsed);
+  if (imdb) {
+    data.imdbId = imdb.imdbId;
+    data.title = imdb.title;
+    data.type = imdb.type;
+    data.year = imdb.year;
+    data.yearRange = imdb.yearRange;
+    data.cast = imdb.cast;
+    data.posterUrl = imdb.posterUrl;
+    data.category = imdb.type === 'series' ? 'Serien' : 'Filme';
+  } else {
+    data.notFound = true;
+  }
+  
+  metadataCache[filename] = data;
+  saveMetadataCache();
+  return data;
+}
+
 async function scanDownloadDir() {
   const dir = appConfig.downloadDir;
   try {
@@ -1019,6 +1210,21 @@ async function scanDownloadDir() {
     
     // Sort by modification time, newest first
     mediaFiles.sort((a, b) => b.mtime - a.mtime);
+
+    // Populate metadata sequentially to avoid rate-limiting
+    for (const file of mediaFiles) {
+      const ext = path.extname(file.filename).toLowerCase();
+      try {
+        file.metadata = await getOrFetchMetadata(file.filename, ext);
+      } catch (err) {
+        console.error(`[Metadata] Failed to get metadata for ${file.filename}:`, err);
+        file.metadata = {
+          title: path.parse(file.filename).name,
+          category: MUSIC_EXTENSIONS.has(ext) ? 'Musik' : (parseFilename(file.filename).isSeries ? 'Serien' : 'Filme')
+        };
+      }
+    }
+
     return mediaFiles;
   } catch (err) {
     console.error('[Media Library] Fehler beim Scannen des Download-Verzeichnisses:', err);
