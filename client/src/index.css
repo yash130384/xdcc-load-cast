@@ -1267,48 +1267,50 @@ input:checked + .slider:before {
 
 .category-tabs-container {
   display: flex;
-  gap: 0.5rem;
-  padding: 0.25rem;
-  background: rgba(255, 255, 255, 0.03);
-  border-radius: 30px;
-  border: 1px solid var(--border-color);
-  margin-bottom: 1.25rem;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
   flex-wrap: wrap;
   width: fit-content;
 }
 
 .category-tab-btn {
-  padding: 0.5rem 1.2rem;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.2rem;
+  border-radius: 10px;
+  font-size: 0.88rem;
   font-weight: 600;
-  border-radius: 25px;
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--text-secondary);
   cursor: pointer;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
 .category-tab-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
 }
 
 .category-tab-btn.active {
-  color: #05050a;
   background: var(--grad-cyan-blue);
-  box-shadow: 0 0 12px rgba(0, 242, 254, 0.25);
-  border-color: transparent;
+  color: #05050a;
+  border: 1px solid transparent;
+  box-shadow: 0 4px 15px rgba(0, 242, 254, 0.2);
+}
+
+.category-tab-btn.active:hover {
+  box-shadow: 0 6px 20px rgba(0, 242, 254, 0.4);
 }
 
 /* Premium Media Grid for Movies & Series */
 .media-grid {
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 1.25rem;
   padding-bottom: 1rem;
   justify-items: center;
@@ -1347,6 +1349,9 @@ input:checked + .slider:before {
 }
 
 .media-poster {
+  position: absolute;
+  top: 0;
+  left: 0;
   width: 100%;
   height: 100%;
   object-fit: cover;
@@ -1612,39 +1617,41 @@ input:checked + .slider:before {
 /* Header Navigation */
 .header-nav {
   display: flex;
-  gap: 0.5rem;
-  background: rgba(255, 255, 255, 0.03);
-  padding: 0.25rem 0.5rem;
-  border-radius: 30px;
-  border: 1px solid rgba(255, 255, 255, 0.06);
+  gap: 0.75rem;
 }
 
 .nav-btn {
-  background: transparent;
-  border: 1px solid transparent;
-  color: var(--text-secondary);
-  padding: 0.5rem 1.25rem;
-  border-radius: 25px;
-  font-size: 0.85rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0.6rem 1.2rem;
+  border-radius: 10px;
+  font-size: 0.88rem;
   font-weight: 600;
   cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
   transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+  text-decoration: none;
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary);
+  border: 1px solid var(--border-color);
 }
 
 .nav-btn:hover {
-  color: var(--text-primary);
-  background: rgba(255, 255, 255, 0.05);
-  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255, 255, 255, 0.2);
+  transform: translateY(-2px);
 }
 
 .nav-btn.active {
-  color: #05050a;
   background: var(--grad-cyan-blue);
-  box-shadow: 0 0 15px rgba(0, 242, 254, 0.3);
-  border-color: transparent;
+  color: #05050a;
+  border: 1px solid transparent;
+  box-shadow: 0 4px 15px rgba(0, 242, 254, 0.25);
+}
+
+.nav-btn.active:hover {
+  box-shadow: 0 6px 20px rgba(0, 242, 254, 0.4);
 }
 
 /* Full Width Library Layout */
@@ -1656,25 +1663,25 @@ input:checked + .slider:before {
 /* Responsive Media Grid Overrides */
 @media (min-width: 992px) {
   .media-grid {
-    grid-template-columns: repeat(5, 1fr) !important;
+    grid-template-columns: repeat(5, minmax(0, 1fr)) !important;
   }
 }
 
 @media (min-width: 768px) and (max-width: 991px) {
   .media-grid {
-    grid-template-columns: repeat(4, 1fr) !important;
+    grid-template-columns: repeat(4, minmax(0, 1fr)) !important;
   }
 }
 
 @media (min-width: 480px) and (max-width: 767px) {
   .media-grid {
-    grid-template-columns: repeat(2, 1fr) !important;
+    grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
   }
 }
 
 @media (max-width: 479px) {
   .media-grid {
-    grid-template-columns: 1fr !important;
+    grid-template-columns: minmax(0, 1fr) !important;
   }
 }
 
