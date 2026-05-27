@@ -116,6 +116,7 @@ function App() {
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
+  const [currentView, setCurrentView] = useState('downloads'); // 'downloads' | 'library'
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0 });
   
   const [tempDownloadDir, setTempDownloadDir] = useState('');
@@ -409,10 +410,15 @@ function App() {
   };
 
   const filteredLibrary = mediaLibrary.filter(item => {
-    const matchesSearch = item.filename.toLowerCase().includes(librarySearchQuery.toLowerCase());
+    const query = librarySearchQuery.toLowerCase();
+    const filenameMatch = item.filename.toLowerCase().includes(query);
+    const titleMatch = item.metadata?.title?.toLowerCase().includes(query);
+    const castMatch = item.metadata?.cast?.toLowerCase().includes(query);
+    const matchesSearch = filenameMatch || titleMatch || castMatch;
+    
     if (!matchesSearch) return false;
     if (selectedCategory === 'all') return true;
-    const cat = item.metadata?.category || 'Sonstige';
+    const cat = item.metadata?.category || 'Videos';
     return cat === selectedCategory;
   });
 
@@ -698,6 +704,23 @@ function App() {
               <span>Local Search & Transfer</span>
             </div>
           </div>
+          <div className="header-nav">
+            <button 
+              className={`nav-btn ${currentView === 'downloads' ? 'active' : ''}`}
+              onClick={() => setCurrentView('downloads')}
+            >
+              📥 Downloads
+            </button>
+            <button 
+              className={`nav-btn ${currentView === 'library' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('library');
+                fetchMediaLibrary();
+              }}
+            >
+              🎥 Mediathek
+            </button>
+          </div>
           <div className="header-actions">
             <div className="btn btn-secondary" style={{ cursor: 'default', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
               <FolderIcon />
@@ -718,10 +741,11 @@ function App() {
         </header>
 
         {/* Dashboard Grid */}
-        <div className="dashboard-grid">
+        <div className={currentView === 'downloads' ? "dashboard-grid" : "library-view-container"}>
           
           {/* Left Panel: Search */}
-          <div className="card">
+          {currentView === 'downloads' && (
+            <div className="card">
             <div className="search-header-tabs">
               <button 
                 className={`search-tab-btn ${searchSource === 'xdcc' ? 'active' : ''}`}
@@ -935,30 +959,19 @@ function App() {
                 </table>
               </div>
             )}
-          </div>
-
-          {/* Right Panel: Tabs */}
-          <div className="card">
-            <div className="search-header-tabs" style={{ marginBottom: '0.5rem' }}>
-              <button 
-                className={`search-tab-btn ${rightPanelTab === 'queue' ? 'active' : ''}`}
-                onClick={() => setRightPanelTab('queue')}
-              >
-                📥 Warteschlange ({downloads.length})
-              </button>
-              <button 
-                className={`search-tab-btn ${rightPanelTab === 'library' ? 'active' : ''}`}
-                onClick={() => {
-                  setRightPanelTab('library');
-                  fetchMediaLibrary();
-                }}
-              >
-                🎥 Mediathek ({mediaLibrary.length})
-              </button>
             </div>
+          )}
 
-            {rightPanelTab === 'queue' ? (
-              downloads.length === 0 ? (
+          {/* Right Panel: Queue or Mediathek */}
+          <div className="card" style={currentView === 'library' ? { width: '100%' } : {}}>
+            {currentView === 'downloads' ? (
+              <>
+                <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    📥 Warteschlange ({downloads.length})
+                  </h3>
+                </div>
+              {downloads.length === 0 ? (
                 <div className="empty-state">
                   <span className="empty-state-icon">📥</span>
                   <p>Aktuell keine aktiven Downloads.</p>
@@ -1274,10 +1287,12 @@ function App() {
                     );
                   })}
                 </div>
-              )
-            ) : (
-              /* Media Library List */
-              loadingLibrary && mediaLibrary.length === 0 ? (
+              )}
+            </>
+          ) : (
+            <>
+              {/* Media Library List */}
+              {loadingLibrary && mediaLibrary.length === 0 ? (
                 <div className="empty-state">
                   <span className="spinner" style={{ fontSize: '2rem' }}>⏳</span>
                   <p>Mediathek wird gescannt...</p>
@@ -1348,7 +1363,7 @@ function App() {
                         type="text"
                         className="search-input"
                         style={{ padding: '0.55rem 1rem 0.55rem 2.5rem', fontSize: '0.85rem' }}
-                        placeholder="Mediathek nach Dateinamen filtern..."
+                        placeholder="Mediathek nach Dateinamen, Titeln oder Schauspielern filtern..."
                         value={librarySearchQuery}
                         onChange={(e) => setLibrarySearchQuery(e.target.value)}
                       />
@@ -1375,19 +1390,17 @@ function App() {
                         📺 Serien ({mediaLibrary.filter(item => item.metadata?.category === 'Serien').length})
                       </button>
                       <button 
+                        className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}
+                        onClick={() => setSelectedCategory('Videos')}
+                      >
+                        📹 Videos ({mediaLibrary.filter(item => item.metadata?.category === 'Videos').length})
+                      </button>
+                      <button 
                         className={`category-tab-btn ${selectedCategory === 'Musik' ? 'active' : ''}`}
                         onClick={() => setSelectedCategory('Musik')}
                       >
                         🎵 Musik ({mediaLibrary.filter(item => item.metadata?.category === 'Musik').length})
                       </button>
-                      {mediaLibrary.some(item => item.metadata?.category === 'Sonstige') && (
-                        <button 
-                          className={`category-tab-btn ${selectedCategory === 'Sonstige' ? 'active' : ''}`}
-                          onClick={() => setSelectedCategory('Sonstige')}
-                        >
-                          📦 Sonstige ({mediaLibrary.filter(item => item.metadata?.category === 'Sonstige').length})
-                        </button>
-                      )}
                     </div>
                   </div>
 
@@ -1556,7 +1569,7 @@ function App() {
                     </div>
                   ) : (
                     /* Movies/Series Card Grid View */
-                    <div className="media-grid" style={{ maxHeight: '650px', overflowY: 'auto' }}>
+                    <div className="media-grid" style={{ maxHeight: '750px', overflowY: 'auto' }}>
                       {filteredLibrary.map((item, idx) => {
                         const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
                         const isPending = !!pendingCasts[item.filename];
@@ -1566,8 +1579,15 @@ function App() {
                         const posterUrl = meta.posterUrl;
                         const year = meta.year || null;
                         const cast = meta.cast || null;
-                        const isTv = meta.type === 'series' || meta.category === 'Serien';
+                        const rawCategory = meta.category || 'Videos';
+                        const category = rawCategory === 'Sonstige' ? 'Videos' : rawCategory;
+                        
+                        const isTv = category === 'Serien';
                         const imdbLink = meta.imdbId ? `https://www.imdb.com/title/${meta.imdbId}` : null;
+                        
+                        let fallbackIcon = '📹';
+                        if (category === 'Filme') fallbackIcon = '🎬';
+                        else if (category === 'Serien') fallbackIcon = '📺';
                         
                         return (
                           <div key={idx} className="media-card">
@@ -1576,14 +1596,16 @@ function App() {
                                 <img src={posterUrl} alt={title} className="media-poster" loading="lazy" />
                               ) : (
                                 <div className="media-poster-fallback">
-                                  <span className="media-poster-fallback-icon">{isTv ? '📺' : '🎬'}</span>
+                                  <span className="media-poster-fallback-icon">{fallbackIcon}</span>
                                   <span className="media-poster-fallback-title">{title}</span>
                                 </div>
                               )}
                               
                               {/* Badges on Poster */}
                               {year && <span className="media-badge-year">{year}</span>}
-                              <span className="media-badge-type">{isTv ? 'Serie' : 'Film'}</span>
+                              <span className="media-badge-type">
+                                {category === 'Serien' ? 'Serie' : category === 'Filme' ? 'Film' : 'Video'}
+                              </span>
                               {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
                             </div>
                             
@@ -1734,11 +1756,12 @@ function App() {
                     </div>
                   )}
                 </div>
-              )
-            )}
-          </div>
-
+              )}
+            </>
+          )}
         </div>
+
+      </div>
 
         {/* Settings Modal */}
         {showSettings && (

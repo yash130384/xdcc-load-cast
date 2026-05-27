@@ -982,22 +982,34 @@ async function deleteMediaFileAndCleanDirs(filename) {
   }
 }
 
-const METADATA_CACHE_FILE = path.join(os.tmpdir(), 'xdcc_downloader_metadata_cache.json');
 let metadataCache = {};
 
+function getMetadataCachePath() {
+  return path.join(appConfig.downloadDir, '.metadata_cache.json');
+}
+
 function loadMetadataCache() {
-  if (fs.existsSync(METADATA_CACHE_FILE)) {
+  const cachePath = getMetadataCachePath();
+  if (fs.existsSync(cachePath)) {
     try {
-      metadataCache = JSON.parse(fs.readFileSync(METADATA_CACHE_FILE, 'utf8'));
+      metadataCache = JSON.parse(fs.readFileSync(cachePath, 'utf8'));
+      console.log(`[Cache] Loaded metadata cache from ${cachePath} (${Object.keys(metadataCache).length} items)`);
     } catch (e) {
       console.error('Error loading metadata cache:', e);
+      metadataCache = {};
     }
+  } else {
+    metadataCache = {};
   }
 }
 
 function saveMetadataCache() {
+  const cachePath = getMetadataCachePath();
   try {
-    fs.writeFileSync(METADATA_CACHE_FILE, JSON.stringify(metadataCache, null, 2), 'utf8');
+    if (!fs.existsSync(appConfig.downloadDir)) {
+      fs.mkdirSync(appConfig.downloadDir, { recursive: true });
+    }
+    fs.writeFileSync(cachePath, JSON.stringify(metadataCache, null, 2), 'utf8');
   } catch (e) {
     console.error('Error saving metadata cache:', e);
   }
@@ -1132,6 +1144,11 @@ async function fetchImdbMetadata(parsedInfo) {
 
 async function getOrFetchMetadata(filename, ext) {
   if (metadataCache[filename]) {
+    // Migration: If item was not found on IMDb but is not categorized as 'Videos', fix it.
+    if (metadataCache[filename].notFound && metadataCache[filename].category !== 'Videos') {
+      metadataCache[filename].category = 'Videos';
+      saveMetadataCache();
+    }
     return metadataCache[filename];
   }
   
@@ -1151,7 +1168,7 @@ async function getOrFetchMetadata(filename, ext) {
     year: parsed.year,
     seasonEpisode: parsed.seasonEpisode,
     isSeries: parsed.isSeries,
-    category: parsed.isSeries ? 'Serien' : 'Filme'
+    category: 'Videos' // default fallback if not found on IMDb
   };
   
   const imdb = await fetchImdbMetadata(parsed);
@@ -1166,6 +1183,7 @@ async function getOrFetchMetadata(filename, ext) {
     data.category = imdb.type === 'series' ? 'Serien' : 'Filme';
   } else {
     data.notFound = true;
+    data.category = 'Videos';
   }
   
   metadataCache[filename] = data;
@@ -1175,6 +1193,7 @@ async function getOrFetchMetadata(filename, ext) {
 
 async function scanDownloadDir() {
   const dir = appConfig.downloadDir;
+  loadMetadataCache(); // Reload metadata cache for the current download directory
   try {
     if (!fs.existsSync(dir)) {
       return [];
@@ -1220,7 +1239,7 @@ async function scanDownloadDir() {
         console.error(`[Metadata] Failed to get metadata for ${file.filename}:`, err);
         file.metadata = {
           title: path.parse(file.filename).name,
-          category: MUSIC_EXTENSIONS.has(ext) ? 'Musik' : (parseFilename(file.filename).isSeries ? 'Serien' : 'Filme')
+          category: MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos'
         };
       }
     }
