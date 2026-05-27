@@ -1394,14 +1394,21 @@ function App() {
                         <div className="series-info-card" style={{ flex: '1 1 250px', maxWidth: '300px' }}>
                           <div className="media-card" style={{ maxWidth: '100%' }}>
                             <div className="media-poster-container">
-                              {activeSeries.posterUrl ? (
-                                <img src={activeSeries.posterUrl} alt={activeSeries.title} className="media-poster" />
-                              ) : (
-                                <div className="media-poster-fallback">
+                                <img 
+                                  src={activeSeries.posterUrl} 
+                                  alt={activeSeries.title} 
+                                  className="media-poster" 
+                                  style={{ display: activeSeries.posterUrl ? 'block' : 'none' }}
+                                  onError={(e) => {
+                                    e.target.style.display = 'none';
+                                    const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
+                                    if (fallback) fallback.style.display = 'flex';
+                                  }}
+                                />
+                                <div className="media-poster-fallback" style={{ display: activeSeries.posterUrl ? 'none' : 'flex' }}>
                                   <span className="media-poster-fallback-icon">📺</span>
                                   <span className="media-poster-fallback-title">{activeSeries.title}</span>
                                 </div>
-                              )}
                               {activeSeries.year && <span className="media-badge-year">{activeSeries.year}</span>}
                               <span className="media-badge-type">Serie</span>
                             </div>
@@ -1865,14 +1872,22 @@ function App() {
                               style={{ cursor: 'pointer' }}
                             >
                               <div className="media-poster-container">
-                                {posterUrl ? (
-                                  <img src={posterUrl} alt={title} className="media-poster" loading="lazy" />
-                                ) : (
-                                  <div className="media-poster-fallback">
-                                    <span className="media-poster-fallback-icon">📺</span>
-                                    <span className="media-poster-fallback-title">{title}</span>
-                                  </div>
-                                )}
+                                 <img 
+                                   src={posterUrl} 
+                                   alt={title} 
+                                   className="media-poster" 
+                                   loading="lazy" 
+                                   style={{ display: posterUrl ? 'block' : 'none' }}
+                                   onError={(e) => {
+                                     e.target.style.display = 'none';
+                                     const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
+                                     if (fallback) fallback.style.display = 'flex';
+                                   }}
+                                 />
+                                 <div className="media-poster-fallback" style={{ display: posterUrl ? 'none' : 'flex' }}>
+                                   <span className="media-poster-fallback-icon">📺</span>
+                                   <span className="media-poster-fallback-title">{title}</span>
+                                 </div>
                                 
                                 {year && <span className="media-badge-year">{year}</span>}
                                 <span className="media-badge-type">Serie</span>
@@ -1933,14 +1948,22 @@ function App() {
                         return (
                           <div key={idx} className="media-card">
                             <div className="media-poster-container">
-                              {posterUrl ? (
-                                <img src={posterUrl} alt={title} className="media-poster" loading="lazy" />
-                              ) : (
-                                <div className="media-poster-fallback">
-                                  <span className="media-poster-fallback-icon">{fallbackIcon}</span>
-                                  <span className="media-poster-fallback-title">{title}</span>
-                                </div>
-                              )}
+                              <img 
+                                src={posterUrl} 
+                                alt={title} 
+                                className="media-poster" 
+                                loading="lazy" 
+                                style={{ display: posterUrl ? 'block' : 'none' }}
+                                onError={(e) => {
+                                  e.target.style.display = 'none';
+                                  const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
+                                  if (fallback) fallback.style.display = 'flex';
+                                }}
+                              />
+                              <div className="media-poster-fallback" style={{ display: posterUrl ? 'none' : 'flex' }}>
+                                <span className="media-poster-fallback-icon">{fallbackIcon}</span>
+                                <span className="media-poster-fallback-title">{title}</span>
+                              </div>
                               
                               {/* Badges on Poster */}
                               {year && <span className="media-badge-year">{year}</span>}
