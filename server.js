@@ -1315,8 +1315,8 @@ async function checkSingleShow(sub, mediaFiles) {
     
     // Check if season is complete using TVmaze
     const totalEpisodes = await getTvmazeEpisodeCount(sub.imdbId, maxSeason);
-    if (totalEpisodes !== null && currentSeasonFiles.length >= totalEpisodes) {
-      console.log(`[Auto-Download] Season ${maxSeason} of "${sub.title}" is complete (${currentSeasonFiles.length}/${totalEpisodes} episodes). Stopping auto-download.`);
+    if (totalEpisodes !== null && (currentSeasonFiles.length >= totalEpisodes || maxEpisode >= totalEpisodes)) {
+      console.log(`[Auto-Download] Season ${maxSeason} of "${sub.title}" is complete (${currentSeasonFiles.length}/${totalEpisodes} episodes, maxEpisode: ${maxEpisode}). Stopping auto-download.`);
       autoDownloads[sub.imdbId].enabled = false;
       saveAutoDownloads();
       
@@ -1367,24 +1367,25 @@ async function checkSingleShow(sub, mediaFiles) {
     
     let searchResults = await searchXdccEu(queryStr);
     
-    // If not found on xdcc.eu, search on moviegods (IRC)
-    if (searchResults.length === 0) {
-      console.log(`[Auto-Download] Episode not found on xdcc.eu. Searching Moviegods IRC...`);
+    // Find a match by tag-based verification
+    let match = searchResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, nextEpisode, sub.title));
+    
+    // If not found on xdcc.eu with matching tags, search on moviegods (IRC)
+    if (!match) {
+      console.log(`[Auto-Download] Episode not found on xdcc.eu with matching tags. Searching Moviegods IRC...`);
       try {
         const mgRes = await searchMoviegodsIRC(queryStr);
-        searchResults = mgRes.results || [];
+        const mgResults = mgRes.results || [];
+        match = mgResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, nextEpisode, sub.title));
       } catch (err) {
         console.error(`[Auto-Download] Moviegods search failed:`, err.message);
       }
     }
     
-    if (searchResults.length === 0) {
-      console.log(`[Auto-Download] Episode ${queryStr} not found yet.`);
+    if (!match) {
+      console.log(`[Auto-Download] Episode ${queryStr} matching template tags not found yet.`);
       return;
     }
-    
-    // Find a match by tag-based verification
-    const match = searchResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, nextEpisode, sub.title));
     if (match) {
       console.log(`[Auto-Download] FOUND MATCH! Starting download for: ${match.filename}`);
       
@@ -1427,6 +1428,7 @@ async function checkSingleShow(sub, mediaFiles) {
       });
       
       downloadQueue.set(downloadId, { downloader });
+      broadcastStatus(downloadId); // Immediately notify client that download has queued/started
       downloader.start();
       
       // Send a system message to all clients about the automatic start
