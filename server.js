@@ -1507,7 +1507,8 @@ async function checkSingleShow(sub, mediaFiles) {
         packNumber: match.packNumber,
         filename: match.filename,
         expectedSize: match.sizeBytes,
-        downloadDir: appConfig.downloadDir
+        downloadDir: appConfig.downloadDir,
+        isAuto: true
       });
       
       downloader.on('progress', (data) => {

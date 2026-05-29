@@ -26,6 +26,7 @@ export class IrcDccDownloader extends EventEmitter {
     this.downloadDir = options.downloadDir || path.join(process.cwd(), 'downloads');
     this.filename = options.filename;
     this.expectedSize = options.expectedSize || 0;
+    this.isAuto = options.isAuto || false;
 
     this.ircSocket = null;
     this.dccSocket = null;
@@ -307,6 +308,10 @@ export class IrcDccDownloader extends EventEmitter {
 
     if (!isFilenameMatch) {
       this.log(`WARNUNG: Dateiname weicht ab! Gesucht: "${originalFilename}", angeboten: "${filename}"`);
+      if (this.isAuto) {
+        this.handleError(`Dateiname weicht ab (Auto-Download abgebrochen): Gesucht: "${originalFilename}", angeboten: "${filename}"`);
+        return;
+      }
       this.updateStatus('confirm_filename', {
         offeredFilename: filename,
         originalFilename: originalFilename
