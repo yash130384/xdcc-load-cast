@@ -412,7 +412,7 @@ export class IrcDccDownloader extends EventEmitter {
         ack.writeBigUInt64BE(BigInt(this.bytesReceived));
       } else {
         ack = Buffer.alloc(4);
-        ack.writeUInt32BE(this.bytesReceived & 0xffffffff);
+        ack.writeUInt32BE(this.bytesReceived >>> 0);
       }
       this.dccSocket.write(ack);
     });
