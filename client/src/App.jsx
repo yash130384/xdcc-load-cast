@@ -813,6 +813,314 @@ function App() {
     return found ? found.status : null;
   };
 
+  const renderDownloadItem = (item) => {
+    const progressPct = item.expectedSize 
+      ? Math.min(100, Math.round((item.bytesReceived / item.expectedSize) * 100))
+      : 0;
+
+    const isDownloading = item.status === 'dcc_downloading';
+    const isQueued = item.status === 'queued';
+    const isCompleted = item.status === 'completed';
+    const isPaused = item.status === 'paused';
+    const isError = item.status === 'error';
+    const isCancelled = item.status === 'cancelled';
+    
+    const showProgress = ['dcc_negotiating', 'dcc_downloading', 'completed', 'paused', 'extracting'].includes(item.status);
+    const logs = downloadLogs[item.id] || [];
+    const isExpanded = !!expandedLogs[item.id];
+    const activeCastForFile = activeCasts.find(c => c.downloadId === item.id);
+    const isPending = !!pendingCasts[item.filename];
+
+    return (
+      <div key={item.id} className={`download-item ${item.status}`}>
+        <div className="download-item-header">
+          <div className="download-filename" title={item.filename}>
+            {item.filename}
+          </div>
+          <span className={getStatusClass(item.status)}>
+            {renderStatusText(item.status)}
+          </span>
+        </div>
+
+        {/* Info lines */}
+        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+          <span>Server: <strong style={{ color: 'var(--text-primary)' }}>{item.server}</strong></span>
+          <span>•</span>
+          <span>Bot: <strong style={{ color: 'var(--text-primary)' }}>{item.botName}</strong></span>
+          <span>•</span>
+          <span>Pack: <strong style={{ color: 'var(--text-primary)' }}>#{item.packNumber}</strong></span>
+        </div>
+
+        {/* Filename Confirmation Prompt */}
+        {item.status === 'confirm_filename' && (
+          <div style={{
+            background: 'rgba(255, 0, 127, 0.08)',
+            border: '1px solid rgba(255, 0, 127, 0.3)',
+            borderRadius: '8px',
+            padding: '0.75rem 0.85rem',
+            fontSize: '0.85rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            marginTop: '0.5rem',
+            color: 'var(--text-primary)'
+          }}>
+            <div>
+              <strong style={{ color: 'var(--accent-pink)' }}>⚠️ Dateiname weicht ab!</strong>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
+                Gesucht: <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{item.filename}</span>
+              </div>
+              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
+                Angeboten: <span style={{ fontFamily: 'monospace', color: 'var(--accent-pink)', fontWeight: 'bold' }}>{item.offeredFilename}</span>
+              </div>
+            </div>
+            <div className="confirm-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+              <button 
+                className="btn btn-primary" 
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', background: 'var(--accent-pink)', borderColor: 'var(--accent-pink)', color: '#fff' }}
+                onClick={() => confirmFilename(item.id)}
+              >
+                Namen akzeptieren & fortsetzen
+              </button>
+              <button 
+                className="btn btn-secondary" 
+                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
+                onClick={() => handleCancel(item.id)}
+              >
+                Abbrechen
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Progress bar */}
+        {showProgress && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+            <div className="progress-bar-container">
+              <div 
+                className="progress-bar-fill"
+                style={{ width: `${progressPct}%` }}
+              />
+            </div>
+            <div className="download-stats">
+              <div className="download-meta-info">
+                {formatBytes(item.bytesReceived)} / {formatBytes(item.expectedSize)} ({progressPct}%)
+              </div>
+              <div className="download-speed-eta">
+                {isDownloading && (
+                  <>
+                    <span className="speed-text">{formatBytes(item.speed)}/s</span>
+                    <span>ETA: {formatDuration(item.eta)}</span>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Error message */}
+        {isError && item.errorMessage && (
+          <div className="download-error-msg">
+            ⚠️ {item.errorMessage}
+          </div>
+        )}
+
+        {/* Casting status */}
+        {activeCastForFile && (
+          <div style={{
+            background: 'rgba(0, 242, 254, 0.08)',
+            border: '1px solid rgba(0, 242, 254, 0.25)',
+            borderRadius: '10px',
+            padding: '0.75rem 1rem',
+            marginTop: '0.5rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            color: 'var(--text-primary)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifycontent: 'space-between' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                📺 Streamt auf {activeCastForFile.device}
+              </span>
+              <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                {activeCastForFile.playerState || 'Verbinden'}
+              </span>
+            </div>
+
+            {/* Progress bar and time labels */}
+            {activeCastForFile.duration > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <input 
+                  type="range"
+                  min={0}
+                  max={activeCastForFile.duration}
+                  value={activeCastForFile.currentTime || 0}
+                  onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                  style={{
+                    width: '100%',
+                    accentColor: 'var(--accent-cyan)',
+                    cursor: 'pointer',
+                    height: '4px'
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                  <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                </div>
+              </div>
+            )}
+
+            {/* Control Buttons */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
+              {activeCastForFile.playerState === 'PAUSED' ? (
+                <button 
+                  className="btn btn-secondary btn-icon-only" 
+                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                  onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
+                  title="Wiedergabe fortsetzen"
+                >
+                  <PlayIcon />
+                </button>
+              ) : (
+                <button 
+                  className="btn btn-secondary btn-icon-only" 
+                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                  onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
+                  title="Wiedergabe pausieren"
+                >
+                  <PauseIcon />
+                </button>
+              )}
+              
+              <button 
+                className="btn btn-danger" 
+                style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
+                onClick={() => stopCast(activeCastForFile.device)}
+              >
+                Stoppen
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Pending Casting status */}
+        {isPending && !activeCastForFile && (
+          <div style={{
+            background: 'rgba(0, 242, 254, 0.05)',
+            border: '1px solid rgba(0, 242, 254, 0.2)',
+            borderRadius: '8px',
+            padding: '0.6rem 0.85rem',
+            fontSize: '0.8rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginTop: '0.5rem',
+            color: 'var(--text-secondary)'
+          }}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+              <span className="spinner">⏳</span> Verbindung wird aufgebaut...
+            </span>
+          </div>
+        )}
+
+        {/* Collapsible logs */}
+        <div className="log-accordion">
+          <div className="log-accordion-header" onClick={() => toggleLogs(item.id)}>
+            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+              <TerminalIcon />
+              Verbindungs-Protokoll ({logs.length} Zeilen)
+            </span>
+            <span>{isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}</span>
+          </div>
+          {isExpanded && (
+            <div className="log-content">
+              {logs.length === 0 ? (
+                <div className="log-line" style={{ color: 'var(--text-muted)' }}>Keine Protokoll-Einträge vorhanden.</div>
+              ) : (
+                logs.map((log, index) => (
+                  <div key={index} className="log-line">{log}</div>
+                ))
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Download actions */}
+        <div className="download-actions">
+          {isDownloading && (
+            <button 
+              className="btn btn-secondary btn-icon-only" 
+              title="Pause"
+              onClick={() => handlePause(item.id)}
+            >
+              <PauseIcon />
+            </button>
+          )}
+          {(isPaused || isError || isCancelled) && (
+            <button 
+              className="btn btn-primary btn-icon-only" 
+              title="Fortsetzen"
+              onClick={() => handleResume(item.id)}
+            >
+              <PlayIcon />
+            </button>
+          )}
+          {(isDownloading || isQueued || item.status === 'connecting' || item.status === 'registering' || item.status === 'joining' || item.status === 'requesting' || item.status === 'dcc_negotiating' || item.status === 'confirm_filename') && (
+            <button 
+              className="btn btn-danger btn-icon-only" 
+              title="Abbrechen"
+              onClick={() => handleCancel(item.id)}
+            >
+              <CancelIcon />
+            </button>
+          )}
+          {isCompleted && (
+            <>
+              <button 
+                className="btn btn-danger btn-icon-only" 
+                style={{ marginRight: 'auto' }}
+                title="Datei von Festplatte löschen"
+                onClick={() => handleDeleteFile(item.id, item.filename)}
+              >
+                <TrashIcon />
+              </button>
+              <button 
+                className="btn btn-primary btn-icon-only" 
+                style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                title="Lokal abspielen"
+                onClick={() => playLocal(item.id)}
+              >
+                <PlayIcon />
+              </button>
+              <button 
+                className="btn btn-secondary btn-icon-only" 
+                style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+                title="Auf Chromecast streamen"
+                disabled={isPending}
+                onClick={() => {
+                  setCastingItem(item);
+                  fetchDevices();
+                }}
+              >
+                {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+              </button>
+            </>
+          )}
+          {(isCompleted || isPaused || isError || isCancelled) && (
+            <button 
+              className="btn btn-secondary btn-icon-only" 
+              style={{ color: 'var(--accent-red)', borderColor: 'rgba(255, 51, 102, 0.2)' }}
+              title="Aus Warteschlange löschen"
+              onClick={() => handleDelete(item.id)}
+            >
+              <TrashIcon />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-layout">
       <div className="app-container">
@@ -1089,330 +1397,107 @@ function App() {
           <div className="card" style={currentView === 'library' ? { width: '100%' } : {}}>
             {currentView === 'downloads' ? (
               <>
+                {/* 1. Vom User beauftragte Warteschlange */}
                 <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                    📥 Warteschlange ({downloads.length})
+                    📥 Warteschlange (Vom User beauftragt) ({downloads.filter(d => !d.isAuto).length})
                   </h3>
                 </div>
-              {downloads.length === 0 ? (
-                <div className="empty-state">
-                  <span className="empty-state-icon">📥</span>
-                  <p>Aktuell keine aktiven Downloads.</p>
-                  <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>Suchergebnisse anklicken, um Downloads zu starten.</p>
+                {downloads.filter(d => !d.isAuto).length === 0 ? (
+                  <div className="empty-state" style={{ padding: '2rem 1rem' }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Keine aktiven manuellen Downloads.</p>
+                  </div>
+                ) : (
+                  <div className="downloads-list" style={{ marginBottom: '1.5rem' }}>
+                    {downloads.filter(d => !d.isAuto).map((item) => renderDownloadItem(item))}
+                  </div>
+                )}
+
+                {/* 2. Automatische Downloads (Auto-Loads) */}
+                <div style={{ marginTop: '1.5rem', marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    🤖 Automatische Downloads (Auto-Loads) ({downloads.filter(d => d.isAuto).length})
+                  </h3>
                 </div>
-              ) : (
-                <div className="downloads-list">
-                  {downloads.map((item) => {
-                    const progressPct = item.expectedSize 
-                      ? Math.min(100, Math.round((item.bytesReceived / item.expectedSize) * 100))
-                      : 0;
+                {downloads.filter(d => d.isAuto).length === 0 ? (
+                  <div className="empty-state" style={{ padding: '2rem 1rem' }}>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>Keine aktiven automatischen Downloads.</p>
+                  </div>
+                ) : (
+                  <div className="downloads-list" style={{ marginBottom: '1.5rem' }}>
+                    {downloads.filter(d => d.isAuto).map((item) => renderDownloadItem(item))}
+                  </div>
+                )}
 
-                    const isDownloading = item.status === 'dcc_downloading';
-                    const isQueued = item.status === 'queued';
-                    const isCompleted = item.status === 'completed';
-                    const isPaused = item.status === 'paused';
-                    const isError = item.status === 'error';
-                    const isCancelled = item.status === 'cancelled';
-                    
-                    const showProgress = ['dcc_negotiating', 'dcc_downloading', 'completed', 'paused', 'extracting'].includes(item.status);
-                    const logs = downloadLogs[item.id] || [];
-                    const isExpanded = !!expandedLogs[item.id];
-                    const activeCastForFile = activeCasts.find(c => c.downloadId === item.id);
-                    const isPending = !!pendingCasts[item.filename];
-
-                    return (
-                      <div key={item.id} className={`download-item ${item.status}`}>
-                        <div className="download-item-header">
-                          <div className="download-filename" title={item.filename}>
-                            {item.filename}
-                          </div>
-                          <span className={getStatusClass(item.status)}>
-                            {renderStatusText(item.status)}
-                          </span>
-                        </div>
-
-                        {/* Info lines */}
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-                          <span>Server: <strong style={{ color: 'var(--text-primary)' }}>{item.server}</strong></span>
-                          <span>•</span>
-                          <span>Bot: <strong style={{ color: 'var(--text-primary)' }}>{item.botName}</strong></span>
-                          <span>•</span>
-                          <span>Pack: <strong style={{ color: 'var(--text-primary)' }}>#{item.packNumber}</strong></span>
-                        </div>
-
-                        {/* Filename Confirmation Prompt */}
-                        {item.status === 'confirm_filename' && (
-                          <div style={{
-                            background: 'rgba(255, 0, 127, 0.08)',
-                            border: '1px solid rgba(255, 0, 127, 0.3)',
-                            borderRadius: '8px',
-                            padding: '0.75rem 0.85rem',
-                            fontSize: '0.85rem',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '0.5rem',
-                            marginTop: '0.5rem',
-                            color: 'var(--text-primary)'
-                          }}>
-                            <div>
-                              <strong style={{ color: 'var(--accent-pink)' }}>⚠️ Dateiname weicht ab!</strong>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', marginTop: '0.25rem' }}>
-                                Gesucht: <span style={{ fontFamily: 'monospace', color: 'var(--text-muted)' }}>{item.filename}</span>
-                              </div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>
-                                Angeboten: <span style={{ fontFamily: 'monospace', color: 'var(--accent-pink)', fontWeight: 'bold' }}>{item.offeredFilename}</span>
-                              </div>
+                {/* 3. Serien-Autoloads (Abonnements) */}
+                <div style={{ marginTop: '2rem', paddingTop: '1.5rem', borderTop: '1px solid var(--border-color)' }}>
+                  <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <h3 style={{ margin: 0, fontSize: '1.1rem', color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                      🔄 Serien-Autoloads ({Object.values(autoDownloads).filter(sub => sub.enabled).length} aktiv)
+                    </h3>
+                  </div>
+                  {Object.keys(autoDownloads).length === 0 ? (
+                    <div className="empty-state" style={{ padding: '2rem 1rem' }}>
+                      <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)' }}>
+                        Keine Serien für den automatischen Download abonniert.
+                      </p>
+                      <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
+                        Aktiviere "Lade weitere Folgen" in der Mediathek, um eine Serie hinzuzufügen.
+                      </p>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                      {Object.values(autoDownloads).map((sub) => (
+                        <div key={sub.imdbId} style={{
+                          background: 'rgba(255, 255, 255, 0.02)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '12px',
+                          padding: '0.75rem 1rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '1rem'
+                        }}>
+                          <div>
+                            <div style={{ fontWeight: '600', fontSize: '0.9rem', color: 'var(--text-primary)' }}>
+                              {sub.title}
                             </div>
-                            <div className="confirm-actions" style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
-                              <button 
-                                className="btn btn-primary" 
-                                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem', background: 'var(--accent-pink)', borderColor: 'var(--accent-pink)', color: '#fff' }}
-                                onClick={() => confirmFilename(item.id)}
-                              >
-                                Namen akzeptieren & fortsetzen
-                              </button>
-                              <button 
-                                className="btn btn-secondary" 
-                                style={{ padding: '0.35rem 0.75rem', fontSize: '0.75rem' }}
-                                onClick={() => handleCancel(item.id)}
-                              >
-                                Abbrechen
-                              </button>
+                            <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.15rem', display: 'flex', gap: '0.5rem' }}>
+                              <span>IMDb: {sub.imdbId}</span>
+                              {sub.failedEpisodes && Object.keys(sub.failedEpisodes).length > 0 && (
+                                <span style={{ color: 'var(--accent-red)' }}>
+                                  ⚠️ {Object.keys(sub.failedEpisodes).length} Fehlgeschlagen
+                                </span>
+                              )}
                             </div>
                           </div>
-                        )}
-
-                        {/* Progress bar */}
-                        {showProgress && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
-                            <div className="progress-bar-container">
-                              <div 
-                                className="progress-bar-fill"
-                                style={{ width: `${progressPct}%` }}
+                          
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                            <button
+                              className="btn btn-secondary"
+                              onClick={() => handleCheckNow(sub.imdbId)}
+                              disabled={checkingShowId === sub.imdbId}
+                              style={{ padding: '0.35rem 0.65rem', fontSize: '0.75rem' }}
+                            >
+                              {checkingShowId === sub.imdbId ? '⏳' : '🔍 Suchen'}
+                            </button>
+                            
+                            <label className="switch" style={{ transform: 'scale(0.85)' }}>
+                              <input
+                                type="checkbox"
+                                checked={!!sub.enabled}
+                                onChange={(e) => handleToggleAutoDownload(sub.imdbId, sub.title, e.target.checked)}
                               />
-                            </div>
-                            <div className="download-stats">
-                              <div className="download-meta-info">
-                                {formatBytes(item.bytesReceived)} / {formatBytes(item.expectedSize)} ({progressPct}%)
-                              </div>
-                              <div className="download-speed-eta">
-                                {isDownloading && (
-                                  <>
-                                    <span className="speed-text">{formatBytes(item.speed)}/s</span>
-                                    <span>ETA: {formatDuration(item.eta)}</span>
-                                  </>
-                                )}
-                              </div>
-                            </div>
+                              <span className="slider"></span>
+                            </label>
                           </div>
-                        )}
-
-                        {/* Error message */}
-                        {isError && item.errorMessage && (
-                          <div className="download-error-msg">
-                            ⚠️ {item.errorMessage}
-                          </div>
-                        )}
-
-                        {/* Casting status */}
-                        {activeCastForFile && (
-                          <div style={{
-                            background: 'rgba(0, 242, 254, 0.08)',
-                            border: '1px solid rgba(0, 242, 254, 0.25)',
-                            borderRadius: '10px',
-                            padding: '0.75rem 1rem',
-                            marginTop: '0.5rem',
-                            display: 'flex',
-                            flexDirection: 'column',
-                            gap: '0.5rem',
-                            color: 'var(--text-primary)'
-                          }}>
-                            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                              <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                                📺 Streamt auf {activeCastForFile.device}
-                              </span>
-                              <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                {activeCastForFile.playerState || 'Verbinden'}
-                              </span>
-                            </div>
-
-                            {/* Progress bar and time labels */}
-                            {activeCastForFile.duration > 0 && (
-                              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                <input 
-                                  type="range"
-                                  min={0}
-                                  max={activeCastForFile.duration}
-                                  value={activeCastForFile.currentTime || 0}
-                                  onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                                  style={{
-                                    width: '100%',
-                                    accentColor: 'var(--accent-cyan)',
-                                    cursor: 'pointer',
-                                    height: '4px'
-                                  }}
-                                />
-                                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                  <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                                  <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-                                </div>
-                              </div>
-                            )}
-
-                            {/* Control Buttons */}
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-                              {activeCastForFile.playerState === 'PAUSED' ? (
-                                <button 
-                                  className="btn btn-secondary btn-icon-only" 
-                                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                  onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
-                                  title="Wiedergabe fortsetzen"
-                                >
-                                  <PlayIcon />
-                                </button>
-                              ) : (
-                                <button 
-                                  className="btn btn-secondary btn-icon-only" 
-                                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                  onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
-                                  title="Wiedergabe pausieren"
-                                >
-                                  <PauseIcon />
-                                </button>
-                              )}
-                              
-                              <button 
-                                className="btn btn-danger" 
-                                style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-                                onClick={() => stopCast(activeCastForFile.device)}
-                              >
-                                Stoppen
-                              </button>
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Pending Casting status */}
-                        {isPending && !activeCastForFile && (
-                          <div style={{
-                            background: 'rgba(0, 242, 254, 0.05)',
-                            border: '1px solid rgba(0, 242, 254, 0.2)',
-                            borderRadius: '8px',
-                            padding: '0.6rem 0.85rem',
-                            fontSize: '0.8rem',
-                            display: 'flex',
-                            alignItems: 'center',
-                            justifyContent: 'space-between',
-                            marginTop: '0.5rem',
-                            color: 'var(--text-secondary)'
-                          }}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                              <span className="spinner">⏳</span> Verbindung wird aufgebaut...
-                            </span>
-                          </div>
-                        )}
-
-                        {/* Collapsible logs */}
-                        <div className="log-accordion">
-                          <div className="log-accordion-header" onClick={() => toggleLogs(item.id)}>
-                            <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-                              <TerminalIcon />
-                              Verbindungs-Protokoll ({logs.length} Zeilen)
-                            </span>
-                            <span>{isExpanded ? <ChevronUpIcon /> : <ChevronDownIcon />}</span>
-                          </div>
-                          {isExpanded && (
-                            <div className="log-content">
-                              {logs.length === 0 ? (
-                                <div className="log-line" style={{ color: 'var(--text-muted)' }}>Keine Protokoll-Einträge vorhanden.</div>
-                              ) : (
-                                logs.map((log, index) => (
-                                  <div key={index} className="log-line">{log}</div>
-                                ))
-                              )}
-                            </div>
-                          )}
                         </div>
-
-                        {/* Download actions */}
-                        <div className="download-actions">
-                          {isDownloading && (
-                            <button 
-                              className="btn btn-secondary btn-icon-only" 
-                              title="Pause"
-                              onClick={() => handlePause(item.id)}
-                            >
-                              <PauseIcon />
-                            </button>
-                          )}
-                          {(isPaused || isError || isCancelled) && (
-                            <button 
-                              className="btn btn-primary btn-icon-only" 
-                              title="Fortsetzen"
-                              onClick={() => handleResume(item.id)}
-                            >
-                              <PlayIcon />
-                            </button>
-                          )}
-                          {(isDownloading || isQueued || item.status === 'connecting' || item.status === 'registering' || item.status === 'joining' || item.status === 'requesting' || item.status === 'dcc_negotiating' || item.status === 'confirm_filename') && (
-                            <button 
-                              className="btn btn-danger btn-icon-only" 
-                              title="Abbrechen"
-                              onClick={() => handleCancel(item.id)}
-                            >
-                              <CancelIcon />
-                            </button>
-                          )}
-                          {isCompleted && (
-                            <>
-                              <button 
-                                className="btn btn-danger btn-icon-only" 
-                                style={{ marginRight: 'auto' }}
-                                title="Datei von Festplatte löschen"
-                                onClick={() => handleDeleteFile(item.id, item.filename)}
-                              >
-                                <TrashIcon />
-                              </button>
-                              <button 
-                                className="btn btn-primary btn-icon-only" 
-                                style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                title="Lokal abspielen"
-                                onClick={() => playLocal(item.id)}
-                              >
-                                <PlayIcon />
-                              </button>
-                              <button 
-                                className="btn btn-secondary btn-icon-only" 
-                                style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                title="Auf Chromecast streamen"
-                                disabled={isPending}
-                                onClick={() => {
-                                  setCastingItem(item);
-                                  fetchDevices();
-                                }}
-                              >
-                                {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                              </button>
-                            </>
-                          )}
-                          {(isCompleted || isPaused || isError || isCancelled) && (
-                            <button 
-                              className="btn btn-secondary btn-icon-only" 
-                              style={{ color: 'var(--accent-red)', borderColor: 'rgba(255, 51, 102, 0.2)' }}
-                              title="Aus Warteschlange löschen"
-                              onClick={() => handleDelete(item.id)}
-                            >
-                              <TrashIcon />
-                            </button>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  })}
+                      ))}
+                    </div>
+                  )}
                 </div>
-              )}
-            </>
-          ) : (
+              </>
+            ) : (
             <>
               {/* Media Library List */}
               {loadingLibrary && mediaLibrary.length === 0 ? (

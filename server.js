@@ -102,7 +102,8 @@ function getDownloadDetails(id) {
     speed: dl.speed,
     eta: dl.eta,
     status: item.statusOverride || dl.status,
-    errorMessage: dl.errorMessage
+    errorMessage: dl.errorMessage,
+    isAuto: !!item.isAuto
   };
 }
 
@@ -1266,6 +1267,76 @@ async function getTvmazeEpisodeCount(imdbId, seasonNumber) {
   return null;
 }
 
+function markEpisodeFailed(imdbId, episode, reason) {
+  loadAutoDownloads();
+  if (autoDownloads[imdbId]) {
+    if (!autoDownloads[imdbId].failedEpisodes) {
+      autoDownloads[imdbId].failedEpisodes = {};
+    }
+    autoDownloads[imdbId].failedEpisodes[String(episode)] = {
+      failedAt: new Date().toISOString(),
+      reason: reason || 'unknown'
+    };
+    saveAutoDownloads();
+    broadcastAutoDownloads();
+    console.log(`[Auto-Download] Marked episode ${episode} of IMDb ${imdbId} as failed. Reason: ${reason}`);
+  }
+}
+
+function clearEpisodeFailure(imdbId, episode) {
+  loadAutoDownloads();
+  if (autoDownloads[imdbId] && autoDownloads[imdbId].failedEpisodes) {
+    if (autoDownloads[imdbId].failedEpisodes[String(episode)]) {
+      delete autoDownloads[imdbId].failedEpisodes[String(episode)];
+      saveAutoDownloads();
+      broadcastAutoDownloads();
+      console.log(`[Auto-Download] Cleared failure for episode ${episode} of IMDb ${imdbId}`);
+    }
+  }
+}
+
+function checkDownloadsTimeout() {
+  const now = Date.now();
+  const timeoutMs = 20 * 60 * 1000; // 20 minutes
+  
+  for (const [id, item] of downloadQueue.entries()) {
+    const dl = item.downloader;
+    if (!item.isAuto) continue;
+    
+    const isActive = !['completed', 'error', 'cancelled', 'paused'].includes(dl.status) && !['completed', 'error', 'cancelled', 'paused'].includes(item.statusOverride);
+    if (!isActive) continue;
+    
+    const startedAt = item.startedAt || now;
+    if (now - startedAt > timeoutMs) {
+      if (dl.bytesReceived === 0) {
+        console.log(`[Auto-Download] Download ${id} timed out after 20 minutes without starting transfer. Cancelling.`);
+        
+        if (item.imdbId && item.episode) {
+          markEpisodeFailed(item.imdbId, item.episode, 'transfer_timeout');
+        }
+        
+        dl.cancel();
+        downloadQueue.delete(id);
+        broadcastDeletion(id);
+        
+        wss.clients.forEach((client) => {
+          if (client.readyState === 1) {
+            client.send(JSON.stringify({
+              type: 'message',
+              data: {
+                id: id,
+                text: `[Auto-Download] Download abgebrochen: Nach 20 Min kein Transfer begonnen.`
+              }
+            }));
+          }
+        });
+        
+        setTimeout(checkAllAutoDownloads, 5000);
+      }
+    }
+  }
+}
+
 async function checkAllAutoDownloads() {
   console.log(`[Auto-Download] Starting auto-download check...`);
   loadAutoDownloads();
@@ -1325,71 +1396,103 @@ async function checkSingleShow(sub, mediaFiles) {
       return;
     }
     
-    // Target next episode
-    const nextEpisode = maxEpisode + 1;
+    // Build list of candidate episodes to try
+    const downloadedEpisodes = new Set(currentSeasonFiles.map(x => x.episode));
+    const limit = totalEpisodes !== null ? totalEpisodes : (maxEpisode + 5);
+    const candidates = [];
+    for (let ep = 1; ep <= limit; ep++) {
+      if (!downloadedEpisodes.has(ep)) {
+        candidates.push(ep);
+      }
+    }
     
-    // Check if it's already in downloadQueue
-    let isAlreadyDownloading = false;
-    for (const item of downloadQueue.values()) {
-      const dl = item.downloader;
-      if (dl.status !== 'completed' && dl.status !== 'error' && dl.status !== 'cancelled') {
-        const parsed = parseFilename(dl.filename);
-        if (parsed.isSeries) {
-          const se = parseSeasonEpisodeNumber(parsed.seasonEpisode);
-          if (se && se.season === maxSeason && se.episode === nextEpisode) {
-            isAlreadyDownloading = true;
-            break;
+    // Helper to check if an episode is in downloadQueue
+    const isEpisodeDownloading = (season, episode) => {
+      for (const item of downloadQueue.values()) {
+        const dl = item.downloader;
+        const isFinished = ['completed', 'error', 'cancelled', 'paused'].includes(dl.status) || ['completed', 'error', 'cancelled', 'paused'].includes(item.statusOverride);
+        if (!isFinished) {
+          const parsed = parseFilename(dl.filename);
+          if (parsed.isSeries) {
+            const se = parseSeasonEpisodeNumber(parsed.seasonEpisode);
+            if (se && se.season === season && se.episode === episode) {
+              return true;
+            }
           }
         }
       }
-    }
-    
-    if (isAlreadyDownloading) {
-      console.log(`[Auto-Download] Next episode S${String(maxSeason).padStart(2, '0')}E${String(nextEpisode).padStart(2, '0')} for "${sub.title}" is already in the download queue.`);
-      return;
-    }
-    
+      return false;
+    };
+
     // Find template filename (the one of maxEpisode)
     const templateFile = currentSeasonFiles.find(x => x.episode === maxEpisode)?.file || currentSeasonFiles[0].file;
     const templateFilename = path.basename(templateFile.filename);
-    const targetFilename = getTargetFilename(templateFilename, nextEpisode);
-    if (!targetFilename) {
-      console.log(`[Auto-Download] Could not construct target filename for "${sub.title}" episode ${nextEpisode}`);
-      return;
-    }
-    
-    console.log(`[Auto-Download] Searching for next episode: "${targetFilename}"`);
-    
-    // Search on xdcc.eu first
-    const seasonStr = String(maxSeason).padStart(2, '0');
-    const epStr = String(nextEpisode).padStart(2, '0');
-    const queryStr = `${sub.title} S${seasonStr}E${epStr}`;
-    
-    let searchResults = await searchXdccEu(queryStr);
-    
-    // Find a match by tag-based verification
-    let match = searchResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, nextEpisode, sub.title));
-    
-    // If not found on xdcc.eu with matching tags, search on moviegods (IRC)
-    if (!match) {
-      console.log(`[Auto-Download] Episode not found on xdcc.eu with matching tags. Searching Moviegods IRC...`);
-      try {
-        const mgRes = await searchMoviegodsIRC(queryStr);
-        const mgResults = mgRes.results || [];
-        match = mgResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, nextEpisode, sub.title));
-      } catch (err) {
-        console.error(`[Auto-Download] Moviegods search failed:`, err.message);
+
+    sub.failedEpisodes = sub.failedEpisodes || {};
+    let startedAnyDownload = false;
+
+    for (const targetEpisode of candidates) {
+      // 1. Check if already downloading
+      if (isEpisodeDownloading(maxSeason, targetEpisode)) {
+        console.log(`[Auto-Download] Episode S${String(maxSeason).padStart(2, '0')}E${String(targetEpisode).padStart(2, '0')} for "${sub.title}" is already in the download queue.`);
+        startedAnyDownload = true;
+        break; // Only run one transfer at a time per series
       }
-    }
-    
-    if (!match) {
-      console.log(`[Auto-Download] Episode ${queryStr} matching template tags not found yet.`);
-      return;
-    }
-    if (match) {
-      console.log(`[Auto-Download] FOUND MATCH! Starting download for: ${match.filename}`);
+
+      // 2. Check if failed recently
+      const failInfo = sub.failedEpisodes[String(targetEpisode)];
+      if (failInfo) {
+        const failedAt = new Date(failInfo.failedAt).getTime();
+        const timeSinceFailure = Date.now() - failedAt;
+        const retryThreshold = 20 * 60 * 1000; // 20 minutes
+        if (timeSinceFailure < retryThreshold) {
+          console.log(`[Auto-Download] Skipping episode S${String(maxSeason).padStart(2, '0')}E${String(targetEpisode).padStart(2, '0')} for "${sub.title}" because it failed recently (${Math.round(timeSinceFailure / 60000)}m ago).`);
+          continue; // Try next candidate
+        }
+      }
+
+      // 3. Construct target filename
+      const targetFilename = getTargetFilename(templateFilename, targetEpisode);
+      if (!targetFilename) {
+        console.log(`[Auto-Download] Could not construct target filename for "${sub.title}" episode ${targetEpisode}`);
+        continue;
+      }
+
+      console.log(`[Auto-Download] Searching S${String(maxSeason).padStart(2, '0')}E${String(targetEpisode).padStart(2, '0')} for "${sub.title}": "${targetFilename}"`);
       
-      // Start download
+      const seasonStr = String(maxSeason).padStart(2, '0');
+      const epStr = String(targetEpisode).padStart(2, '0');
+      const queryStr = `${sub.title} S${seasonStr}E${epStr}`;
+      
+      let searchResults = [];
+      try {
+        searchResults = await searchXdccEu(queryStr);
+      } catch (err) {
+        console.error(`[Auto-Download] Search on xdcc.eu failed:`, err.message);
+      }
+      
+      let match = searchResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, targetEpisode, sub.title));
+      
+      if (!match) {
+        console.log(`[Auto-Download] Episode S${seasonStr}E${epStr} not found on xdcc.eu with matching tags. Searching Moviegods IRC...`);
+        try {
+          const mgRes = await searchMoviegodsIRC(queryStr);
+          const mgResults = mgRes.results || [];
+          match = mgResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, targetEpisode, sub.title));
+        } catch (err) {
+          console.error(`[Auto-Download] Moviegods search failed:`, err.message);
+        }
+      }
+      
+      if (!match) {
+        console.log(`[Auto-Download] Episode ${queryStr} matching template tags not found. Marking S${seasonStr}E${epStr} as failed.`);
+        markEpisodeFailed(sub.imdbId, targetEpisode, 'search_no_match');
+        continue; // Try next candidate
+      }
+
+      // Found a match!
+      console.log(`[Auto-Download] FOUND MATCH for S${seasonStr}E${epStr}! Starting download for: ${match.filename}`);
+      
       const downloadId = `${match.server}_${match.channel}_${match.botName}_${match.packNumber}_${match.filename.replace(/\s+/g, '_')}`;
       const resolvedUseSSL = appConfig.useSSLByDefault;
       const resolvedPort = resolvedUseSSL ? appConfig.ircPortDefaultSSL : appConfig.ircPortDefaultNoSSL;
@@ -1411,9 +1514,12 @@ async function checkSingleShow(sub, mediaFiles) {
         if (data.status === 'completed' && !downloader._extractionStarted) {
           downloader._extractionStarted = true;
           handleDownloadPostProcessing(downloadId, downloader);
-          
-          // Trigger a check for the next episode shortly after this one completes!
+          clearEpisodeFailure(sub.imdbId, targetEpisode);
           setTimeout(checkAllAutoDownloads, 30000);
+        } else if (data.status === 'error') {
+          console.log(`[Auto-Download] Download ${downloadId} failed with error. Marking S${seasonStr}E${epStr} as failed.`);
+          markEpisodeFailed(sub.imdbId, targetEpisode, `download_error: ${data.errorMessage || 'Unknown error'}`);
+          setTimeout(checkAllAutoDownloads, 5000);
         } else {
           broadcastStatus(downloadId);
         }
@@ -1427,9 +1533,21 @@ async function checkSingleShow(sub, mediaFiles) {
         });
       });
       
-      downloadQueue.set(downloadId, { downloader });
-      broadcastStatus(downloadId); // Immediately notify client that download has queued/started
+      // Save metadata and auto flag in queue
+      downloadQueue.set(downloadId, {
+        downloader,
+        isAuto: true,
+        imdbId: sub.imdbId,
+        season: maxSeason,
+        episode: targetEpisode,
+        startedAt: Date.now()
+      });
+      
+      broadcastStatus(downloadId);
       downloader.start();
+      
+      // Clear failure history since download succeeded
+      clearEpisodeFailure(sub.imdbId, targetEpisode);
       
       // Send a system message to all clients about the automatic start
       wss.clients.forEach((client) => {
@@ -1443,8 +1561,9 @@ async function checkSingleShow(sub, mediaFiles) {
           }));
         }
       });
-    } else {
-      console.log(`[Auto-Download] Search results found, but none matched the tags (Language, Resolution, Source, Codec) of the template: "${templateFilename}"`);
+      
+      startedAnyDownload = true;
+      break; // Only start one download at a time per show per run
     }
   } catch (subErr) {
     console.error(`[Auto-Download] Error processing "${sub.title}":`, subErr);
@@ -2242,6 +2361,9 @@ server.listen(PORT, '0.0.0.0', () => {
 
   // Setup interval check from configuration
   recreateCheckInterval();
+
+  // Start background timeout checker for auto-downloads
+  setInterval(checkDownloadsTimeout, 30 * 1000);
 
   // Trigger initial check after 5 seconds
   setTimeout(checkAllAutoDownloads, 5000);
