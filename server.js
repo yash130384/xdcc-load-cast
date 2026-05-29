@@ -26,7 +26,8 @@ let appConfig = {
   useSSLByDefault: true,
   ircPortDefaultSSL: 6697,
   ircPortDefaultNoSSL: 6667,
-  keepDays: 0
+  keepDays: 0,
+  checkIntervalHours: 3
 };
 
 // Chromecast discovery setup
@@ -355,34 +356,16 @@ function searchMoviegodsIRC(queryStr) {
   });
 }
 
-// 1. Search endpoint
-app.get('/api/search', async (req, res) => {
-  const query = req.query.q;
-  const source = req.query.source || 'xdcc';
-
-  if (!query) {
-    return res.status(400).json({ error: 'Suchbegriff fehlt' });
-  }
-
-  if (source === 'moviegods') {
-    try {
-      console.log(`Searching Moviegods IRC for: ${query}`);
-      const data = await searchMoviegodsIRC(query);
-      return res.json(data);
-    } catch (error) {
-      console.error('Moviegods search error:', error.message);
-      return res.status(500).json({ error: `Fehler bei der Suche auf Moviegods IRC: ${error.message}` });
-    }
-  }
-
-  // Fallback to xdcc.eu search
+// Reusable xdcc.eu search helper
+async function searchXdccEu(queryStr) {
   try {
-    console.log(`Searching xdcc.eu for: ${query}`);
+    console.log(`Searching xdcc.eu for: ${queryStr}`);
     const response = await axios.get(`https://www.xdcc.eu/search.php`, {
-      params: { searchkey: query },
+      params: { searchkey: queryStr },
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-      }
+      },
+      timeout: 10000
     });
 
     const $ = cheerio.load(response.data);
@@ -402,7 +385,6 @@ app.get('/api/search', async (req, res) => {
       const botName = commandParts[0];
       const packCommand = commandParts.slice(1).join(' ');
 
-      // Extract pack number (could be like "#42" or "42")
       const packNumberMatch = packCommand.match(/#?(\d+)/);
       const packNumber = packNumberMatch ? packNumberMatch[1] : '';
 
@@ -428,6 +410,36 @@ app.get('/api/search', async (req, res) => {
       });
     });
 
+    return results;
+  } catch (error) {
+    console.error('Search xdcc.eu error:', error.message);
+    return [];
+  }
+}
+
+// 1. Search endpoint
+app.get('/api/search', async (req, res) => {
+  const query = req.query.q;
+  const source = req.query.source || 'xdcc';
+
+  if (!query) {
+    return res.status(400).json({ error: 'Suchbegriff fehlt' });
+  }
+
+  if (source === 'moviegods') {
+    try {
+      console.log(`Searching Moviegods IRC for: ${query}`);
+      const data = await searchMoviegodsIRC(query);
+      return res.json(data);
+    } catch (error) {
+      console.error('Moviegods search error:', error.message);
+      return res.status(500).json({ error: `Fehler bei der Suche auf Moviegods IRC: ${error.message}` });
+    }
+  }
+
+  // Fallback to xdcc.eu search
+  try {
+    const results = await searchXdccEu(query);
     return res.json({ type: 'search', results: results });
   } catch (error) {
     console.error('Search error:', error.message);
@@ -447,7 +459,7 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
-  const { downloadDir, useSSLByDefault, keepDays } = req.body;
+  const { downloadDir, useSSLByDefault, keepDays, checkIntervalHours } = req.body;
   if (downloadDir) {
     appConfig.downloadDir = path.resolve(downloadDir);
   }
@@ -457,8 +469,73 @@ app.post('/api/settings', (req, res) => {
   if (typeof keepDays === 'number' && keepDays >= 0) {
     appConfig.keepDays = keepDays;
   }
+  if (typeof checkIntervalHours === 'number' && checkIntervalHours > 0) {
+    appConfig.checkIntervalHours = checkIntervalHours;
+    recreateCheckInterval();
+  }
   saveConfig();
   return res.json(appConfig);
+});
+
+// Auto-Download endpoints
+app.get('/api/auto-download', (req, res) => {
+  loadAutoDownloads();
+  return res.json(autoDownloads);
+});
+
+app.post('/api/auto-download/toggle', (req, res) => {
+  const { imdbId, title, enabled } = req.body;
+  if (!imdbId || !title) {
+    return res.status(400).json({ error: 'Fehlende Parameter imdbId oder title' });
+  }
+
+  loadAutoDownloads();
+  
+  if (!autoDownloads[imdbId]) {
+    autoDownloads[imdbId] = {
+      imdbId,
+      title,
+      enabled: false,
+      addedAt: new Date().toISOString()
+    };
+  }
+
+  autoDownloads[imdbId].enabled = !!enabled;
+  saveAutoDownloads();
+  
+  // Broadcast updated subscriptions to all connected clients
+  broadcastAutoDownloads();
+
+  // If enabled, trigger a check immediately in the background
+  if (enabled) {
+    console.log(`[Auto-Download] Enabled for "${title}" (${imdbId}). Triggering check...`);
+    checkAllAutoDownloads();
+  }
+
+  return res.json(autoDownloads[imdbId]);
+});
+
+app.post('/api/auto-download/check-now', async (req, res) => {
+  const { imdbId } = req.body;
+  if (!imdbId) {
+    return res.status(400).json({ error: 'Fehlende Parameter imdbId' });
+  }
+
+  loadAutoDownloads();
+  const sub = autoDownloads[imdbId];
+  if (!sub) {
+    return res.status(404).json({ error: 'Kein Abonnement für diese IMDb-ID gefunden' });
+  }
+
+  console.log(`[Auto-Download] Manual 'Search now' triggered for "${sub.title}" (${imdbId})`);
+
+  scanDownloadDir().then(mediaFiles => {
+    checkSingleShow(sub, mediaFiles);
+  }).catch(err => {
+    console.error(`[Auto-Download] Error scanning during manual check:`, err.message);
+  });
+
+  return res.json({ success: true, message: 'Suche gestartet' });
 });
 
 async function findAndExtractRarFiles(dir, sendLog) {
@@ -1016,6 +1093,362 @@ function saveMetadataCache() {
 }
 
 loadMetadataCache();
+
+// --- Auto-Download Feature ---
+let autoDownloads = {};
+const tvmazeCache = {};
+let checkIntervalTimer = null;
+
+function recreateCheckInterval() {
+  if (checkIntervalTimer) {
+    clearInterval(checkIntervalTimer);
+  }
+  const hours = appConfig.checkIntervalHours || 3;
+  console.log(`[Auto-Download] Setting query interval to ${hours} hours.`);
+  checkIntervalTimer = setInterval(checkAllAutoDownloads, hours * 60 * 60 * 1000);
+}
+
+function getAutoDownloadsPath() {
+  return path.join(appConfig.downloadDir, '.auto_downloads.json');
+}
+
+function loadAutoDownloads() {
+  const filePath = getAutoDownloadsPath();
+  if (fs.existsSync(filePath)) {
+    try {
+      autoDownloads = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+      console.log(`[Auto-Download] Loaded subscriptions from ${filePath} (${Object.keys(autoDownloads).length} items)`);
+    } catch (e) {
+      console.error('Error loading auto downloads file:', e);
+      autoDownloads = {};
+    }
+  } else {
+    autoDownloads = {};
+  }
+}
+
+function saveAutoDownloads() {
+  const filePath = getAutoDownloadsPath();
+  try {
+    if (!fs.existsSync(appConfig.downloadDir)) {
+      fs.mkdirSync(appConfig.downloadDir, { recursive: true });
+    }
+    fs.writeFileSync(filePath, JSON.stringify(autoDownloads, null, 2), 'utf8');
+  } catch (e) {
+    console.error('Error saving auto downloads file:', e);
+  }
+}
+
+function broadcastAutoDownloads() {
+  const message = JSON.stringify({ type: 'auto-downloads', data: autoDownloads });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // OPEN
+      client.send(message);
+    }
+  });
+}
+
+function parseSeasonEpisodeNumber(seStr) {
+  if (!seStr) return null;
+  let match = seStr.match(/S(\d+)E(\d+)/i);
+  if (match) {
+    return {
+      season: parseInt(match[1], 10),
+      episode: parseInt(match[2], 10)
+    };
+  }
+  match = seStr.match(/(\d+)X(\d+)/i);
+  if (match) {
+    return {
+      season: parseInt(match[1], 10),
+      episode: parseInt(match[2], 10)
+    };
+  }
+  return null;
+}
+
+function getTargetFilename(originalFilename, targetEpNum) {
+  const seriesPattern = /(s\d{1,2}\s?e\d+|\d{1,2}x\d+)/i;
+  const match = originalFilename.match(seriesPattern);
+  if (!match) return null;
+  
+  const epMatch = match[0].match(/([EeXx])(\d+)/);
+  if (!epMatch) return null;
+  
+  const prefix = epMatch[1]; // E or x
+  const digits = epMatch[2]; // e.g. 03
+  const padding = digits.length;
+  const newEpStr = prefix + String(targetEpNum).padStart(padding, '0');
+  
+  const newSeriesStr = match[0].replace(epMatch[0], newEpStr);
+  return originalFilename.replace(match[0], newSeriesStr);
+}
+
+function matchTagBased(templateFilename, resultFilename, targetSeason, targetEpisode, showTitle) {
+  // 1. Verify season and episode
+  const parsedResult = parseFilename(resultFilename);
+  if (!parsedResult.isSeries) return false;
+  
+  const se = parseSeasonEpisodeNumber(parsedResult.seasonEpisode);
+  if (!se || se.season !== targetSeason || se.episode !== targetEpisode) {
+    return false;
+  }
+
+  // 2. Verify show title is present in result (normalized)
+  const normShowTitle = showTitle.toLowerCase().replace(/[^a-z0-9]/g, '');
+  const normResultFile = resultFilename.toLowerCase().replace(/[^a-z0-9]/g, '');
+  if (!normResultFile.includes(normShowTitle)) {
+    return false;
+  }
+
+  // 3. Clean strings for tag boundaries (replace non-alphanumeric with spaces)
+  const cleanTemplate = templateFilename.replace(/[^a-zA-Z0-9]/g, ' ');
+  const cleanResult = resultFilename.replace(/[^a-zA-Z0-9]/g, ' ');
+
+  // 4. Define target matching tags
+  const RESOLUTIONS = ['2160p', '1080p', '720p', '4k', 'uhd', '576p', 'sd'];
+  const LANGUAGES = ['german', 'english', 'french', 'multi', 'dl', 'dubbed', 'dual'];
+  const SOURCES = ['web-dl', 'webrip', 'web', 'bluray', 'hdtv', 'dvdrip', 'bdrip', 'dsr'];
+  const CODECS = ['x264', 'x265', 'h264', 'h265', 'hevc', 'av1'];
+
+  const tagGroups = [RESOLUTIONS, LANGUAGES, SOURCES, CODECS];
+
+  for (const group of tagGroups) {
+    // Find if template contains a tag from this group
+    const templateTag = group.find(tag => {
+      const regex = new RegExp(`\\b${tag}\\b`, 'i');
+      return regex.test(cleanTemplate);
+    });
+
+    if (templateTag) {
+      // If template contains this tag, result must also contain it
+      const regex = new RegExp(`\\b${templateTag}\\b`, 'i');
+      if (!regex.test(cleanResult)) {
+        return false; // Tag missing in result
+      }
+    }
+  }
+
+  return true;
+}
+
+async function getTvmazeEpisodeCount(imdbId, seasonNumber) {
+  const cacheKey = `${imdbId}_${seasonNumber}`;
+  if (tvmazeCache[cacheKey] !== undefined) {
+    return tvmazeCache[cacheKey];
+  }
+  
+  try {
+    console.log(`[TVmaze] Fetching episodes for IMDb ID ${imdbId}, Season ${seasonNumber}...`);
+    const lookupUrl = `https://api.tvmaze.com/lookup/shows?imdb=${imdbId}`;
+    const res = await axios.get(lookupUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+      },
+      timeout: 5000
+    });
+    
+    if (res.status === 200 && res.data && res.data.id) {
+      const showId = res.data.id;
+      const episodesUrl = `https://api.tvmaze.com/shows/${showId}/episodes`;
+      const epRes = await axios.get(episodesUrl, { timeout: 5000 });
+      if (epRes.status === 200 && Array.isArray(epRes.data)) {
+        const seasonEpisodes = epRes.data.filter(ep => ep.season === seasonNumber);
+        const count = seasonEpisodes.length;
+        console.log(`[TVmaze] Found ${count} episodes for IMDb ID ${imdbId}, Season ${seasonNumber}`);
+        tvmazeCache[cacheKey] = count;
+        return count;
+      }
+    }
+  } catch (err) {
+    console.error(`[TVmaze] Error fetching for IMDb ID ${imdbId}:`, err.message);
+  }
+  return null;
+}
+
+async function checkAllAutoDownloads() {
+  console.log(`[Auto-Download] Starting auto-download check...`);
+  loadAutoDownloads();
+  
+  const subscriptions = Object.values(autoDownloads).filter(sub => sub.enabled);
+  if (subscriptions.length === 0) {
+    console.log(`[Auto-Download] No active subscriptions.`);
+    return;
+  }
+  
+  const mediaFiles = await scanDownloadDir();
+  for (const sub of subscriptions) {
+    await checkSingleShow(sub, mediaFiles);
+  }
+}
+
+async function checkSingleShow(sub, mediaFiles) {
+  try {
+    console.log(`[Auto-Download] Checking show: "${sub.title}" (IMDb: ${sub.imdbId})`);
+    
+    const showFiles = mediaFiles.filter(file => file.metadata && file.metadata.imdbId === sub.imdbId);
+    if (showFiles.length === 0) {
+      console.log(`[Auto-Download] No files found for "${sub.title}" in library. Cannot check next episode.`);
+      return;
+    }
+    
+    const parsedFiles = showFiles.map(file => {
+      const se = parseSeasonEpisodeNumber(file.metadata.seasonEpisode);
+      return {
+        file,
+        season: se ? se.season : null,
+        episode: se ? se.episode : null
+      };
+    }).filter(x => x.season !== null && x.episode !== null);
+    
+    if (parsedFiles.length === 0) {
+      console.log(`[Auto-Download] No files with valid SxxExx structure for "${sub.title}".`);
+      return;
+    }
+    
+    // Highest season
+    const maxSeason = Math.max(...parsedFiles.map(x => x.season));
+    const currentSeasonFiles = parsedFiles.filter(x => x.season === maxSeason);
+    const maxEpisode = Math.max(...currentSeasonFiles.map(x => x.episode));
+    
+    console.log(`[Auto-Download] Current state for "${sub.title}": Season ${maxSeason}, Episode ${maxEpisode}. Total downloaded in season: ${currentSeasonFiles.length}`);
+    
+    // Check if season is complete using TVmaze
+    const totalEpisodes = await getTvmazeEpisodeCount(sub.imdbId, maxSeason);
+    if (totalEpisodes !== null && currentSeasonFiles.length >= totalEpisodes) {
+      console.log(`[Auto-Download] Season ${maxSeason} of "${sub.title}" is complete (${currentSeasonFiles.length}/${totalEpisodes} episodes). Stopping auto-download.`);
+      autoDownloads[sub.imdbId].enabled = false;
+      saveAutoDownloads();
+      
+      // Broadcast change to client
+      broadcastAutoDownloads();
+      return;
+    }
+    
+    // Target next episode
+    const nextEpisode = maxEpisode + 1;
+    
+    // Check if it's already in downloadQueue
+    let isAlreadyDownloading = false;
+    for (const item of downloadQueue.values()) {
+      const dl = item.downloader;
+      if (dl.status !== 'completed' && dl.status !== 'error' && dl.status !== 'cancelled') {
+        const parsed = parseFilename(dl.filename);
+        if (parsed.isSeries) {
+          const se = parseSeasonEpisodeNumber(parsed.seasonEpisode);
+          if (se && se.season === maxSeason && se.episode === nextEpisode) {
+            isAlreadyDownloading = true;
+            break;
+          }
+        }
+      }
+    }
+    
+    if (isAlreadyDownloading) {
+      console.log(`[Auto-Download] Next episode S${String(maxSeason).padStart(2, '0')}E${String(nextEpisode).padStart(2, '0')} for "${sub.title}" is already in the download queue.`);
+      return;
+    }
+    
+    // Find template filename (the one of maxEpisode)
+    const templateFile = currentSeasonFiles.find(x => x.episode === maxEpisode)?.file || currentSeasonFiles[0].file;
+    const templateFilename = path.basename(templateFile.filename);
+    const targetFilename = getTargetFilename(templateFilename, nextEpisode);
+    if (!targetFilename) {
+      console.log(`[Auto-Download] Could not construct target filename for "${sub.title}" episode ${nextEpisode}`);
+      return;
+    }
+    
+    console.log(`[Auto-Download] Searching for next episode: "${targetFilename}"`);
+    
+    // Search on xdcc.eu first
+    const seasonStr = String(maxSeason).padStart(2, '0');
+    const epStr = String(nextEpisode).padStart(2, '0');
+    const queryStr = `${sub.title} S${seasonStr}E${epStr}`;
+    
+    let searchResults = await searchXdccEu(queryStr);
+    
+    // If not found on xdcc.eu, search on moviegods (IRC)
+    if (searchResults.length === 0) {
+      console.log(`[Auto-Download] Episode not found on xdcc.eu. Searching Moviegods IRC...`);
+      try {
+        const mgRes = await searchMoviegodsIRC(queryStr);
+        searchResults = mgRes.results || [];
+      } catch (err) {
+        console.error(`[Auto-Download] Moviegods search failed:`, err.message);
+      }
+    }
+    
+    if (searchResults.length === 0) {
+      console.log(`[Auto-Download] Episode ${queryStr} not found yet.`);
+      return;
+    }
+    
+    // Find a match by tag-based verification
+    const match = searchResults.find(res => matchTagBased(templateFilename, res.filename, maxSeason, nextEpisode, sub.title));
+    if (match) {
+      console.log(`[Auto-Download] FOUND MATCH! Starting download for: ${match.filename}`);
+      
+      // Start download
+      const downloadId = `${match.server}_${match.channel}_${match.botName}_${match.packNumber}_${match.filename.replace(/\s+/g, '_')}`;
+      const resolvedUseSSL = appConfig.useSSLByDefault;
+      const resolvedPort = resolvedUseSSL ? appConfig.ircPortDefaultSSL : appConfig.ircPortDefaultNoSSL;
+      
+      const downloader = new IrcDccDownloader({
+        id: downloadId,
+        server: match.server,
+        port: resolvedPort,
+        useSSL: resolvedUseSSL,
+        channel: match.channel,
+        botName: match.botName,
+        packNumber: match.packNumber,
+        filename: match.filename,
+        expectedSize: match.sizeBytes,
+        downloadDir: appConfig.downloadDir
+      });
+      
+      downloader.on('progress', (data) => {
+        if (data.status === 'completed' && !downloader._extractionStarted) {
+          downloader._extractionStarted = true;
+          handleDownloadPostProcessing(downloadId, downloader);
+          
+          // Trigger a check for the next episode shortly after this one completes!
+          setTimeout(checkAllAutoDownloads, 30000);
+        } else {
+          broadcastStatus(downloadId);
+        }
+      });
+      
+      downloader.on('message', (data) => {
+        wss.clients.forEach((client) => {
+          if (client.readyState === 1) {
+            client.send(JSON.stringify({ type: 'message', data: { id: downloadId, text: data.text } }));
+          }
+        });
+      });
+      
+      downloadQueue.set(downloadId, { downloader });
+      downloader.start();
+      
+      // Send a system message to all clients about the automatic start
+      wss.clients.forEach((client) => {
+        if (client.readyState === 1) {
+          client.send(JSON.stringify({
+            type: 'message',
+            data: {
+              id: downloadId,
+              text: `[Auto-Download] Neue Folge automatisch gestartet: ${match.filename}`
+            }
+          }));
+        }
+      });
+    } else {
+      console.log(`[Auto-Download] Search results found, but none matched the tags (Language, Resolution, Source, Codec) of the template: "${templateFilename}"`);
+    }
+  } catch (subErr) {
+    console.error(`[Auto-Download] Error processing "${sub.title}":`, subErr);
+  }
+}
+// -----------------------------
 
 const MUSIC_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg']);
 
@@ -1791,6 +2224,9 @@ wss.on('connection', (ws) => {
   }));
   ws.send(JSON.stringify({ type: 'activeCasts', data: activeList }));
 
+  // Send current auto-downloads on connection
+  ws.send(JSON.stringify({ type: 'auto-downloads', data: autoDownloads }));
+
   ws.on('close', () => {
     console.log('WS Client disconnected.');
   });
@@ -1798,4 +2234,13 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server started at http://localhost:${PORT}`);
+
+  // Load auto-downloads from disk
+  loadAutoDownloads();
+
+  // Setup interval check from configuration
+  recreateCheckInterval();
+
+  // Trigger initial check after 5 seconds
+  setTimeout(checkAllAutoDownloads, 5000);
 });

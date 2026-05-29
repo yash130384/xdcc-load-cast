@@ -134,6 +134,11 @@ function App() {
   // Log message store: { downloadId: [string] }
   const [downloadLogs, setDownloadLogs] = useState({});
 
+  // Auto-downloads state
+  const [autoDownloads, setAutoDownloads] = useState({});
+  const [tempCheckIntervalHours, setTempCheckIntervalHours] = useState(3);
+  const [checkingShowId, setCheckingShowId] = useState(null);
+
   const wsRef = useRef(null);
 
   // Initialize and WebSockets setup
@@ -146,6 +151,7 @@ function App() {
         setTempDownloadDir(data.downloadDir);
         setTempUseSSL(data.useSSLByDefault);
         setTempKeepDays(data.keepDays || 0);
+        setTempCheckIntervalHours(data.checkIntervalHours || 3);
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -162,6 +168,12 @@ function App() {
 
     // Fetch local Media Library files
     fetchMediaLibrary();
+
+    // Fetch initial auto downloads
+    fetch('/api/auto-download')
+      .then(res => res.json())
+      .then(data => setAutoDownloads(data))
+      .catch(err => console.error('Error fetching auto downloads:', err));
 
     // Connect WebSocket
     const connectWS = () => {
@@ -224,6 +236,8 @@ function App() {
             });
             return changed ? copy : prev;
           });
+        } else if (message.type === 'auto-downloads') {
+          setAutoDownloads(message.data);
         }
       };
 
@@ -402,6 +416,27 @@ function App() {
         })
         .catch(err => console.error('Error deleting library file:', err));
     }
+  };
+
+  const handleToggleAutoDownload = (imdbId, title, enabled) => {
+    fetch('/api/auto-download/toggle', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ imdbId, title, enabled })
+    })
+      .then(res => res.json())
+      .then(data => {
+        setAutoDownloads(prev => ({
+          ...prev,
+          [imdbId]: data
+        }));
+      })
+      .catch(err => {
+        console.error('Error toggling auto download:', err);
+        alert('Fehler beim Ändern des Suchauftrags: ' + err.message);
+      });
   };
 
   const getObsoleteFiles = () => {
@@ -699,7 +734,8 @@ function App() {
       body: JSON.stringify({
         downloadDir: tempDownloadDir,
         useSSLByDefault: tempUseSSL,
-        keepDays: parseInt(tempKeepDays, 10) || 0
+        keepDays: parseInt(tempKeepDays, 10) || 0,
+        checkIntervalHours: parseInt(tempCheckIntervalHours, 10) || 3
       })
     })
       .then(res => res.json())
@@ -710,6 +746,33 @@ function App() {
       })
       .catch(err => {
         alert(`Einstellungen konnten nicht gespeichert werden: ${err.message}`);
+      });
+  };
+
+  const handleCheckNow = (imdbId) => {
+    setCheckingShowId(imdbId);
+    fetch('/api/auto-download/check-now', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ imdbId })
+    })
+      .then(res => {
+        if (!res.ok) {
+          throw new Error('Suche konnte nicht gestartet werden');
+        }
+        return res.json();
+      })
+      .then(() => {
+        setTimeout(() => {
+          setCheckingShowId(null);
+        }, 1500);
+      })
+      .catch(err => {
+        console.error('Error triggering manual check:', err);
+        alert('Fehler beim Starten der Suche: ' + err.message);
+        setCheckingShowId(null);
       });
   };
 
@@ -791,6 +854,7 @@ function App() {
               setTempDownloadDir(settings.downloadDir);
               setTempUseSSL(settings.useSSLByDefault);
               setTempKeepDays(settings.keepDays || 0);
+              setTempCheckIntervalHours(settings.checkIntervalHours || 3);
               setShowSettings(true);
             }}>
               <SettingsIcon />
@@ -1432,6 +1496,69 @@ function App() {
                                 >
                                   ⭐ Auf IMDb ansehen
                                 </a>
+                              )}
+
+                              {activeSeries.imdbId && (
+                                <div style={{ 
+                                  marginTop: '1.25rem', 
+                                  borderTop: '1px solid rgba(255, 255, 255, 0.08)', 
+                                  paddingTop: '1rem',
+                                  display: 'flex',
+                                  flexDirection: 'column',
+                                  gap: '0.5rem'
+                                }}>
+                                  <label style={{ 
+                                    display: 'flex', 
+                                    alignItems: 'center', 
+                                    gap: '0.6rem', 
+                                    cursor: 'pointer',
+                                    userSelect: 'none',
+                                    fontSize: '0.85rem',
+                                    fontWeight: '500',
+                                    color: 'var(--text-primary)'
+                                  }}>
+                                    <input 
+                                      type="checkbox" 
+                                      checked={!!autoDownloads[activeSeries.imdbId]?.enabled}
+                                      onChange={(e) => handleToggleAutoDownload(activeSeries.imdbId, activeSeries.title, e.target.checked)}
+                                      style={{
+                                        width: '16px',
+                                        height: '16px',
+                                        accentColor: 'var(--accent-pink)',
+                                        cursor: 'pointer',
+                                        borderRadius: '4px'
+                                      }}
+                                    />
+                                    <span>Lade weitere Folgen</span>
+                                  </label>
+                                  <div style={{ fontSize: '0.725rem', color: 'var(--text-muted)', lineHeight: '1.35' }}>
+                                    {autoDownloads[activeSeries.imdbId]?.enabled ? (
+                                      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                                        <span style={{ color: 'var(--accent-pink)', fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
+                                          ● Aktiv (prüft alle {settings.checkIntervalHours || 3} Std.)
+                                        </span>
+                                        <button
+                                          className="btn btn-secondary"
+                                          onClick={() => handleCheckNow(activeSeries.imdbId)}
+                                          disabled={checkingShowId === activeSeries.imdbId}
+                                          style={{
+                                            padding: '0.3rem 0.6rem',
+                                            fontSize: '0.7rem',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            gap: '0.3rem',
+                                            width: 'fit-content',
+                                            marginTop: '0.2rem'
+                                          }}
+                                        >
+                                          {checkingShowId === activeSeries.imdbId ? '🔍 Suche läuft...' : '🔍 Jetzt suchen'}
+                                        </button>
+                                      </div>
+                                    ) : (
+                                      `Prüft alle ${settings.checkIntervalHours || 3} Std. auf neue Folgen desselben Formats und lädt diese automatisch herunter.`
+                                    )}
+                                  </div>
+                                </div>
                               )}
                             </div>
                           </div>
@@ -2181,6 +2308,21 @@ function App() {
                 />
                 <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                   Gibt an, wie viele Tage Dateien in der Mediathek behalten werden. 0 deaktiviert die automatische Löschung.
+                </span>
+              </div>
+
+              <div className="form-group" style={{ marginTop: '0.5rem' }}>
+                <label>Abfrageintervall für neue Folgen (Stunden)</label>
+                <input
+                  type="number"
+                  className="input-text"
+                  value={tempCheckIntervalHours}
+                  onChange={(e) => setTempCheckIntervalHours(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                  min="1"
+                  placeholder="3"
+                />
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Gibt an, wie oft (in Stunden) automatisch nach neuen Folgen gesucht werden soll.
                 </span>
               </div>
 
