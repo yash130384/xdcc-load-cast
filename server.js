@@ -96,7 +96,9 @@ let appConfig = {
   xtreamUsername: '',
   xtreamPassword: '',
   xtreamEnabled: false,
-  xtreamSyncIntervalHours: 1
+  xtreamSyncIntervalHours: 1,
+  xxxHideEnabled: false,
+  xxxPin: '0000'
 };
 
 // Chromecast discovery setup
@@ -122,8 +124,18 @@ startChromecastDiscovery();
 let xtreamMovies = [];
 let xtreamSeries = [];
 let xtreamLive = [];
+let xtreamVodCategories = [];
+let xtreamSeriesCategories = [];
+let xtreamLiveCategories = [];
 let lastXtreamFetch = 0;
 let xtreamSyncTimer = null;
+
+function isAdultContent(subcategory, title) {
+  const adultKeywords = ['xxx', 'adult', '18+', 'porn', 'erotik', 'redlight', 'pink', 'explicito', 'sensual', 'hot', 'erotic', 'hentai', 'lust', 'sxt'];
+  const cat = (subcategory || '').toLowerCase();
+  const t = (title || '').toLowerCase();
+  return adultKeywords.some(kw => cat.includes(kw) || t.includes(kw));
+}
 
 function broadcastXtreamSyncComplete() {
   if (typeof wss !== 'undefined' && wss && wss.clients) {
@@ -163,6 +175,59 @@ async function fetchXtreamData(force = false) {
   
   try {
     const host = appConfig.xtreamHost.replace(/\/$/, '');
+    
+    // Fetch categories first
+    console.log(`[Xtream] Fetching movies categories from ${host}...`);
+    try {
+      const moviesCatRes = await axios.get(`${host}/player_api.php`, {
+        params: {
+          username: appConfig.xtreamUsername,
+          password: appConfig.xtreamPassword,
+          action: 'get_vod_categories'
+        },
+        timeout: 10000
+      });
+      if (Array.isArray(moviesCatRes.data)) {
+        xtreamVodCategories = moviesCatRes.data;
+      }
+    } catch (err) {
+      console.error('[Xtream] Error fetching VOD categories:', err.message);
+    }
+
+    console.log(`[Xtream] Fetching series categories from ${host}...`);
+    try {
+      const seriesCatRes = await axios.get(`${host}/player_api.php`, {
+        params: {
+          username: appConfig.xtreamUsername,
+          password: appConfig.xtreamPassword,
+          action: 'get_series_categories'
+        },
+        timeout: 10000
+      });
+      if (Array.isArray(seriesCatRes.data)) {
+        xtreamSeriesCategories = seriesCatRes.data;
+      }
+    } catch (err) {
+      console.error('[Xtream] Error fetching series categories:', err.message);
+    }
+
+    console.log(`[Xtream] Fetching live categories from ${host}...`);
+    try {
+      const liveCatRes = await axios.get(`${host}/player_api.php`, {
+        params: {
+          username: appConfig.xtreamUsername,
+          password: appConfig.xtreamPassword,
+          action: 'get_live_categories'
+        },
+        timeout: 10000
+      });
+      if (Array.isArray(liveCatRes.data)) {
+        xtreamLiveCategories = liveCatRes.data;
+      }
+    } catch (err) {
+      console.error('[Xtream] Error fetching live categories:', err.message);
+    }
+
     console.log(`[Xtream] Fetching movies list from ${host}...`);
     const moviesRes = await axios.get(`${host}/player_api.php`, {
       params: {
@@ -190,7 +255,7 @@ async function fetchXtreamData(force = false) {
     if (Array.isArray(seriesRes.data)) {
       xtreamSeries = seriesRes.data;
     }
-
+ 
     console.log(`[Xtream] Fetching live channels list from ${host}...`);
     const liveRes = await axios.get(`${host}/player_api.php`, {
       params: {
@@ -626,11 +691,39 @@ app.get('/api/downloads', (req, res) => {
 
 // 3. Settings endpoints
 app.get('/api/settings', (req, res) => {
-  return res.json(appConfig);
+  const publicConfig = { ...appConfig };
+  delete publicConfig.xxxPin;
+  return res.json(publicConfig);
 });
 
 app.post('/api/settings', (req, res) => {
-  const { downloadDir, useSSLByDefault, keepDays, checkIntervalHours, xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled, xtreamSyncIntervalHours } = req.body;
+  const { 
+    downloadDir, useSSLByDefault, keepDays, checkIntervalHours, 
+    xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled, xtreamSyncIntervalHours,
+    xxxHideEnabled, pin, newPin
+  } = req.body;
+
+  // Verify PIN if we are disabling the lock (changing xxxHideEnabled from true to false)
+  if (appConfig.xxxHideEnabled && xxxHideEnabled === false) {
+    if (pin !== appConfig.xxxPin) {
+      return res.status(403).json({ error: 'Falscher Sperrcode!' });
+    }
+  }
+
+  // Change PIN if requested
+  if (newPin !== undefined && newPin !== '') {
+    // If a PIN is currently active, verify it
+    if (appConfig.xxxPin !== '' && pin !== appConfig.xxxPin) {
+      return res.status(403).json({ error: 'Falscher Sperrcode!' });
+    }
+    appConfig.xxxPin = newPin;
+    console.log('[Jugendschutz] Sperrcode wurde geändert.');
+  }
+
+  if (xxxHideEnabled !== undefined) {
+    appConfig.xxxHideEnabled = !!xxxHideEnabled;
+  }
+
   if (downloadDir) {
     appConfig.downloadDir = path.resolve(downloadDir);
   }
@@ -662,7 +755,9 @@ app.post('/api/settings', (req, res) => {
     fetchXtreamData().catch(err => console.error('[Xtream] Settings update fetch error:', err.message));
   }
 
-  return res.json(appConfig);
+  const publicConfig = { ...appConfig };
+  delete publicConfig.xxxPin;
+  return res.json(publicConfig);
 });
 
 // 4. Logs endpoint
@@ -2010,6 +2105,22 @@ async function scanDownloadDir() {
 app.get('/api/media-library', async (req, res) => {
   const list = await scanDownloadDir();
   
+  // Map local files to category 'Lokal'
+  const mappedList = list.map(item => {
+    if (item.metadata) {
+      item.metadata.originalCategory = item.metadata.category || 'Videos';
+      item.metadata.category = 'Lokal';
+    } else {
+      const ext = path.extname(item.filename).toLowerCase();
+      item.metadata = {
+        title: path.parse(item.filename).name,
+        category: 'Lokal',
+        originalCategory: MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos'
+      };
+    }
+    return item;
+  });
+  
   if (appConfig.xtreamEnabled && appConfig.xtreamHost && appConfig.xtreamUsername && appConfig.xtreamPassword) {
     if (xtreamMovies.length === 0 && xtreamSeries.length === 0 && xtreamLive.length === 0 && lastXtreamFetch === 0) {
       fetchXtreamData().catch(err => console.error('[Xtream] Async fetch in library handler:', err.message));
@@ -2017,10 +2128,16 @@ app.get('/api/media-library', async (req, res) => {
     
     const host = appConfig.xtreamHost.replace(/\/$/, '');
     
+    // Build category maps for lookup
+    const vodCatMap = new Map(xtreamVodCategories.map(c => [String(c.category_id), c.category_name]));
+    const seriesCatMap = new Map(xtreamSeriesCategories.map(c => [String(c.category_id), c.category_name]));
+    const liveCatMap = new Map(xtreamLiveCategories.map(c => [String(c.category_id), c.category_name]));
+    
     // Map movies (ALL)
-    const mappedMovies = xtreamMovies.map(movie => {
+    let mappedMovies = xtreamMovies.map(movie => {
       const ext = movie.container_extension || 'mp4';
       const streamUrl = `${host}/movie/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${movie.stream_id}.${ext}`;
+      const subcat = vodCatMap.get(String(movie.category_id)) || 'Sonstige';
       return {
         filename: streamUrl, // Stream URL directly as filename
         sizeBytes: 0,
@@ -2031,6 +2148,7 @@ app.get('/api/media-library', async (req, res) => {
           title: movie.name,
           posterUrl: movie.stream_icon,
           category: 'Filme',
+          subcategory: subcat,
           cast: 'Xtream Codes Movie',
           year: movie.rating ? `Rating: ${movie.rating}` : null
         }
@@ -2038,7 +2156,8 @@ app.get('/api/media-library', async (req, res) => {
     });
     
     // Map series (ALL)
-    const mappedSeries = xtreamSeries.map(series => {
+    let mappedSeries = xtreamSeries.map(series => {
+      const subcat = seriesCatMap.get(String(series.category_id)) || 'Sonstige';
       return {
         filename: `xtream_series_${series.series_id}`,
         isGroup: true,
@@ -2047,22 +2166,25 @@ app.get('/api/media-library', async (req, res) => {
         title: series.name,
         posterUrl: series.cover,
         category: 'Serien',
+        subcategory: subcat,
         cast: series.plot || 'Xtream Codes Series',
         year: series.rating ? `Rating: ${series.rating}` : null,
         metadata: {
           title: series.name,
           posterUrl: series.cover,
           category: 'Serien',
+          subcategory: subcat,
           cast: series.plot || 'Xtream Codes Series',
           year: series.rating ? `Rating: ${series.rating}` : null
         },
         files: [] // loaded on-demand in frontend
       };
     });
-
+ 
     // Map Live TV (ALL)
-    const mappedLive = xtreamLive.map(channel => {
+    let mappedLive = xtreamLive.map(channel => {
       const streamUrl = `${host}/live/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${channel.stream_id}.ts`;
+      const subcat = liveCatMap.get(String(channel.category_id)) || 'Sonstige';
       return {
         filename: streamUrl,
         sizeBytes: 0,
@@ -2074,15 +2196,23 @@ app.get('/api/media-library', async (req, res) => {
           title: channel.name,
           posterUrl: channel.stream_icon,
           category: 'Live TV',
+          subcategory: subcat,
           cast: 'Xtream Live TV Channel'
         }
       };
     });
     
-    return res.json([...list, ...mappedMovies, ...mappedSeries, ...mappedLive]);
+    // Filter out adult content if parental control is active
+    if (appConfig.xxxHideEnabled) {
+      mappedMovies = mappedMovies.filter(m => !isAdultContent(m.metadata.subcategory, m.metadata.title));
+      mappedSeries = mappedSeries.filter(s => !isAdultContent(s.metadata.subcategory, s.metadata.title));
+      mappedLive = mappedLive.filter(l => !isAdultContent(l.metadata.subcategory, l.metadata.title));
+    }
+    
+    return res.json([...mappedList, ...mappedMovies, ...mappedSeries, ...mappedLive]);
   }
   
-  return res.json(list);
+  return res.json(mappedList);
 });
 
 app.get('/api/xtream/series-episodes', async (req, res) => {
@@ -2596,6 +2726,34 @@ app.get('/api/media/*', async (req, res) => {
       });
       return;
     }
+  const isTs = ext === '.ts' || filePath.includes('/live/');
+  if (isTs) {
+    console.log(`[Playback] Remuxing TS stream on-the-fly to MP4 for: ${filePath}`);
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Transfer-Encoding': 'chunked'
+    });
+    
+    const ffmpeg = spawn('ffmpeg', [
+      '-i', filePath,
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov',
+      'pipe:1'
+    ]);
+    
+    ffmpeg.stdout.pipe(res);
+    
+    req.on('close', () => {
+      console.log(`[Playback] Client-Verbindung geschlossen, beende ffmpeg für: ${filePath}`);
+      ffmpeg.kill('SIGKILL');
+    });
+    
+    ffmpeg.on('error', (err) => {
+      console.error(`[Playback] ffmpeg-Fehler beim Remuxen des TS-Streams für ${filePath}:`, err);
+    });
+    return;
   }
 
   if (isUrl) {

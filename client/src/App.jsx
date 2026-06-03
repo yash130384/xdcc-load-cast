@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 // Custom inline SVG Icons for zero-dependency and clean layout
 const SearchIcon = () => (
@@ -113,12 +113,13 @@ function App() {
   const [pendingCasts, setPendingCasts] = useState({});
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [mediaLibrary, setMediaLibrary] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
+  const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Lokal' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
+  const [selectedSubcategory, setSelectedSubcategory] = useState('all');
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
   const [currentView, setCurrentView] = useState('downloads'); // 'downloads' | 'library'
   const [activeSeriesId, setActiveSeriesId] = useState(null);
-  const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0 });
+  const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
   
   const [tempDownloadDir, setTempDownloadDir] = useState('');
   const [tempUseSSL, setTempUseSSL] = useState(true);
@@ -126,6 +127,12 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
+  // Parental Control/PIN states
+  const [tempXxxHideEnabled, setTempXxxHideEnabled] = useState(false);
+  const [verifyPin, setVerifyPin] = useState('');
+  const [currentPinInput, setCurrentPinInput] = useState('');
+  const [newPinInput, setNewPinInput] = useState('');
+  
   const [showObsoleteModal, setShowObsoleteModal] = useState(false);
   const [selectedObsoleteFiles, setSelectedObsoleteFiles] = useState([]);
   
@@ -171,6 +178,7 @@ function App() {
         setTempXtreamPassword(data.xtreamPassword || '');
         setTempXtreamEnabled(!!data.xtreamEnabled);
         setTempXtreamSyncIntervalHours(data.xtreamSyncIntervalHours || 1);
+        setTempXxxHideEnabled(!!data.xxxHideEnabled);
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -466,6 +474,31 @@ function App() {
     return mediaLibrary.filter(item => item.mtime < cutoff);
   };
 
+  const availableSubcategories = useMemo(() => {
+    const baseItems = mediaLibrary.filter(item => {
+      const query = librarySearchQuery.toLowerCase();
+      const filenameMatch = item.filename ? item.filename.toLowerCase().includes(query) : false;
+      const titleMatch = (item.metadata?.title || item.title || '').toLowerCase().includes(query);
+      const castMatch = (item.metadata?.cast || item.cast || '').toLowerCase().includes(query);
+      const matchesSearch = filenameMatch || titleMatch || castMatch;
+      
+      if (!matchesSearch) return false;
+      if (selectedCategory === 'all') return true;
+      const cat = item.metadata?.category || item.category || 'Videos';
+      return cat === selectedCategory;
+    });
+    
+    const subcats = new Set();
+    baseItems.forEach(item => {
+      const sub = item.metadata?.subcategory || item.subcategory;
+      if (sub) {
+        subcats.add(sub);
+      }
+    });
+    
+    return ['all', ...Array.from(subcats).sort()];
+  }, [mediaLibrary, selectedCategory, librarySearchQuery]);
+
   const filteredLibrary = mediaLibrary.filter(item => {
     const query = librarySearchQuery.toLowerCase();
     const filenameMatch = item.filename ? item.filename.toLowerCase().includes(query) : false;
@@ -474,9 +507,18 @@ function App() {
     const matchesSearch = filenameMatch || titleMatch || castMatch;
     
     if (!matchesSearch) return false;
-    if (selectedCategory === 'all') return true;
-    const cat = item.metadata?.category || item.category || 'Videos';
-    return cat === selectedCategory;
+    
+    if (selectedCategory !== 'all') {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      if (cat !== selectedCategory) return false;
+    }
+    
+    if (selectedSubcategory !== 'all') {
+      const subcat = item.metadata?.subcategory || item.subcategory || '';
+      if (subcat !== selectedSubcategory) return false;
+    }
+    
+    return true;
   });
 
   const getGroupedLibrary = () => {
@@ -485,8 +527,9 @@ function App() {
 
     filteredLibrary.forEach(item => {
       const category = item.metadata?.category || 'Videos';
+      const originalCategory = item.metadata?.originalCategory || category;
       
-      if (category === 'Serien') {
+      if (category === 'Serien' || originalCategory === 'Serien') {
         if (item.isGroup) {
           // Already a group (e.g. Xtream series)
           const key = item.xtreamSeriesId || item.title;
@@ -505,7 +548,7 @@ function App() {
             year: item.metadata?.year,
             cast: item.metadata?.cast,
             imdbId: item.metadata?.imdbId,
-            category: 'Serien',
+            category: category,
             files: []
           };
         }
@@ -791,17 +834,29 @@ function App() {
         xtreamUsername: tempXtreamUsername,
         xtreamPassword: tempXtreamPassword,
         xtreamEnabled: tempXtreamEnabled,
-        xtreamSyncIntervalHours: parseInt(tempXtreamSyncIntervalHours, 10) || 1
+        xtreamSyncIntervalHours: parseInt(tempXtreamSyncIntervalHours, 10) || 1,
+        xxxHideEnabled: tempXxxHideEnabled,
+        pin: verifyPin || currentPinInput,
+        newPin: newPinInput
       })
     })
-      .then(res => res.json())
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json();
+          throw new Error(errData.error || 'Einstellungen konnten nicht gespeichert werden');
+        }
+        return res.json();
+      })
       .then(data => {
         setSettings(data);
         setShowSettings(false);
+        setVerifyPin('');
+        setCurrentPinInput('');
+        setNewPinInput('');
         fetchMediaLibrary();
       })
       .catch(err => {
-        alert(`Einstellungen konnten nicht gespeichert werden: ${err.message}`);
+        alert(err.message);
       });
   };
 
@@ -1969,43 +2024,75 @@ function App() {
                     <div className="category-tabs-container">
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'all' ? 'active' : ''}`}
-                        onClick={() => setSelectedCategory('all')}
+                        onClick={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); }}
                       >
                         📁 Alle ({mediaLibrary.length})
                       </button>
                       <button 
+                        className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
+                        onClick={() => { setSelectedCategory('Lokal'); setSelectedSubcategory('all'); }}
+                      >
+                        💾 Lokal ({mediaLibrary.filter(item => item.metadata?.category === 'Lokal').length})
+                      </button>
+                      <button 
                         className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
-                        onClick={() => setSelectedCategory('Filme')}
+                        onClick={() => { setSelectedCategory('Filme'); setSelectedSubcategory('all'); }}
                       >
                         🎬 Filme ({mediaLibrary.filter(item => (item.metadata?.category || 'Filme') === 'Filme').length})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
-                        onClick={() => setSelectedCategory('Serien')}
+                        onClick={() => { setSelectedCategory('Serien'); setSelectedSubcategory('all'); }}
                       >
                         📺 Serien ({mediaLibrary.filter(item => item.metadata?.category === 'Serien').length})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}
-                        onClick={() => setSelectedCategory('Videos')}
+                        onClick={() => { setSelectedCategory('Videos'); setSelectedSubcategory('all'); }}
                       >
                         📹 Videos ({mediaLibrary.filter(item => item.metadata?.category === 'Videos').length})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Musik' ? 'active' : ''}`}
-                        onClick={() => setSelectedCategory('Musik')}
+                        onClick={() => { setSelectedCategory('Musik'); setSelectedSubcategory('all'); }}
                       >
                         🎵 Musik ({mediaLibrary.filter(item => item.metadata?.category === 'Musik').length})
                       </button>
                       {settings.xtreamEnabled && (
                         <button 
                           className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
-                          onClick={() => setSelectedCategory('Live TV')}
+                          onClick={() => { setSelectedCategory('Live TV'); setSelectedSubcategory('all'); }}
                         >
                           📡 Live TV ({mediaLibrary.filter(item => item.metadata?.category === 'Live TV').length})
                         </button>
                       )}
                     </div>
+
+                    {/* Subcategories tags container */}
+                    {availableSubcategories.length > 2 && (
+                      <div className="subcategory-tags-container" style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', padding: '0.5rem 0', margin: '0.2rem 0', scrollbarWidth: 'thin' }}>
+                        {availableSubcategories.map(sub => (
+                          <button
+                            key={sub}
+                            className={`subcategory-tag-btn ${selectedSubcategory === sub ? 'active' : ''}`}
+                            onClick={() => setSelectedSubcategory(sub)}
+                            style={{
+                              padding: '0.35rem 0.75rem',
+                              borderRadius: '20px',
+                              border: '1px solid var(--border-color)',
+                              background: selectedSubcategory === sub ? 'var(--grad-cyan-blue)' : 'rgba(255, 255, 255, 0.05)',
+                              color: selectedSubcategory === sub ? '#fff' : 'var(--text-secondary)',
+                              fontSize: '0.75rem',
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.2s'
+                            }}
+                          >
+                            {sub === 'all' ? 'Alle' : sub}
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   {filteredLibrary.length === 0 ? (
@@ -2258,14 +2345,15 @@ function App() {
                         const cast = meta.cast || null;
                         const rawCategory = meta.category || 'Videos';
                         const category = rawCategory === 'Sonstige' ? 'Videos' : rawCategory;
+                        const originalCategory = meta.originalCategory || category;
                         
-                        const isTv = category === 'Serien';
                         const imdbLink = meta.imdbId ? `https://www.imdb.com/title/${meta.imdbId}` : null;
                         
                         let fallbackIcon = '📹';
-                        if (category === 'Filme') fallbackIcon = '🎬';
-                        else if (category === 'Serien') fallbackIcon = '📺';
-                        else if (category === 'Live TV') fallbackIcon = '📡';
+                        if (category === 'Filme' || originalCategory === 'Filme') fallbackIcon = '🎬';
+                        else if (category === 'Serien' || originalCategory === 'Serien') fallbackIcon = '📺';
+                        else if (category === 'Live TV' || originalCategory === 'Live TV') fallbackIcon = '📡';
+                        else if (category === 'Musik' || originalCategory === 'Musik') fallbackIcon = '🎵';
                         
                         return (
                           <div key={idx} className="media-card">
@@ -2290,7 +2378,7 @@ function App() {
                               {/* Badges on Poster */}
                               {year && <span className="media-badge-year">{year}</span>}
                               <span className="media-badge-type">
-                                {category === 'Serien' ? 'Serie' : category === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : 'Video'}
+                                {category === 'Serien' || originalCategory === 'Serien' ? 'Serie' : category === 'Filme' || originalCategory === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : category === 'Musik' || originalCategory === 'Musik' ? 'Musik' : 'Video'}
                               </span>
                               {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
                             </div>
@@ -2589,6 +2677,69 @@ function App() {
                     </div>
                   </div>
                 )}
+              </div>
+
+              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Jugendschutz (XXX-Inhalte)</label>
+                
+                <div className="toggle-group" style={{ padding: '0.25rem 0' }}>
+                  <div className="toggle-group-label">
+                    <span>XXX-Inhalte ausblenden</span>
+                    <span>Blendet Filme, Serien und Live-TV mit adult-Inhalten aus</span>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={tempXxxHideEnabled}
+                      onChange={(e) => {
+                        setTempXxxHideEnabled(e.target.checked);
+                      }}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                {settings.xxxHideEnabled && !tempXxxHideEnabled && (
+                  <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                    <label style={{ fontSize: '0.8rem', color: 'rgba(255, 75, 75, 1)' }}>Sperrcode zur Freigabe</label>
+                    <input
+                      type="password"
+                      className="input-text"
+                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem', borderColor: 'rgba(255, 75, 75, 0.4)' }}
+                      value={verifyPin}
+                      onChange={(e) => setVerifyPin(e.target.value)}
+                      placeholder="Aktuellen Sperrcode eingeben"
+                    />
+                  </div>
+                )}
+
+                <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
+                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '0.25rem' }}>Sperrcode ändern</label>
+                  <div style={{ display: 'flex', gap: '0.5rem' }}>
+                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                      <label style={{ fontSize: '0.7rem' }}>Aktueller Sperrcode</label>
+                      <input
+                        type="password"
+                        className="input-text"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                        value={currentPinInput}
+                        onChange={(e) => setCurrentPinInput(e.target.value)}
+                        placeholder="Aktueller Code"
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
+                      <label style={{ fontSize: '0.7rem' }}>Neuer Sperrcode</label>
+                      <input
+                        type="password"
+                        className="input-text"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                        value={newPinInput}
+                        onChange={(e) => setNewPinInput(e.target.value)}
+                        placeholder="Neuer Code"
+                      />
+                    </div>
+                  </div>
+                </div>
               </div>
 
               <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
