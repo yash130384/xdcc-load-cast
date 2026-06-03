@@ -624,6 +624,8 @@ button, input, select {
 .modal {
   width: 500px;
   max-width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
   background: var(--bg-secondary);
   border: 1px solid var(--glass-border);
   border-radius: 20px;
