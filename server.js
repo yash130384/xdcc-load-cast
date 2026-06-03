@@ -1170,7 +1170,7 @@ async function handleDownloadPostProcessing(id, downloader) {
 
 // 4. Download operations
 app.post('/api/download', (req, res) => {
-  const { server, port, useSSL, channel, botName, packNumber, filename, expectedSize } = req.body;
+  const { server, port, useSSL, channel, botName, packNumber, filename, expectedSize, useSsend } = req.body;
 
   if (!server || !channel || !botName || !packNumber || !filename) {
     return res.status(400).json({ error: 'Fehlende Download-Parameter' });
@@ -1203,7 +1203,8 @@ app.post('/api/download', (req, res) => {
     packNumber,
     filename,
     expectedSize,
-    downloadDir: appConfig.downloadDir
+    downloadDir: appConfig.downloadDir,
+    useSsend: typeof useSsend === 'boolean' ? useSsend : false
   });
 
   downloader.on('progress', (data) => {

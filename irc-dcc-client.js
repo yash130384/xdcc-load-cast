@@ -44,6 +44,8 @@ export class IrcDccDownloader extends EventEmitter {
     this.localSize = 0;
     this.filePath = '';
     this.dccResumeNegotiated = false;
+    this.useSsend = options.useSsend || false;
+    this.isSecureDcc = false;
   }
 
   log(msg) {
@@ -193,7 +195,8 @@ export class IrcDccDownloader extends EventEmitter {
       
       setTimeout(() => {
         if (this.ircSocket && this.ircSocket.writable) {
-          this.ircSocket.write(`PRIVMSG ${this.botName} :xdcc send ${this.packNumber}\r\n`);
+          const reqCmd = this.useSsend ? 'ssend' : 'send';
+          this.ircSocket.write(`PRIVMSG ${this.botName} :xdcc ${reqCmd} ${this.packNumber}\r\n`);
         }
       }, 1000);
       return;
@@ -203,6 +206,21 @@ export class IrcDccDownloader extends EventEmitter {
       const noticeContent = line.substring(line.indexOf(' :', 1) + 2);
       this.log(`Notice received: ${noticeContent}`);
       
+      const noticeLower = noticeContent.toLowerCase();
+      if ((noticeLower.includes('ssend') || noticeLower.includes('secure ssl dcc') || noticeLower.includes('ssl dcc')) && !this.useSsend) {
+        this.log(`Notice indicates secure SSL DCC Sends (SSEND) is required. Switching to xdcc ssend...`);
+        this.useSsend = true;
+        this.emit('message', {
+          id: this.id,
+          text: `[Info] Server/Bot erfordert secure SSL DCC Sends. Wechsel zu xdcc ssend.`
+        });
+        if (this.status === 'requesting' || this.status === 'queued') {
+          if (this.ircSocket && this.ircSocket.writable) {
+            this.ircSocket.write(`PRIVMSG ${this.botName} :xdcc ssend ${this.packNumber}\r\n`);
+          }
+        }
+      }
+
       if (sender.includes(this.botName)) {
         this.emit('message', {
           id: this.id,
@@ -236,8 +254,14 @@ export class IrcDccDownloader extends EventEmitter {
     this.log(`CTCP Received from ${this.botName}: ${ctcpContent}`);
 
     if (ctcpContent.startsWith('DCC SEND ')) {
+      this.isSecureDcc = false;
+      this.handleDccSend(ctcpContent);
+    } else if (ctcpContent.startsWith('DCC SSEND ') || ctcpContent.startsWith('DCC TSEND ') || ctcpContent.startsWith('DCC TSSEND ') || ctcpContent.startsWith('DCC STSEND ')) {
+      this.isSecureDcc = true;
       this.handleDccSend(ctcpContent);
     } else if (ctcpContent.startsWith('DCC ACCEPT ')) {
+      this.handleDccAccept(ctcpContent);
+    } else if (ctcpContent.startsWith('DCC SACCEPT ') || ctcpContent.startsWith('DCC TSACCEPT ')) {
       this.handleDccAccept(ctcpContent);
     } else if (ctcpContent.startsWith('ERR ')) {
       this.handleError(`Bot Fehler: ${ctcpContent.substring(4)}`);
@@ -246,7 +270,14 @@ export class IrcDccDownloader extends EventEmitter {
 
   handleDccSend(ctcpContent) {
     this.updateStatus('dcc_negotiating');
-    const payload = ctcpContent.substring(9); // remove "DCC SEND "
+    
+    let prefixLength = 9; // "DCC SEND "
+    if (ctcpContent.startsWith('DCC SSEND ')) prefixLength = 10;
+    else if (ctcpContent.startsWith('DCC TSEND ')) prefixLength = 10;
+    else if (ctcpContent.startsWith('DCC TSSEND ')) prefixLength = 11;
+    else if (ctcpContent.startsWith('DCC STSEND ')) prefixLength = 11;
+
+    const payload = ctcpContent.substring(prefixLength);
     
     let filename, ipInt, port, size;
     const cleanPayload = payload.trim();
@@ -353,7 +384,8 @@ export class IrcDccDownloader extends EventEmitter {
     if (this.localSize > 0 && this.localSize < this.expectedSize) {
       this.log(`Requesting DCC RESUME for "${this.filename}" at port ${this.dccPort} and position ${this.localSize}...`);
       if (this.ircSocket && this.ircSocket.writable) {
-        this.ircSocket.write(`PRIVMSG ${this.botName} :\x01DCC RESUME "${this.filename}" ${this.dccPort} ${this.localSize}\x01\r\n`);
+        const resumeVerb = this.isSecureDcc ? 'DCC SRESUME' : 'DCC RESUME';
+        this.ircSocket.write(`PRIVMSG ${this.botName} :\x01${resumeVerb} "${this.filename}" ${this.dccPort} ${this.localSize}\x01\r\n`);
         
         this.resumeTimeout = setTimeout(() => {
           this.log('Resume negotiation timed out. Starting download from scratch.');
@@ -378,7 +410,11 @@ export class IrcDccDownloader extends EventEmitter {
     }
 
     this.log(`DCC ACCEPT received: ${ctcpContent}`);
-    const parts = ctcpContent.substring(11).split(' ');
+    let prefixLength = 11; // "DCC ACCEPT "
+    if (ctcpContent.startsWith('DCC SACCEPT ')) prefixLength = 12;
+    else if (ctcpContent.startsWith('DCC TSACCEPT ')) prefixLength = 13;
+
+    const parts = ctcpContent.substring(prefixLength).split(' ');
     const position = parseInt(parts[parts.length - 1], 10);
     const port = parseInt(parts[parts.length - 2], 10);
 
@@ -397,10 +433,23 @@ export class IrcDccDownloader extends EventEmitter {
     const writeFlags = this.dccResumeNegotiated ? 'a' : 'w';
     this.fileStream = fs.createWriteStream(this.filePath, { flags: writeFlags });
 
-    this.dccSocket = net.createConnection({ host: ip, port: port }, () => {
-      this.log(`DCC Connected. Starting file write...`);
-      this.startSpeedCalculator();
-    });
+    const connectionOptions = {
+      host: ip,
+      port: port,
+      rejectUnauthorized: false
+    };
+
+    if (this.isSecureDcc) {
+      this.dccSocket = tls.connect(connectionOptions, () => {
+        this.log(`Secure DCC Connected (SSL/TLS). Starting file write...`);
+        this.startSpeedCalculator();
+      });
+    } else {
+      this.dccSocket = net.createConnection({ host: ip, port: port }, () => {
+        this.log(`DCC Connected. Starting file write...`);
+        this.startSpeedCalculator();
+      });
+    }
 
     this.dccSocket.on('data', (chunk) => {
       this.bytesReceived += chunk.length;
