@@ -2211,27 +2211,21 @@ app.post('/api/media-library/cast/play', async (req, res) => {
     return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden.` });
   }
 
-  const mediaUrl = isUrl ? filename : `http://${getLocalIp()}:${PORT}/api/media/${encodeURIComponent(filename)}`;
+  // Always route through local server endpoint (especially for URLs to handle transcoding and CORS)
+  const mediaUrl = `http://${getLocalIp()}:${PORT}/api/media/${encodeURIComponent(filename)}`;
 
   console.log(`[Chromecast] Casting Library file "${filename}" to "${deviceName}" via ${mediaUrl}`);
 
   // Determine mime type
   let contentType = 'video/mp4';
-  if (!isUrl) {
-    const ext = path.extname(filename).toLowerCase();
-    if (ext === '.mkv') {
-      const needsTranscode = await checkAudioTranscodeNeeded(filePath);
-      contentType = needsTranscode ? 'video/mp4' : 'video/x-matroska';
-    }
-    else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
-    else if (ext === '.mp3') contentType = 'audio/mpeg';
-    else if (ext === '.wav') contentType = 'audio/wav';
-  } else {
-    const ext = path.extname(filename.split('?')[0]).toLowerCase();
-    if (ext === '.mkv') contentType = 'video/x-matroska';
-    else if (ext === '.mp3') contentType = 'audio/mpeg';
-    else contentType = 'video/mp4';
+  const ext = path.extname(filename.split('?')[0]).toLowerCase();
+  if (ext === '.mkv') {
+    const needsTranscode = await checkAudioTranscodeNeeded(filePath);
+    contentType = needsTranscode ? 'video/mp4' : 'video/x-matroska';
   }
+  else if (ext === '.avi') contentType = 'video/mp4'; // transcoded on the fly!
+  else if (ext === '.mp3') contentType = 'audio/mpeg';
+  else if (ext === '.wav') contentType = 'audio/wav';
 
   let responded = false;
   device.play(mediaUrl, { contentType }, (err) => {
@@ -2523,13 +2517,19 @@ app.get('/api/chromecast/active', (req, res) => {
 // Serving local media files with HTTP Range Requests for streaming and seeking support
 app.get('/api/media/*', async (req, res) => {
   const filename = req.params[0];
-  const filePath = getSafeFilePath(filename);
+  const isUrl = filename.startsWith('http://') || filename.startsWith('https://');
 
-  if (!filePath || !fs.existsSync(filePath)) {
-    return res.status(404).send('Datei nicht gefunden');
+  let filePath;
+  if (isUrl) {
+    filePath = filename;
+  } else {
+    filePath = getSafeFilePath(filename);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).send('Datei nicht gefunden');
+    }
   }
 
-  const ext = path.extname(filePath).toLowerCase();
+  const ext = path.extname(filePath.split('?')[0]).toLowerCase();
   if (ext === '.avi') {
     console.log(`[Playback] Transcodierung läuft (on-the-fly) für AVI-Datei: ${filePath}`);
     res.writeHead(200, {
@@ -2596,6 +2596,53 @@ app.get('/api/media/*', async (req, res) => {
       });
       return;
     }
+  }
+
+  if (isUrl) {
+    const headers = {};
+    if (req.headers.range) {
+      headers['Range'] = req.headers.range;
+    }
+    if (req.headers['user-agent']) {
+      headers['User-Agent'] = req.headers['user-agent'];
+    }
+
+    try {
+      const response = await axios({
+        method: 'get',
+        url: filePath,
+        headers: headers,
+        responseType: 'stream',
+        timeout: 30000
+      });
+
+      res.status(response.status);
+
+      const headersToForward = [
+        'content-type',
+        'content-length',
+        'content-range',
+        'accept-ranges'
+      ];
+      for (const h of headersToForward) {
+        if (response.headers[h]) {
+          res.setHeader(h, response.headers[h]);
+        }
+      }
+
+      response.data.pipe(res);
+
+      req.on('close', () => {
+        response.data.destroy();
+      });
+      return;
+    } catch (err) {
+      console.error('[Media Proxy] Fehler beim Proxying der URL:', filePath, err.message);
+      if (!res.headersSent) {
+        return res.status(500).send(`Fehler beim Laden des Remote-Streams: ${err.message}`);
+      }
+    }
+    return;
   }
 
   const stat = fs.statSync(filePath);
