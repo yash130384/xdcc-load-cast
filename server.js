@@ -2726,6 +2726,7 @@ app.get('/api/media/*', async (req, res) => {
       });
       return;
     }
+  }
   const isTs = ext === '.ts' || filePath.includes('/live/');
   if (isTs) {
     console.log(`[Playback] Remuxing TS stream on-the-fly to MP4 for: ${filePath}`);
