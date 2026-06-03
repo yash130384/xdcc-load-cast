@@ -144,6 +144,7 @@ function App() {
   const [tempXtreamUsername, setTempXtreamUsername] = useState('');
   const [tempXtreamPassword, setTempXtreamPassword] = useState('');
   const [tempXtreamEnabled, setTempXtreamEnabled] = useState(false);
+  const [tempXtreamSyncIntervalHours, setTempXtreamSyncIntervalHours] = useState(1);
   const [xtreamEpisodes, setXtreamEpisodes] = useState({});
   const [loadingXtreamEpisodes, setLoadingXtreamEpisodes] = useState(false);
 
@@ -169,6 +170,7 @@ function App() {
         setTempXtreamUsername(data.xtreamUsername || '');
         setTempXtreamPassword(data.xtreamPassword || '');
         setTempXtreamEnabled(!!data.xtreamEnabled);
+        setTempXtreamSyncIntervalHours(data.xtreamSyncIntervalHours || 1);
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -255,6 +257,8 @@ function App() {
           });
         } else if (message.type === 'auto-downloads') {
           setAutoDownloads(message.data);
+        } else if (message.type === 'xtream-sync-complete') {
+          fetchMediaLibrary();
         }
       };
 
@@ -464,14 +468,14 @@ function App() {
 
   const filteredLibrary = mediaLibrary.filter(item => {
     const query = librarySearchQuery.toLowerCase();
-    const filenameMatch = item.filename.toLowerCase().includes(query);
-    const titleMatch = item.metadata?.title?.toLowerCase().includes(query);
-    const castMatch = item.metadata?.cast?.toLowerCase().includes(query);
+    const filenameMatch = item.filename ? item.filename.toLowerCase().includes(query) : false;
+    const titleMatch = (item.metadata?.title || item.title || '').toLowerCase().includes(query);
+    const castMatch = (item.metadata?.cast || item.cast || '').toLowerCase().includes(query);
     const matchesSearch = filenameMatch || titleMatch || castMatch;
     
     if (!matchesSearch) return false;
     if (selectedCategory === 'all') return true;
-    const cat = item.metadata?.category || 'Videos';
+    const cat = item.metadata?.category || item.category || 'Videos';
     return cat === selectedCategory;
   });
 
@@ -786,7 +790,8 @@ function App() {
         xtreamHost: tempXtreamHost,
         xtreamUsername: tempXtreamUsername,
         xtreamPassword: tempXtreamPassword,
-        xtreamEnabled: tempXtreamEnabled
+        xtreamEnabled: tempXtreamEnabled,
+        xtreamSyncIntervalHours: parseInt(tempXtreamSyncIntervalHours, 10) || 1
       })
     })
       .then(res => res.json())
@@ -1233,6 +1238,7 @@ function App() {
               setTempXtreamUsername(settings.xtreamUsername || '');
               setTempXtreamPassword(settings.xtreamPassword || '');
               setTempXtreamEnabled(!!settings.xtreamEnabled);
+              setTempXtreamSyncIntervalHours(settings.xtreamSyncIntervalHours || 1);
               setShowSettings(true);
             }}>
               <SettingsIcon />
@@ -2567,6 +2573,18 @@ function App() {
                         value={tempXtreamPassword}
                         onChange={(e) => setTempXtreamPassword(e.target.value)}
                         placeholder="Passwort"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.8rem' }}>Sync-Intervall (Stunden)</label>
+                      <input
+                        type="number"
+                        className="input-text"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                        value={tempXtreamSyncIntervalHours}
+                        onChange={(e) => setTempXtreamSyncIntervalHours(e.target.value)}
+                        placeholder="1"
+                        min="1"
                       />
                     </div>
                   </div>

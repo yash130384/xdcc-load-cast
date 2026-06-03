@@ -95,7 +95,8 @@ let appConfig = {
   xtreamHost: '',
   xtreamUsername: '',
   xtreamPassword: '',
-  xtreamEnabled: false
+  xtreamEnabled: false,
+  xtreamSyncIntervalHours: 1
 };
 
 // Chromecast discovery setup
@@ -122,13 +123,41 @@ let xtreamMovies = [];
 let xtreamSeries = [];
 let xtreamLive = [];
 let lastXtreamFetch = 0;
+let xtreamSyncTimer = null;
 
-async function fetchXtreamData() {
+function broadcastXtreamSyncComplete() {
+  if (typeof wss !== 'undefined' && wss && wss.clients) {
+    const message = JSON.stringify({ type: 'xtream-sync-complete' });
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) { // OPEN
+        client.send(message);
+      }
+    });
+  }
+}
+
+function recreateXtreamSyncInterval() {
+  if (xtreamSyncTimer) {
+    clearInterval(xtreamSyncTimer);
+    xtreamSyncTimer = null;
+  }
+  if (!appConfig.xtreamEnabled) {
+    return;
+  }
+  const hours = appConfig.xtreamSyncIntervalHours || 1;
+  console.log(`[Xtream] Setting sync interval to ${hours} hours.`);
+  xtreamSyncTimer = setInterval(() => {
+    console.log(`[Xtream] Running background sync...`);
+    fetchXtreamData(true).catch(err => console.error('[Xtream] Background sync error:', err.message));
+  }, hours * 60 * 60 * 1000);
+}
+
+async function fetchXtreamData(force = false) {
   if (!appConfig.xtreamEnabled || !appConfig.xtreamHost || !appConfig.xtreamUsername || !appConfig.xtreamPassword) {
     return;
   }
-  // Refresh cache if older than 1 hour and we have items
-  if (Date.now() - lastXtreamFetch < 3600000 && xtreamMovies.length > 0) {
+  const intervalMs = (appConfig.xtreamSyncIntervalHours || 1) * 60 * 60 * 1000;
+  if (!force && (Date.now() - lastXtreamFetch < intervalMs) && xtreamMovies.length > 0) {
     return;
   }
   
@@ -178,6 +207,7 @@ async function fetchXtreamData() {
     
     lastXtreamFetch = Date.now();
     console.log(`[Xtream] Cache updated. Movies: ${xtreamMovies.length}, Series: ${xtreamSeries.length}, Live TV: ${xtreamLive.length}`);
+    broadcastXtreamSyncComplete();
   } catch (err) {
     console.error('[Xtream] Error updating cache:', err.message);
   }
@@ -187,6 +217,7 @@ async function fetchXtreamData() {
 if (fs.existsSync(CONFIG_FILE)) {
   try {
     appConfig = { ...appConfig, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) };
+    recreateXtreamSyncInterval();
     if (appConfig.xtreamEnabled) {
       setTimeout(() => {
         fetchXtreamData().catch(err => console.error('[Xtream] Startup fetch error:', err.message));
@@ -599,7 +630,7 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.post('/api/settings', (req, res) => {
-  const { downloadDir, useSSLByDefault, keepDays, checkIntervalHours, xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled } = req.body;
+  const { downloadDir, useSSLByDefault, keepDays, checkIntervalHours, xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled, xtreamSyncIntervalHours } = req.body;
   if (downloadDir) {
     appConfig.downloadDir = path.resolve(downloadDir);
   }
@@ -618,8 +649,13 @@ app.post('/api/settings', (req, res) => {
   if (xtreamUsername !== undefined) appConfig.xtreamUsername = xtreamUsername;
   if (xtreamPassword !== undefined) appConfig.xtreamPassword = xtreamPassword;
   if (xtreamEnabled !== undefined) appConfig.xtreamEnabled = !!xtreamEnabled;
+  if (typeof xtreamSyncIntervalHours === 'number' && xtreamSyncIntervalHours > 0) {
+    appConfig.xtreamSyncIntervalHours = xtreamSyncIntervalHours;
+  }
 
   saveConfig();
+
+  recreateXtreamSyncInterval();
 
   if (appConfig.xtreamEnabled) {
     lastXtreamFetch = 0; // force cache refresh
@@ -1975,7 +2011,9 @@ app.get('/api/media-library', async (req, res) => {
   const list = await scanDownloadDir();
   
   if (appConfig.xtreamEnabled && appConfig.xtreamHost && appConfig.xtreamUsername && appConfig.xtreamPassword) {
-    await fetchXtreamData();
+    if (xtreamMovies.length === 0 && xtreamSeries.length === 0 && xtreamLive.length === 0 && lastXtreamFetch === 0) {
+      fetchXtreamData().catch(err => console.error('[Xtream] Async fetch in library handler:', err.message));
+    }
     
     const host = appConfig.xtreamHost.replace(/\/$/, '');
     
@@ -2002,6 +2040,7 @@ app.get('/api/media-library', async (req, res) => {
     // Map series (ALL)
     const mappedSeries = xtreamSeries.map(series => {
       return {
+        filename: `xtream_series_${series.series_id}`,
         isGroup: true,
         isXtream: true,
         xtreamSeriesId: series.series_id,
@@ -2010,6 +2049,13 @@ app.get('/api/media-library', async (req, res) => {
         category: 'Serien',
         cast: series.plot || 'Xtream Codes Series',
         year: series.rating ? `Rating: ${series.rating}` : null,
+        metadata: {
+          title: series.name,
+          posterUrl: series.cover,
+          category: 'Serien',
+          cast: series.plot || 'Xtream Codes Series',
+          year: series.rating ? `Rating: ${series.rating}` : null
+        },
         files: [] // loaded on-demand in frontend
       };
     });
@@ -2657,6 +2703,9 @@ server.listen(PORT, '0.0.0.0', () => {
 
   // Setup interval check from configuration
   recreateCheckInterval();
+
+  // Setup Xtream sync interval
+  recreateXtreamSyncInterval();
 
   // Start background timeout checker for auto-downloads
   setInterval(checkDownloadsTimeout, 30 * 1000);
