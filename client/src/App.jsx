@@ -134,6 +134,19 @@ function App() {
   // Log message store: { downloadId: [string] }
   const [downloadLogs, setDownloadLogs] = useState({});
 
+  // Application logs state
+  const [showLogs, setShowLogs] = useState(false);
+  const [logsContent, setLogsContent] = useState('');
+  const [loadingLogs, setLoadingLogs] = useState(false);
+
+  // Xtream Codes state
+  const [tempXtreamHost, setTempXtreamHost] = useState('');
+  const [tempXtreamUsername, setTempXtreamUsername] = useState('');
+  const [tempXtreamPassword, setTempXtreamPassword] = useState('');
+  const [tempXtreamEnabled, setTempXtreamEnabled] = useState(false);
+  const [xtreamEpisodes, setXtreamEpisodes] = useState({});
+  const [loadingXtreamEpisodes, setLoadingXtreamEpisodes] = useState(false);
+
   // Auto-downloads state
   const [autoDownloads, setAutoDownloads] = useState({});
   const [tempCheckIntervalHours, setTempCheckIntervalHours] = useState(3);
@@ -152,6 +165,10 @@ function App() {
         setTempUseSSL(data.useSSLByDefault);
         setTempKeepDays(data.keepDays || 0);
         setTempCheckIntervalHours(data.checkIntervalHours || 3);
+        setTempXtreamHost(data.xtreamHost || '');
+        setTempXtreamUsername(data.xtreamUsername || '');
+        setTempXtreamPassword(data.xtreamPassword || '');
+        setTempXtreamEnabled(!!data.xtreamEnabled);
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -466,6 +483,15 @@ function App() {
       const category = item.metadata?.category || 'Videos';
       
       if (category === 'Serien') {
+        if (item.isGroup) {
+          // Already a group (e.g. Xtream series)
+          const key = item.xtreamSeriesId || item.title;
+          seriesGroups[key] = {
+            ...item,
+            files: item.files || []
+          };
+          return;
+        }
         const seriesKey = item.metadata?.imdbId || item.metadata?.title || 'Unknown Series';
         if (!seriesGroups[seriesKey]) {
           seriesGroups[seriesKey] = {
@@ -486,14 +512,16 @@ function App() {
     });
 
     Object.values(seriesGroups).forEach(group => {
-      group.files.sort((a, b) => {
-        const epA = a.metadata?.seasonEpisode || '';
-        const epB = b.metadata?.seasonEpisode || '';
-        if (epA && epB) {
-          return epA.localeCompare(epB, undefined, { numeric: true, sensitivity: 'base' });
-        }
-        return a.filename.localeCompare(b.filename);
-      });
+      if (Array.isArray(group.files)) {
+        group.files.sort((a, b) => {
+          const epA = a.metadata?.seasonEpisode || '';
+          const epB = b.metadata?.seasonEpisode || '';
+          if (epA && epB) {
+            return epA.localeCompare(epB, undefined, { numeric: true, sensitivity: 'base' });
+          }
+          return a.filename.localeCompare(b.filename);
+        });
+      }
     });
 
     const sortedSeries = Object.values(seriesGroups).sort((a, b) => a.title.localeCompare(b.title));
@@ -503,8 +531,27 @@ function App() {
   const groupedLibrary = getGroupedLibrary();
   
   const activeSeries = activeSeriesId 
-    ? groupedLibrary.find(g => g.isGroup && (g.imdbId === activeSeriesId || g.title === activeSeriesId))
+    ? groupedLibrary.find(g => g.isGroup && (g.imdbId === activeSeriesId || g.title === activeSeriesId || (g.isXtream && g.xtreamSeriesId === activeSeriesId)))
     : null;
+
+  useEffect(() => {
+    if (activeSeries && activeSeries.isXtream) {
+      const sid = activeSeries.xtreamSeriesId;
+      if (!xtreamEpisodes[sid]) {
+        setLoadingXtreamEpisodes(true);
+        fetch(`/api/xtream/series-episodes?seriesId=${sid}`)
+          .then(res => res.json())
+          .then(data => {
+            setXtreamEpisodes(prev => ({ ...prev, [sid]: data }));
+            setLoadingXtreamEpisodes(false);
+          })
+          .catch(err => {
+            console.error('Error loading Xtream episodes:', err);
+            setLoadingXtreamEpisodes(false);
+          });
+      }
+    }
+  }, [activeSeriesId, activeSeries]);
 
   useEffect(() => {
     if (activeSeriesId && !activeSeries) {
@@ -735,7 +782,11 @@ function App() {
         downloadDir: tempDownloadDir,
         useSSLByDefault: tempUseSSL,
         keepDays: parseInt(tempKeepDays, 10) || 0,
-        checkIntervalHours: parseInt(tempCheckIntervalHours, 10) || 3
+        checkIntervalHours: parseInt(tempCheckIntervalHours, 10) || 3,
+        xtreamHost: tempXtreamHost,
+        xtreamUsername: tempXtreamUsername,
+        xtreamPassword: tempXtreamPassword,
+        xtreamEnabled: tempXtreamEnabled
       })
     })
       .then(res => res.json())
@@ -746,6 +797,21 @@ function App() {
       })
       .catch(err => {
         alert(`Einstellungen konnten nicht gespeichert werden: ${err.message}`);
+      });
+  };
+
+  const fetchLogs = () => {
+    setLoadingLogs(true);
+    fetch('/api/logs')
+      .then(res => res.json())
+      .then(data => {
+        setLogsContent(data.logs || 'Keine System-Logs vorhanden.');
+        setLoadingLogs(false);
+      })
+      .catch(err => {
+        console.error('Error fetching logs:', err);
+        setLogsContent(`Fehler beim Laden der Logs: ${err.message}`);
+        setLoadingLogs(false);
       });
   };
 
@@ -1163,6 +1229,10 @@ function App() {
               setTempUseSSL(settings.useSSLByDefault);
               setTempKeepDays(settings.keepDays || 0);
               setTempCheckIntervalHours(settings.checkIntervalHours || 3);
+              setTempXtreamHost(settings.xtreamHost || '');
+              setTempXtreamUsername(settings.xtreamUsername || '');
+              setTempXtreamPassword(settings.xtreamPassword || '');
+              setTempXtreamEnabled(!!settings.xtreamEnabled);
               setShowSettings(true);
             }}>
               <SettingsIcon />
@@ -1651,43 +1721,62 @@ function App() {
 
                         {/* Right side: Episodes List */}
                         <div className="series-episodes-container" style={{ flex: '2 1 450px' }}>
-                          <h3 style={{ margin: '0 0 1rem 0', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
-                            Dateien ({activeSeries.files.length})
-                          </h3>
+                          {(() => {
+                            const activeSeriesFiles = activeSeries.isXtream 
+                              ? (xtreamEpisodes[activeSeries.xtreamSeriesId] || []) 
+                              : activeSeries.files;
+                            
+                            return (
+                              <>
+                                <h3 style={{ margin: '0 0 1rem 0', color: 'var(--text-primary)', borderBottom: '1px solid var(--border-color)', paddingBottom: '0.5rem' }}>
+                                  Dateien ({activeSeriesFiles.length})
+                                </h3>
 
-                          <div className="episodes-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '750px', overflowY: 'auto' }}>
-                            {activeSeries.files.map((item, idx) => {
-                              const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
-                              const isPending = !!pendingCasts[item.filename];
-                              
-                              return (
-                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                  <div className="music-item" style={{ background: 'rgba(255, 255, 255, 0.015)' }}>
-                                    <div className="music-info">
-                                      <div className="music-icon" style={{ background: 'rgba(255, 0, 127, 0.08)', color: 'var(--accent-pink)' }}>
-                                        {item.metadata?.seasonEpisode ? '🎬' : '📹'}
-                                      </div>
-                                      <div className="music-details">
-                                        <div className="music-title" title={item.filename} style={{ fontWeight: '500' }}>
-                                          {item.metadata?.seasonEpisode ? <strong style={{ color: 'var(--accent-pink)', marginRight: '0.4rem' }}>{item.metadata.seasonEpisode}</strong> : null}
-                                          {item.filename}
-                                        </div>
-                                        <div className="music-meta">
-                                          <span className="music-size">{formatBytes(item.sizeBytes)}</span>
-                                          <span>•</span>
-                                          <span>{new Date(item.mtime).toLocaleDateString()}</span>
-                                        </div>
-                                      </div>
-                                    </div>
+                                {loadingXtreamEpisodes ? (
+                                  <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                                    <span className="spinner" style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</span>
+                                    <p>Lade Episoden vom Xtream Server...</p>
+                                  </div>
+                                ) : (
+                                  <div className="episodes-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '750px', overflowY: 'auto' }}>
+                                    {activeSeriesFiles.map((item, idx) => {
+                                      const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
+                                      const isPending = !!pendingCasts[item.filename];
+                                      
+                                      return (
+                                        <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                          <div className="music-item" style={{ background: 'rgba(255, 255, 255, 0.015)' }}>
+                                            <div className="music-info">
+                                              <div className="music-icon" style={{ background: 'rgba(255, 0, 127, 0.08)', color: 'var(--accent-pink)' }}>
+                                                {item.metadata?.seasonEpisode ? '🎬' : '📹'}
+                                              </div>
+                                              <div className="music-details">
+                                                <div className="music-title" title={item.filename} style={{ fontWeight: '500' }}>
+                                                  {item.metadata?.seasonEpisode ? <strong style={{ color: 'var(--accent-pink)', marginRight: '0.4rem' }}>{item.metadata.seasonEpisode}</strong> : null}
+                                                  {item.isXtream ? (item.metadata?.title || item.filename) : item.filename}
+                                                </div>
+                                                <div className="music-meta">
+                                                  {item.sizeBytes > 0 && (
+                                                    <>
+                                                      <span className="music-size">{formatBytes(item.sizeBytes)}</span>
+                                                      <span>•</span>
+                                                    </>
+                                                  )}
+                                                  <span>{item.isXtream ? 'Xtream Codes Stream' : new Date(item.mtime).toLocaleDateString()}</span>
+                                                </div>
+                                              </div>
+                                            </div>
 
-                                    <div className="music-actions">
-                                      <button 
-                                        className="btn btn-danger btn-icon-only" 
-                                        title="Datei von Festplatte löschen"
-                                        onClick={() => handleDeleteMediaFile(item.filename)}
-                                      >
-                                        <TrashIcon />
-                                      </button>
+                                            <div className="music-actions">
+                                              {!item.isXtream && (
+                                                <button 
+                                                  className="btn btn-danger btn-icon-only" 
+                                                  title="Datei von Festplatte löschen"
+                                                  onClick={() => handleDeleteMediaFile(item.filename)}
+                                                >
+                                                  <TrashIcon />
+                                                </button>
+                                              )}
                                       <button 
                                         className="btn btn-primary btn-icon-only" 
                                         style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
@@ -1802,6 +1891,10 @@ function App() {
                               );
                             })}
                           </div>
+                                )}
+                              </>
+                            );
+                          })()}
                         </div>
                       </div>
                     </div>
@@ -1898,6 +1991,14 @@ function App() {
                       >
                         🎵 Musik ({mediaLibrary.filter(item => item.metadata?.category === 'Musik').length})
                       </button>
+                      {settings.xtreamEnabled && (
+                        <button 
+                          className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
+                          onClick={() => setSelectedCategory('Live TV')}
+                        >
+                          📡 Live TV ({mediaLibrary.filter(item => item.metadata?.category === 'Live TV').length})
+                        </button>
+                      )}
                     </div>
                   </div>
 
@@ -1938,13 +2039,15 @@ function App() {
                               </div>
 
                               <div className="music-actions">
-                                <button 
-                                  className="btn btn-danger btn-icon-only" 
-                                  title="Datei von Festplatte löschen"
-                                  onClick={() => handleDeleteMediaFile(item.filename)}
-                                >
-                                  <TrashIcon />
-                                </button>
+                                {!item.isXtream && (
+                                  <button 
+                                    className="btn btn-danger btn-icon-only" 
+                                    title="Datei von Festplatte löschen"
+                                    onClick={() => handleDeleteMediaFile(item.filename)}
+                                  >
+                                    <TrashIcon />
+                                  </button>
+                                )}
                                 <button 
                                   className="btn btn-primary btn-icon-only" 
                                   style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
@@ -2156,6 +2259,7 @@ function App() {
                         let fallbackIcon = '📹';
                         if (category === 'Filme') fallbackIcon = '🎬';
                         else if (category === 'Serien') fallbackIcon = '📺';
+                        else if (category === 'Live TV') fallbackIcon = '📡';
                         
                         return (
                           <div key={idx} className="media-card">
@@ -2180,7 +2284,7 @@ function App() {
                               {/* Badges on Poster */}
                               {year && <span className="media-badge-year">{year}</span>}
                               <span className="media-badge-type">
-                                {category === 'Serien' ? 'Serie' : category === 'Filme' ? 'Film' : 'Video'}
+                                {category === 'Serien' ? 'Serie' : category === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : 'Video'}
                               </span>
                               {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
                             </div>
@@ -2206,13 +2310,15 @@ function App() {
                               </div>
                               
                               <div className="media-card-actions">
-                                <button 
-                                  className="btn btn-danger btn-icon-only" 
-                                  title="Datei löschen"
-                                  onClick={() => handleDeleteMediaFile(item.filename)}
-                                >
-                                  <TrashIcon />
-                                </button>
+                                {!item.isXtream && (
+                                  <button 
+                                    className="btn btn-danger btn-icon-only" 
+                                    title="Datei löschen"
+                                    onClick={() => handleDeleteMediaFile(item.filename)}
+                                  >
+                                    <TrashIcon />
+                                  </button>
+                                )}
                                 <button 
                                   className="btn btn-primary btn-icon-only" 
                                   style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
@@ -2411,6 +2517,85 @@ function App() {
                 </span>
               </div>
 
+              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Xtream Codes (IPTV/VOD)</label>
+                <div className="toggle-group" style={{ padding: '0.25rem 0' }}>
+                  <div className="toggle-group-label">
+                    <span>Xtream Codes aktivieren</span>
+                    <span>Integiere IPTV/VOD-Streams in die Mediathek</span>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={tempXtreamEnabled}
+                      onChange={(e) => setTempXtreamEnabled(e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+                
+                {tempXtreamEnabled && (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.8rem' }}>Server-URL</label>
+                      <input
+                        type="text"
+                        className="input-text"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                        value={tempXtreamHost}
+                        onChange={(e) => setTempXtreamHost(e.target.value)}
+                        placeholder="http://iptv-server.com:8080"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.8rem' }}>Benutzername</label>
+                      <input
+                        type="text"
+                        className="input-text"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                        value={tempXtreamUsername}
+                        onChange={(e) => setTempXtreamUsername(e.target.value)}
+                        placeholder="Benutzername"
+                      />
+                    </div>
+                    <div className="form-group">
+                      <label style={{ fontSize: '0.8rem' }}>Passwort</label>
+                      <input
+                        type="password"
+                        className="input-text"
+                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                        value={tempXtreamPassword}
+                        onChange={(e) => setTempXtreamPassword(e.target.value)}
+                        placeholder="Passwort"
+                      />
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>System-Logs</label>
+                <button 
+                  type="button"
+                  className="btn btn-secondary" 
+                  style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '0.5rem', 
+                    width: '100%', 
+                    justifyContent: 'center',
+                    background: 'rgba(255, 255, 255, 0.05)',
+                    borderColor: 'var(--border-color)'
+                  }}
+                  onClick={() => {
+                    fetchLogs();
+                    setShowLogs(true);
+                  }}
+                >
+                  📋 Logs ansehen
+                </button>
+              </div>
+
               <div className="settings-footer">
                 <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>
                   Abbrechen
@@ -2418,6 +2603,80 @@ function App() {
                 <button className="btn btn-primary" onClick={handleSaveSettings}>
                   Speichern
                 </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Logs Modal */}
+        {showLogs && (
+          <div className="modal-overlay" style={{ zIndex: 1100 }}>
+            <div className="modal" style={{ width: '800px', maxWidth: '95%' }}>
+              <div className="modal-header">
+                <span className="modal-title">📋 System-Logs</span>
+                <button className="modal-close" onClick={() => setShowLogs(false)}>
+                  <CloseIcon />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                  Hier sind die letzten System-Logs der Anwendung. Du kannst sie ansehen und kopieren.
+                </p>
+
+                {loadingLogs ? (
+                  <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <span className="spinner" style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</span>
+                    <p>Lade Logs...</p>
+                  </div>
+                ) : (
+                  <div>
+                    <pre 
+                      style={{
+                        background: 'rgba(0, 0, 0, 0.5)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '10px',
+                        padding: '1rem',
+                        fontFamily: 'var(--font-mono)',
+                        fontSize: '0.8rem',
+                        maxHeight: '400px',
+                        overflowY: 'auto',
+                        whiteSpace: 'pre-wrap',
+                        wordBreak: 'break-all',
+                        color: '#a5b4fc',
+                        margin: 0
+                      }}
+                    >
+                      {logsContent}
+                    </pre>
+                  </div>
+                )}
+              </div>
+
+              <div className="settings-footer" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%' }}>
+                <button 
+                  className="btn btn-secondary" 
+                  onClick={fetchLogs}
+                  disabled={loadingLogs}
+                >
+                  🔄 Aktualisieren
+                </button>
+                <div style={{ display: 'flex', gap: '0.75rem' }}>
+                  <button 
+                    className="btn btn-primary"
+                    style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                    disabled={!logsContent || loadingLogs}
+                    onClick={() => {
+                      navigator.clipboard.writeText(logsContent);
+                      alert('Logs in die Zwischenablage kopiert!');
+                    }}
+                  >
+                    📋 Kopieren
+                  </button>
+                  <button className="btn btn-secondary" onClick={() => setShowLogs(false)}>
+                    Schließen
+                  </button>
+                </div>
               </div>
             </div>
           </div>
