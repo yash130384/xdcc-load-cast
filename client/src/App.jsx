@@ -387,6 +387,44 @@ function App() {
     }
   };
 
+  const triggerXtreamDownload = async (item, activeSeries = null) => {
+    try {
+      const title = item.metadata?.title || item.filename;
+      const seasonEpisode = item.metadata?.seasonEpisode || '';
+      
+      const payload = {
+        url: item.filename,
+        title: seasonEpisode ? `${seasonEpisode} - ${title}` : title
+      };
+
+      if (activeSeries && activeSeries.title) {
+        payload.seriesTitle = activeSeries.title;
+      }
+
+      const res = await fetch('/api/xtream/download', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(payload)
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(`Download konnte nicht gestartet werden: ${errData.error}`);
+      } else {
+        const data = await res.json();
+        setDownloadLogs(prev => ({
+          ...prev,
+          [data.id]: [`[${new Date().toLocaleTimeString()}] HTTP-Download gestartet...`]
+        }));
+        setCurrentView('downloads');
+      }
+    } catch (err) {
+      alert(`Fehler beim Starten des Downloads: ${err.message}`);
+    }
+  };
+
   const handlePause = (id) => {
     fetch(`/api/download/${encodeURIComponent(id)}/pause`, { method: 'POST' })
       .catch(err => console.error('Error pausing:', err));
@@ -969,13 +1007,21 @@ function App() {
         </div>
 
         {/* Info lines */}
-        <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
-          <span>Server: <strong style={{ color: 'var(--text-primary)' }}>{item.server}</strong></span>
-          <span>•</span>
-          <span>Bot: <strong style={{ color: 'var(--text-primary)' }}>{item.botName}</strong></span>
-          <span>•</span>
-          <span>Pack: <strong style={{ color: 'var(--text-primary)' }}>#{item.packNumber}</strong></span>
-        </div>
+        {item.isHttp ? (
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span>Typ: <strong style={{ color: 'var(--text-primary)' }}>Xtream Codes</strong></span>
+            <span>•</span>
+            <span>Quelle: <strong style={{ color: 'var(--text-primary)' }}>{item.server}</strong></span>
+          </div>
+        ) : (
+          <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', display: 'flex', gap: '0.5rem', flexWrap: 'wrap' }}>
+            <span>Server: <strong style={{ color: 'var(--text-primary)' }}>{item.server}</strong></span>
+            <span>•</span>
+            <span>Bot: <strong style={{ color: 'var(--text-primary)' }}>{item.botName}</strong></span>
+            <span>•</span>
+            <span>Pack: <strong style={{ color: 'var(--text-primary)' }}>#{item.packNumber}</strong></span>
+          </div>
+        )}
 
         {/* Filename Confirmation Prompt */}
         {item.status === 'confirm_filename' && (
@@ -1829,6 +1875,16 @@ function App() {
                                             </div>
 
                                             <div className="music-actions">
+                                              {item.isXtream && (
+                                                <button 
+                                                  className="btn btn-secondary btn-icon-only" 
+                                                  style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
+                                                  title="Folge herunterladen"
+                                                  onClick={() => triggerXtreamDownload(item, activeSeries)}
+                                                >
+                                                  <DownloadIcon />
+                                                </button>
+                                              )}
                                               {!item.isXtream && (
                                                 <button 
                                                   className="btn btn-danger btn-icon-only" 
@@ -1838,29 +1894,28 @@ function App() {
                                                   <TrashIcon />
                                                 </button>
                                               )}
-                                      <button 
-                                        className="btn btn-primary btn-icon-only" 
-                                        style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                        title="Lokal abspielen"
-                                        onClick={() => playLocalLibrary(item.filename)}
-                                      >
-                                        <PlayIcon />
-                                      </button>
-                                      <button 
-                                        className="btn btn-secondary btn-icon-only" 
-                                        style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                        title="Auf TV streamen (Cast)"
-                                        disabled={isPending}
-                                        onClick={() => {
-                                          setCastingItem(item);
-                                          fetchDevices();
-                                        }}
-                                      >
-                                        {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                                      </button>
-                                    </div>
-                                  </div>
-
+                                              <button 
+                                                className="btn btn-primary btn-icon-only" 
+                                                style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                                                title="Lokal abspielen"
+                                                onClick={() => playLocalLibrary(item.filename)}
+                                              >
+                                                <PlayIcon />
+                                              </button>
+                                              <button 
+                                                className="btn btn-secondary btn-icon-only" 
+                                                style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+                                                title="Auf TV streamen (Cast)"
+                                                disabled={isPending}
+                                                onClick={() => {
+                                                  setCastingItem(item);
+                                                  fetchDevices();
+                                                }}
+                                              >
+                                                {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+                                              </button>
+                                            </div>
+                                          </div>
                                   {/* Casting status */}
                                   {activeCastForFile && (
                                     <div style={{
@@ -2404,6 +2459,16 @@ function App() {
                               </div>
                               
                               <div className="media-card-actions">
+                                {item.isXtream && !item.isLive && (
+                                  <button 
+                                    className="btn btn-secondary btn-icon-only" 
+                                    style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
+                                    title="Herunterladen"
+                                    onClick={() => triggerXtreamDownload(item)}
+                                  >
+                                    <DownloadIcon />
+                                  </button>
+                                )}
                                 {!item.isXtream && (
                                   <button 
                                     className="btn btn-danger btn-icon-only" 

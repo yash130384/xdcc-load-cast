@@ -12,6 +12,8 @@ import ChromecastAPI from 'chromecast-api';
 import dlnacastsCreator from 'dlnacasts2';
 import airplayerCreator from 'airplayer';
 import { IrcDccDownloader } from './irc-dcc-client.js';
+import crypto from 'crypto';
+import { HttpDownloader } from './http-downloader.js';
 
 // Setup global log file interception
 const LOG_FILE = path.join(os.homedir(), '.xdcc_downloader_logs.txt');
@@ -378,7 +380,8 @@ function getDownloadDetails(id) {
     eta: dl.eta,
     status: item.statusOverride || dl.status,
     errorMessage: dl.errorMessage,
-    isAuto: !!item.isAuto
+    isAuto: !!item.isAuto,
+    isHttp: !!dl.isHttp
   };
 }
 
@@ -1207,6 +1210,72 @@ async function handleDownloadPostProcessing(id, downloader) {
     broadcastStatus(id);
   }
 }
+
+app.post('/api/xtream/download', (req, res) => {
+  const { url, title, seriesTitle } = req.body;
+
+  if (!url || !title) {
+    return res.status(400).json({ error: 'Fehlende Parameter url oder title' });
+  }
+
+  // Generate unique ID using md5 hash of the stream URL
+  const id = `http_${crypto.createHash('md5').update(url).digest('hex')}`;
+
+  if (downloadQueue.has(id)) {
+    const item = downloadQueue.get(id);
+    if (item.downloader.status === 'paused' || item.downloader.status === 'error' || item.downloader.status === 'cancelled') {
+      item.downloader.cleanup();
+      downloadQueue.delete(id);
+    } else {
+      return res.status(400).json({ error: 'Download läuft bereits oder ist bereits in der Warteschlange.' });
+    }
+  }
+
+  // Determine file extension from URL
+  let extension = '.mp4';
+  try {
+    const pathname = new URL(url).pathname;
+    const ext = path.extname(pathname);
+    if (ext && ext.length > 1 && ext.length < 6) {
+      extension = ext.toLowerCase();
+    }
+  } catch (e) {}
+
+  // Construct target filename
+  let filename = '';
+  if (seriesTitle) {
+    filename = `${seriesTitle} - ${title}${extension}`;
+  } else {
+    filename = `${title}${extension}`;
+  }
+  // Clean illegal filename characters
+  filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+
+  const downloader = new HttpDownloader({
+    id,
+    url,
+    filename,
+    downloadDir: appConfig.downloadDir
+  });
+
+  downloader.on('progress', (data) => {
+    // HTTP downloads do not require RAR/TAR extraction post-processing
+    broadcastStatus(id);
+  });
+
+  downloader.on('message', (data) => {
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) {
+        client.send(JSON.stringify({ type: 'message', data: { id, text: data.text } }));
+      }
+    });
+  });
+
+  downloadQueue.set(id, { downloader });
+  downloader.start();
+
+  return res.json({ success: true, id, status: downloader.status });
+});
 
 // 4. Download operations
 app.post('/api/download', (req, res) => {
