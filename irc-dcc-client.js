@@ -46,6 +46,7 @@ export class IrcDccDownloader extends EventEmitter {
     this.dccResumeNegotiated = false;
     this.useSsend = options.useSsend || false;
     this.isSecureDcc = false;
+    this.isReconnecting = false;
   }
 
   log(msg) {
@@ -99,6 +100,7 @@ export class IrcDccDownloader extends EventEmitter {
   }
 
   connectIrc() {
+    this.isReconnecting = false;
     this.updateStatus('connecting');
     this.log(`Connecting to IRC server ${this.server}:${this.port}...`);
 
@@ -133,6 +135,10 @@ export class IrcDccDownloader extends EventEmitter {
       });
 
       this.ircSocket.on('error', (err) => {
+        if (this.isReconnecting) {
+          this.log(`IRC Socket Error ignored during deliberate reconnect: ${err.message}`);
+          return;
+        }
         this.log(`IRC Socket Error: ${err.message}`);
         this.emit('message', {
           id: this.id,
@@ -143,6 +149,10 @@ export class IrcDccDownloader extends EventEmitter {
 
       this.ircSocket.on('close', () => {
         this.log(`IRC Connection closed. Current status: ${this.status}`);
+        if (this.isReconnecting) {
+          this.log(`Reconnecting flag is set, ignoring close event.`);
+          return;
+        }
         if (this.status !== 'completed' && this.status !== 'error' && this.status !== 'cancelled' && this.status !== 'paused' && this.status !== 'dcc_downloading') {
           this.handleError('IRC-Verbindung unerwartet geschlossen.');
         }
@@ -208,17 +218,27 @@ export class IrcDccDownloader extends EventEmitter {
       
       const noticeLower = noticeContent.toLowerCase();
       if ((noticeLower.includes('ssend') || noticeLower.includes('secure ssl dcc') || noticeLower.includes('ssl dcc')) && !this.useSsend) {
-        this.log(`Notice indicates secure SSL DCC Sends (SSEND) is required. Switching to xdcc ssend...`);
+        this.log(`Notice indicates secure SSL DCC Sends (SSEND) is required. Reconnecting and switching to xdcc ssend...`);
         this.useSsend = true;
+        this.isReconnecting = true;
         this.emit('message', {
           id: this.id,
-          text: `[Info] Server/Bot erfordert secure SSL DCC Sends. Wechsel zu xdcc ssend.`
+          text: `[Info] Server/Bot erfordert secure SSL DCC Sends. Reconnection und Wechsel zu xdcc ssend...`
         });
-        if (this.status === 'requesting' || this.status === 'queued') {
-          if (this.ircSocket && this.ircSocket.writable) {
-            this.ircSocket.write(`PRIVMSG ${this.botName} :xdcc ssend ${this.packNumber}\r\n`);
-          }
+        
+        if (this.ircSocket) {
+          try {
+            if (this.ircSocket.writable) {
+              this.ircSocket.write('QUIT :Reconnecting for SSEND\r\n');
+            }
+            this.ircSocket.destroy();
+          } catch (e) {}
+          this.ircSocket = null;
         }
+
+        setTimeout(() => {
+          this.connectIrc();
+        }, 2000);
       }
 
       if (sender.includes(this.botName)) {
