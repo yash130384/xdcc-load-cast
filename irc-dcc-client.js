@@ -53,6 +53,13 @@ export class IrcDccDownloader extends EventEmitter {
     console.log(`[XDCC Downloader][${this.id}] ${msg}`);
   }
 
+  getNickFromSender(sender) {
+    if (!sender) return '';
+    const clean = sender.startsWith(':') ? sender.substring(1) : sender;
+    const exclIndex = clean.indexOf('!');
+    return exclIndex !== -1 ? clean.substring(0, exclIndex) : clean;
+  }
+
   updateStatus(status, extra = {}) {
     this.status = status;
     this.emit('progress', {
@@ -187,6 +194,9 @@ export class IrcDccDownloader extends EventEmitter {
     const command = parts[1];
 
     if (command === '376' || command === '422') {
+      if (parts[2]) {
+        this.nick = parts[2];
+      }
       if (this.server.toLowerCase().includes('abjects') || this.channel === '#moviegods') {
         this.log(`Registered successfully. Joining channel #moviegods and #mg-chat...`);
         this.updateStatus('joining');
@@ -199,17 +209,23 @@ export class IrcDccDownloader extends EventEmitter {
       return;
     }
 
-    if (command === 'JOIN' && sender.includes(this.nick) && parts[2]?.replace(':', '') === this.channel) {
-      this.log(`Joined channel ${this.channel}. Requesting pack ${this.packNumber} from ${this.botName}...`);
-      this.updateStatus('requesting');
-      
-      setTimeout(() => {
-        if (this.ircSocket && this.ircSocket.writable) {
-          const reqCmd = this.useSsend ? 'ssend' : 'send';
-          this.ircSocket.write(`PRIVMSG ${this.botName} :xdcc ${reqCmd} ${this.packNumber}\r\n`);
-        }
-      }, 1000);
-      return;
+    if (command === 'JOIN') {
+      const senderNick = this.getNickFromSender(sender);
+      const joinedChans = parts[2]?.replace(':', '').trim().toLowerCase().split(',');
+      const targetChan = this.channel.toLowerCase();
+
+      if (senderNick.toLowerCase() === this.nick.toLowerCase() && joinedChans.includes(targetChan)) {
+        this.log(`Joined channel ${this.channel}. Requesting pack ${this.packNumber} from ${this.botName}...`);
+        this.updateStatus('requesting');
+        
+        setTimeout(() => {
+          if (this.ircSocket && this.ircSocket.writable) {
+            const reqCmd = this.useSsend ? 'ssend' : 'send';
+            this.ircSocket.write(`PRIVMSG ${this.botName} :xdcc ${reqCmd} ${this.packNumber}\r\n`);
+          }
+        }, 1000);
+        return;
+      }
     }
 
     if (command === 'NOTICE') {
