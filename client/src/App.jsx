@@ -107,7 +107,7 @@ function App() {
 
   const [downloads, setDownloads] = useState([]);
   const [castingItem, setCastingItem] = useState(null);
-  const [chromecastDevices, setChromecastDevices] = useState([]);
+  const [castDevices, setCastDevices] = useState([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
   const [activeCasts, setActiveCasts] = useState([]);
   const [pendingCasts, setPendingCasts] = useState({});
@@ -653,11 +653,11 @@ function App() {
     fetch('/api/chromecast/devices')
       .then(res => res.json())
       .then(data => {
-        setChromecastDevices(data);
+        setCastDevices(data);
         setLoadingDevices(false);
       })
       .catch(err => {
-        console.error('Error fetching Chromecast devices:', err);
+        console.error('Error fetching cast devices:', err);
         setLoadingDevices(false);
       });
   };
@@ -1221,7 +1221,7 @@ function App() {
               <button 
                 className="btn btn-secondary btn-icon-only" 
                 style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                title="Auf Chromecast streamen"
+                title="Auf TV streamen (Cast)"
                 disabled={isPending}
                 onClick={() => {
                   setCastingItem(item);
@@ -1849,7 +1849,7 @@ function App() {
                                       <button 
                                         className="btn btn-secondary btn-icon-only" 
                                         style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                        title="Auf Chromecast streamen"
+                                        title="Auf TV streamen (Cast)"
                                         disabled={isPending}
                                         onClick={() => {
                                           setCastingItem(item);
@@ -2152,7 +2152,7 @@ function App() {
                                 <button 
                                   className="btn btn-secondary btn-icon-only" 
                                   style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                  title="Auf Chromecast streamen"
+                                  title="Auf TV streamen (Cast)"
                                   disabled={isPending}
                                   onClick={() => {
                                     setCastingItem(item);
@@ -2424,7 +2424,7 @@ function App() {
                                 <button 
                                   className="btn btn-secondary btn-icon-only" 
                                   style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                  title="Auf Chromecast streamen"
+                                  title="Auf TV streamen (Cast)"
                                   disabled={isPending}
                                   onClick={() => {
                                     setCastingItem(item);
@@ -2851,12 +2851,12 @@ function App() {
           </div>
         )}
 
-        {/* Chromecast Modal */}
+        {/* Chromecast / Miracast Modal */}
         {castingItem && (
           <div className="modal-overlay">
             <div className="modal">
               <div className="modal-header">
-                <span className="modal-title">Auf Chromecast streamen</span>
+                <span className="modal-title">Auf TV streamen (Cast)</span>
                 <button className="modal-close" onClick={() => setCastingItem(null)}>
                   <CloseIcon />
                 </button>
@@ -2875,21 +2875,21 @@ function App() {
                     </button>
                   </div>
 
-                  {loadingDevices && chromecastDevices.length === 0 ? (
+                  {loadingDevices && castDevices.length === 0 ? (
                     <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-muted)' }}>
                       <span className="spinner" style={{ fontSize: '1.5rem', marginBottom: '0.5rem', display: 'inline-block' }}>⏳</span>
-                      <p>Suche nach Chromecast Geräten...</p>
+                      <p>Suche nach Cast Geräten...</p>
                     </div>
-                  ) : chromecastDevices.length === 0 ? (
+                  ) : castDevices.length === 0 ? (
                     <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)', background: 'rgba(255,255,255,0.02)', borderRadius: '10px', border: '1px dashed var(--border-color)' }}>
-                      <p>Keine Chromecast Geräte im Netzwerk gefunden.</p>
+                      <p>Keine Cast-Geräte im Netzwerk gefunden.</p>
                       <p style={{ fontSize: '0.75rem', color: 'var(--text-muted)', marginTop: '0.25rem' }}>
-                        Vergewissere dich, dass Chromecast und Computer im selben WLAN/Netzwerk sind.
+                        Vergewissere dich, dass Chromecast/AirPlay/Miracast und Computer im selben WLAN/Netzwerk sind.
                       </p>
                     </div>
                   ) : (
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', maxHeight: '200px', overflowY: 'auto' }}>
-                      {chromecastDevices.map((device, idx) => {
+                      {castDevices.map((device, idx) => {
                         const activeCastForDevice = activeCasts.find(c => c.device === device.name);
                         return (
                           <div 
@@ -2906,7 +2906,13 @@ function App() {
                             }}
                           >
                             <div style={{ marginRight: '1rem', overflow: 'hidden' }}>
-                              <div style={{ fontWeight: '600', fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>📺 {device.name}</div>
+                              <div style={{ fontWeight: '600', fontSize: '0.9rem', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
+                                {device.type === 'dlna' ? '📶 ' : device.type === 'airplay' ? '🍏 ' : '📺 '}
+                                {device.name}
+                                <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', marginLeft: '0.5rem', opacity: 0.8 }}>
+                                  ({device.type === 'dlna' ? 'Miracast/DLNA' : device.type === 'airplay' ? 'AirPlay/Apple' : 'Chromecast'})
+                                </span>
+                              </div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>IP: {device.host}</div>
                               {activeCastForDevice && (
                                 <div style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', marginTop: '0.15rem' }}>

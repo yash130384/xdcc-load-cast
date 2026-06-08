@@ -9,6 +9,8 @@ import * as cheerio from 'cheerio';
 import tls from 'tls';
 import { execFile, spawn } from 'child_process';
 import ChromecastAPI from 'chromecast-api';
+import dlnacastsCreator from 'dlnacasts2';
+import airplayerCreator from 'airplayer';
 import { IrcDccDownloader } from './irc-dcc-client.js';
 
 // Setup global log file interception
@@ -119,6 +121,44 @@ function startChromecastDiscovery() {
 }
 
 startChromecastDiscovery();
+
+// DLNA / Miracast discovery setup
+const discoveredDlnas = new Map();
+let dlnaBrowser = null;
+
+function startDlnaDiscovery() {
+  if (dlnaBrowser) return;
+  try {
+    dlnaBrowser = dlnacastsCreator();
+    dlnaBrowser.on('update', (player) => {
+      console.log(`[DLNA/Miracast] Discovered device: ${player.name}`);
+      discoveredDlnas.set(player.name, player);
+    });
+  } catch (err) {
+    console.error('[DLNA/Miracast] Error starting discovery:', err);
+  }
+}
+
+startDlnaDiscovery();
+
+// AirPlay discovery setup
+const discoveredAirplays = new Map();
+let airplayBrowser = null;
+
+function startAirplayDiscovery() {
+  if (airplayBrowser) return;
+  try {
+    airplayBrowser = airplayerCreator();
+    airplayBrowser.on('update', (player) => {
+      console.log(`[AirPlay] Discovered device: ${player.name}`);
+      discoveredAirplays.set(player.name, player);
+    });
+  } catch (err) {
+    console.error('[AirPlay] Error starting discovery:', err);
+  }
+}
+
+startAirplayDiscovery();
 
 // Xtream Codes API Cache
 let xtreamMovies = [];
@@ -2337,15 +2377,27 @@ app.post('/api/media-library/cast/play', async (req, res) => {
     return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
   }
 
-  const device = discoveredChromecasts.get(deviceName);
+  let device = discoveredChromecasts.get(deviceName);
+  let isDlna = false;
+  let isAirplay = false;
   if (!device) {
-    return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden.` });
+    device = discoveredDlnas.get(deviceName);
+    if (device) {
+      isDlna = true;
+    } else {
+      device = discoveredAirplays.get(deviceName);
+      if (device) {
+        isAirplay = true;
+      } else {
+        return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden.` });
+      }
+    }
   }
 
   // Always route through local server endpoint (especially for URLs to handle transcoding and CORS)
   const mediaUrl = `http://${getLocalIp()}:${PORT}/api/media/${encodeURIComponent(filename)}`;
 
-  console.log(`[Chromecast] Casting Library file "${filename}" to "${deviceName}" via ${mediaUrl}`);
+  console.log(`[Cast] Casting Library file "${filename}" to "${deviceName}" via ${mediaUrl} (isDlna: ${isDlna}, isAirplay: ${isAirplay})`);
 
   // Determine mime type
   let contentType = 'video/mp4';
@@ -2359,26 +2411,98 @@ app.post('/api/media-library/cast/play', async (req, res) => {
   else if (ext === '.wav') contentType = 'audio/wav';
 
   let responded = false;
-  device.play(mediaUrl, { contentType }, (err) => {
-    if (responded) return;
-    responded = true;
-    if (err) {
-      console.error(`[Chromecast] Fehler beim Abspielen der Library-Datei auf ${deviceName}:`, err);
-      return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+  if (isDlna) {
+    const performPlay = () => {
+      device.play(mediaUrl, {
+        title: filename,
+        type: contentType,
+        autoPlay: false
+      }, (err) => {
+        if (responded) return;
+        if (err) {
+          responded = true;
+          console.error(`[DLNA] Fehler beim Laden der Library-Datei auf ${deviceName}:`, err);
+          return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+        }
+
+        setTimeout(() => {
+          device.resume((resumeErr) => {
+            if (resumeErr) {
+              console.error(`[DLNA] Fehler beim Starten (Resume) auf ${deviceName}:`, resumeErr);
+            }
+          });
+        }, 1500);
+
+        responded = true;
+        activeCasts.set(deviceName, {
+          downloadId: null,
+          filename: filename,
+          deviceType: 'dlna',
+          playerState: 'PLAYING',
+          currentTime: 0,
+          duration: 0,
+          volume: 1,
+          muted: false
+        });
+        attachDlnaDeviceStatusListeners(device, deviceName);
+        broadcastActiveCasts();
+        return res.json({ success: true, deviceName, filename: filename });
+      });
+    };
+
+    if (device.client) {
+      // Stop first to reset transport state machine, then play with autoPlay: false to set URI, then trigger play after a delay
+      device.stop(() => {
+        setTimeout(performPlay, 1000);
+      });
+    } else {
+      performPlay();
     }
-    activeCasts.set(deviceName, {
-      downloadId: null,
-      filename: filename,
-      playerState: 'BUFFERING',
-      currentTime: 0,
-      duration: 0,
-      volume: 1,
-      muted: false
+  } else if (isAirplay) {
+    device.play(mediaUrl, (err) => {
+      if (responded) return;
+      responded = true;
+      if (err) {
+        console.error(`[AirPlay] Fehler beim Laden der Library-Datei auf ${deviceName}:`, err);
+        return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+      }
+      activeCasts.set(deviceName, {
+        downloadId: null,
+        filename: filename,
+        deviceType: 'airplay',
+        playerState: 'PLAYING',
+        currentTime: 0,
+        duration: 0,
+        volume: 1,
+        muted: false
+      });
+      attachAirplayDeviceStatusListeners(device, deviceName);
+      broadcastActiveCasts();
+      return res.json({ success: true, deviceName, filename: filename });
     });
-    attachDeviceStatusListeners(device, deviceName);
-    broadcastActiveCasts();
-    return res.json({ success: true, deviceName, filename: filename });
-  });
+  } else {
+    device.play(mediaUrl, { contentType }, (err) => {
+      if (responded) return;
+      responded = true;
+      if (err) {
+        console.error(`[Chromecast] Fehler beim Abspielen der Library-Datei auf ${deviceName}:`, err);
+        return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+      }
+      activeCasts.set(deviceName, {
+        downloadId: null,
+        filename: filename,
+        deviceType: 'chromecast',
+        playerState: 'BUFFERING',
+        currentTime: 0,
+        duration: 0,
+        volume: 1,
+        muted: false
+      });
+      attachDeviceStatusListeners(device, deviceName);
+      broadcastActiveCasts();
+      return res.json({ success: true, deviceName, filename: filename });
+    });
+  }
 });
 
 // Local and Chromecast Playback endpoints
@@ -2412,11 +2536,36 @@ app.get('/api/chromecast/devices', (req, res) => {
       console.error('[Chromecast] Fehler beim Aktualisieren des Browsers:', e);
     }
   }
-  const list = Array.from(discoveredChromecasts.values()).map(d => ({
+  if (dlnaBrowser) {
+    try {
+      dlnaBrowser.update();
+    } catch (e) {
+      console.error('[DLNA] Fehler beim Aktualisieren des Browsers:', e);
+    }
+  }
+  if (airplayBrowser) {
+    try {
+      airplayBrowser.update();
+    } catch (e) {
+      console.error('[AirPlay] Fehler beim Aktualisieren des Browsers:', e);
+    }
+  }
+  const chromecasts = Array.from(discoveredChromecasts.values()).map(d => ({
     name: d.friendlyName,
-    host: d.host
+    host: d.host,
+    type: 'chromecast'
   }));
-  return res.json(list);
+  const dlnas = Array.from(discoveredDlnas.values()).map(d => ({
+    name: d.name,
+    host: d.host || 'DLNA',
+    type: 'dlna'
+  }));
+  const airplays = Array.from(discoveredAirplays.values()).map(d => ({
+    name: d.name,
+    host: d.host || 'AirPlay',
+    type: 'airplay'
+  }));
+  return res.json([...chromecasts, ...dlnas, ...airplays]);
 });
 
 // Helper to get local network IP address (ipv4, non-loopback)
@@ -2470,6 +2619,90 @@ function attachDeviceStatusListeners(device, deviceName) {
   }
 }
 
+// Helper to parse HH:MM:SS or MM:SS to seconds
+function parseTimeStringToSeconds(timeStr) {
+  if (!timeStr || typeof timeStr !== 'string') return 0;
+  if (/^\d+(\.\d+)?$/.test(timeStr)) {
+    return parseFloat(timeStr);
+  }
+  const parts = timeStr.split(':');
+  if (parts.length === 3) {
+    const h = parseInt(parts[0], 10) || 0;
+    const m = parseInt(parts[1], 10) || 0;
+    const s = parseInt(parts[2], 10) || 0;
+    return h * 3600 + m * 60 + s;
+  } else if (parts.length === 2) {
+    const m = parseInt(parts[0], 10) || 0;
+    const s = parseInt(parts[1], 10) || 0;
+    return m * 60 + s;
+  }
+  return 0;
+}
+
+// DLNA Device Status Listeners
+function attachDlnaDeviceStatusListeners(device, deviceName) {
+  device.removeAllListeners('status');
+  device.on('status', (status) => {
+    console.log(`[DLNA] Status update on ${deviceName}:`, status?.transportState);
+    if (status) {
+      const castInfo = activeCasts.get(deviceName);
+      if (castInfo) {
+        let playerState = 'PLAYING';
+        if (status.transportState === 'PAUSED_PLAYBACK') {
+          playerState = 'PAUSED';
+        } else if (status.transportState === 'STOPPED') {
+          playerState = 'IDLE';
+        }
+
+        castInfo.playerState = playerState;
+        if (status.relTime) {
+          castInfo.currentTime = parseTimeStringToSeconds(status.relTime);
+        }
+        if (status.trackDuration) {
+          castInfo.duration = parseTimeStringToSeconds(status.trackDuration);
+        }
+        if (status.volume !== undefined) {
+          castInfo.volume = status.volume / 100;
+        }
+
+        activeCasts.set(deviceName, castInfo);
+        broadcastActiveCasts();
+
+        if (playerState === 'IDLE') {
+          console.log(`[DLNA] Playback STOPPED on ${deviceName}. Clearing active cast.`);
+          activeCasts.delete(deviceName);
+          broadcastActiveCasts();
+        }
+      }
+    }
+  });
+}
+
+// AirPlay Device Status Listeners
+function attachAirplayDeviceStatusListeners(device, deviceName) {
+  device.removeAllListeners('event');
+  device.on('event', (event) => {
+    console.log(`[AirPlay] Status update on ${deviceName}:`, event);
+    if (event) {
+      const castInfo = activeCasts.get(deviceName);
+      if (castInfo) {
+        if (event.state === 'playing') {
+          castInfo.playerState = 'PLAYING';
+        } else if (event.state === 'paused') {
+          castInfo.playerState = 'PAUSED';
+        } else if (event.state === 'stopped') {
+          console.log(`[AirPlay] Playback STOPPED on ${deviceName}. Clearing active cast.`);
+          activeCasts.delete(deviceName);
+          broadcastActiveCasts();
+          return;
+        }
+        activeCasts.set(deviceName, castInfo);
+        broadcastActiveCasts();
+      }
+    }
+  });
+}
+
 // Periodic status check (every 8 seconds) to verify active casts are still playing
 setInterval(() => {
   if (activeCasts.size === 0) return;
@@ -2477,7 +2710,85 @@ setInterval(() => {
   for (const [deviceName, castInfo] of activeCasts.entries()) {
     const device = discoveredChromecasts.get(deviceName);
     if (!device) {
-      console.log(`[Chromecast Check] Active device "${deviceName}" is no longer in discovered list. Clearing.`);
+      // Check if it's a DLNA device
+      const dlnaDevice = discoveredDlnas.get(deviceName);
+      if (dlnaDevice) {
+        dlnaDevice.status((err, status) => {
+          if (err) {
+            console.log(`[DLNA Check] Failed to get status for "${deviceName}": ${err.message}. Clearing active cast.`);
+            activeCasts.delete(deviceName);
+            broadcastActiveCasts();
+            return;
+          }
+          
+          if (status) {
+            const currentCast = activeCasts.get(deviceName);
+            if (currentCast) {
+              let playerState = 'PLAYING';
+              if (status.transportState === 'PAUSED_PLAYBACK') {
+                playerState = 'PAUSED';
+              } else if (status.transportState === 'STOPPED') {
+                playerState = 'IDLE';
+              }
+              
+              currentCast.playerState = playerState;
+              if (status.relTime) {
+                currentCast.currentTime = parseTimeStringToSeconds(status.relTime);
+              }
+              if (status.trackDuration) {
+                currentCast.duration = parseTimeStringToSeconds(status.trackDuration);
+              }
+              if (status.volume !== undefined) {
+                currentCast.volume = status.volume / 100;
+              }
+              
+              if (playerState === 'IDLE') {
+                activeCasts.delete(deviceName);
+              } else {
+                activeCasts.set(deviceName, currentCast);
+              }
+              broadcastActiveCasts();
+            }
+          }
+        });
+        continue;
+      }
+
+      // Check if it's an AirPlay device
+      const airplayDevice = discoveredAirplays.get(deviceName);
+      if (airplayDevice) {
+        airplayDevice.playbackInfo((err, resObj, body) => {
+          if (err) {
+            console.log(`[AirPlay Check] Failed to get status for "${deviceName}": ${err.message}. Clearing active cast.`);
+            activeCasts.delete(deviceName);
+            broadcastActiveCasts();
+            return;
+          }
+          if (body) {
+            const currentCast = activeCasts.get(deviceName);
+            if (currentCast) {
+              if (body.rate !== undefined) {
+                currentCast.playerState = body.rate === 0 ? 'PAUSED' : 'PLAYING';
+              }
+              if (body.duration !== undefined) {
+                currentCast.duration = body.duration;
+              }
+              if (body.position !== undefined) {
+                currentCast.currentTime = body.position;
+              }
+              activeCasts.set(deviceName, currentCast);
+              broadcastActiveCasts();
+            }
+          } else {
+            console.log(`[AirPlay Check] No status body for "${deviceName}". Clearing active cast.`);
+            activeCasts.delete(deviceName);
+            broadcastActiveCasts();
+          }
+        });
+        continue;
+      }
+
+      console.log(`[Cast Check] Active device "${deviceName}" is no longer in discovered list. Clearing.`);
       activeCasts.delete(deviceName);
       broadcastActiveCasts();
       continue;
@@ -2512,16 +2823,28 @@ app.post('/api/chromecast/play', async (req, res) => {
     return res.status(400).json({ error: 'Download ist noch nicht abgeschlossen' });
   }
 
-  const device = discoveredChromecasts.get(deviceName);
+  let device = discoveredChromecasts.get(deviceName);
+  let isDlna = false;
+  let isAirplay = false;
   if (!device) {
-    return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden. Bitte Suche aktualisieren.` });
+    device = discoveredDlnas.get(deviceName);
+    if (device) {
+      isDlna = true;
+    } else {
+      device = discoveredAirplays.get(deviceName);
+      if (device) {
+        isAirplay = true;
+      } else {
+        return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden. Bitte Suche aktualisieren.` });
+      }
+    }
   }
 
   const filename = item.downloader.filename;
   const localIp = getLocalIp();
   const mediaUrl = `http://${localIp}:${PORT}/api/media/${encodeURIComponent(filename)}`;
 
-  console.log(`[Chromecast] Casting "${filename}" to "${deviceName}" via ${mediaUrl}`);
+  console.log(`[Cast] Casting "${filename}" to "${deviceName}" via ${mediaUrl} (isDlna: ${isDlna}, isAirplay: ${isAirplay})`);
 
   // Determine mime type
   let contentType = 'video/mp4';
@@ -2535,26 +2858,98 @@ app.post('/api/chromecast/play', async (req, res) => {
   else if (ext === '.wav') contentType = 'audio/wav';
 
   let responded = false;
-  device.play(mediaUrl, { contentType }, (err) => {
-    if (responded) return;
-    responded = true;
-    if (err) {
-      console.error(`[Chromecast] Fehler beim Abspielen auf ${deviceName}:`, err);
-      return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+  if (isDlna) {
+    const performPlay = () => {
+      device.play(mediaUrl, {
+        title: filename,
+        type: contentType,
+        autoPlay: false
+      }, (err) => {
+        if (responded) return;
+        if (err) {
+          responded = true;
+          console.error(`[DLNA] Fehler beim Laden auf ${deviceName}:`, err);
+          return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+        }
+
+        setTimeout(() => {
+          device.resume((resumeErr) => {
+            if (resumeErr) {
+              console.error(`[DLNA] Fehler beim Starten (Resume) auf ${deviceName}:`, resumeErr);
+            }
+          });
+        }, 1500);
+
+        responded = true;
+        activeCasts.set(deviceName, {
+          downloadId,
+          filename,
+          deviceType: 'dlna',
+          playerState: 'PLAYING',
+          currentTime: 0,
+          duration: 0,
+          volume: 1,
+          muted: false
+        });
+        attachDlnaDeviceStatusListeners(device, deviceName);
+        broadcastActiveCasts();
+        return res.json({ success: true, deviceName, filename });
+      });
+    };
+
+    if (device.client) {
+      // Stop first to reset transport state machine, then play with autoPlay: false to set URI, then trigger play after a delay
+      device.stop(() => {
+        setTimeout(performPlay, 1000);
+      });
+    } else {
+      performPlay();
     }
-    activeCasts.set(deviceName, {
-      downloadId,
-      filename,
-      playerState: 'BUFFERING',
-      currentTime: 0,
-      duration: 0,
-      volume: 1,
-      muted: false
+  } else if (isAirplay) {
+    device.play(mediaUrl, (err) => {
+      if (responded) return;
+      responded = true;
+      if (err) {
+        console.error(`[AirPlay] Fehler beim Abspielen auf ${deviceName}:`, err);
+        return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+      }
+      activeCasts.set(deviceName, {
+        downloadId,
+        filename,
+        deviceType: 'airplay',
+        playerState: 'PLAYING',
+        currentTime: 0,
+        duration: 0,
+        volume: 1,
+        muted: false
+      });
+      attachAirplayDeviceStatusListeners(device, deviceName);
+      broadcastActiveCasts();
+      return res.json({ success: true, deviceName, filename });
     });
-    attachDeviceStatusListeners(device, deviceName);
-    broadcastActiveCasts();
-    return res.json({ success: true, deviceName, filename });
-  });
+  } else {
+    device.play(mediaUrl, { contentType }, (err) => {
+      if (responded) return;
+      responded = true;
+      if (err) {
+        console.error(`[Chromecast] Fehler beim Abspielen auf ${deviceName}:`, err);
+        return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
+      }
+      activeCasts.set(deviceName, {
+        downloadId,
+        filename,
+        deviceType: 'chromecast',
+        playerState: 'BUFFERING',
+        currentTime: 0,
+        duration: 0,
+        volume: 1,
+        muted: false
+      });
+      attachDeviceStatusListeners(device, deviceName);
+      broadcastActiveCasts();
+      return res.json({ success: true, deviceName, filename });
+    });
+  }
 });
 
 app.post('/api/chromecast/stop', (req, res) => {
@@ -2575,7 +2970,25 @@ app.post('/api/chromecast/stop', (req, res) => {
       }
     });
   } else {
-    console.log(`[Chromecast] Gerät "${deviceName}" für Stop nicht in Entdeckungsliste.`);
+    const dlnaDevice = discoveredDlnas.get(deviceName);
+    if (dlnaDevice && dlnaDevice.client && typeof dlnaDevice.stop === 'function') {
+      dlnaDevice.stop((err) => {
+        if (err) {
+          console.error(`[DLNA] Fehler beim Hintergrund-Stoppen auf ${deviceName}:`, err.message);
+        }
+      });
+    } else {
+      const airplayDevice = discoveredAirplays.get(deviceName);
+      if (airplayDevice && typeof airplayDevice.stop === 'function') {
+        airplayDevice.stop((err) => {
+          if (err) {
+            console.error(`[AirPlay] Fehler beim Hintergrund-Stoppen auf ${deviceName}:`, err.message);
+          }
+        });
+      } else {
+        console.log(`[Cast] Gerät "${deviceName}" für Stop nicht in Entdeckungsliste oder nicht aktiv.`);
+      }
+    }
   }
 
   return res.json({ success: true });
@@ -2587,11 +3000,134 @@ app.post('/api/chromecast/control', (req, res) => {
     return res.status(400).json({ error: 'Parameter deviceName und action fehlen' });
   }
 
-  const device = discoveredChromecasts.get(deviceName);
+  let device = discoveredChromecasts.get(deviceName);
+  let isDlna = false;
+  let isAirplay = false;
   if (!device) {
-    return res.status(404).json({ error: 'Gerät nicht gefunden' });
+    device = discoveredDlnas.get(deviceName);
+    if (device) {
+      isDlna = true;
+    } else {
+      device = discoveredAirplays.get(deviceName);
+      if (device) {
+        isAirplay = true;
+      } else {
+        return res.status(404).json({ error: 'Gerät nicht gefunden' });
+      }
+    }
   }
 
+  if (isAirplay) {
+    const callback = (err) => {
+      if (err) {
+        console.error(`[AirPlay Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
+        return res.status(500).json({ error: `Steuerung fehlgeschlagen: ${err.message}` });
+      }
+      
+      // Fetch status immediately
+      device.playbackInfo((statusErr, resObj, body) => {
+        if (!statusErr && body) {
+          const castInfo = activeCasts.get(deviceName);
+          if (castInfo) {
+            if (body.rate !== undefined) {
+              castInfo.playerState = body.rate === 0 ? 'PAUSED' : 'PLAYING';
+            }
+            if (body.duration !== undefined) {
+              castInfo.duration = body.duration;
+            }
+            if (body.position !== undefined) {
+              castInfo.currentTime = body.position;
+            }
+            activeCasts.set(deviceName, castInfo);
+            broadcastActiveCasts();
+          }
+        }
+      });
+      return res.json({ success: true });
+    };
+
+    switch (action) {
+      case 'pause':
+        device.pause(callback);
+        break;
+      case 'resume':
+        device.resume(callback);
+        break;
+      case 'seek':
+        device.scrub(parseFloat(value), callback);
+        break;
+      case 'volume':
+        // volume control is not directly supported by this AirPlay library, return success
+        return res.json({ success: true });
+      default:
+        return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
+    }
+    return;
+  }
+
+  if (isDlna) {
+    if (!device.client) {
+      return res.status(400).json({ error: 'Wiedergabe ist nicht aktiv.' });
+    }
+    const callback = (err) => {
+      if (err) {
+        console.error(`[DLNA Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
+        return res.status(500).json({ error: `Steuerung fehlgeschlagen: ${err.message}` });
+      }
+      
+      // Poll status immediately
+      device.status((statusErr, status) => {
+        if (!statusErr && status) {
+          const castInfo = activeCasts.get(deviceName);
+          if (castInfo) {
+            let playerState = 'PLAYING';
+            if (status.transportState === 'PAUSED_PLAYBACK') {
+              playerState = 'PAUSED';
+            } else if (status.transportState === 'STOPPED') {
+              playerState = 'IDLE';
+            }
+            castInfo.playerState = playerState;
+            if (status.relTime) {
+              castInfo.currentTime = parseTimeStringToSeconds(status.relTime);
+            }
+            if (status.trackDuration) {
+              castInfo.duration = parseTimeStringToSeconds(status.trackDuration);
+            }
+            if (status.volume !== undefined) {
+              castInfo.volume = status.volume / 100;
+            }
+            activeCasts.set(deviceName, castInfo);
+            broadcastActiveCasts();
+          }
+        }
+      });
+      return res.json({ success: true });
+    };
+
+    switch (action) {
+      case 'pause':
+        device.pause(callback);
+        break;
+      case 'resume':
+        if (typeof device.resume === 'function') {
+          device.resume(callback);
+        } else {
+          device.play(callback);
+        }
+        break;
+      case 'seek':
+        device.seek(parseFloat(value), callback);
+        break;
+      case 'volume':
+        device.volume(Math.round(parseFloat(value) * 100), callback);
+        break;
+      default:
+        return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
+    }
+    return;
+  }
+
+  // Chromecast control
   const callback = (err) => {
     if (err) {
       console.error(`[Chromecast Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
