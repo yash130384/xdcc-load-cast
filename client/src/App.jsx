@@ -1427,8 +1427,22 @@ function App() {
             <button 
               className={`nav-btn ${currentView === 'library' ? 'active' : ''}`}
               onClick={() => {
+                const wasLibrary = currentView === 'library';
+                const isAtTopLevel = selectedCategory === 'all' &&
+                                     selectedSubcategory === 'all' &&
+                                     librarySearchQuery === '' &&
+                                     currentPage === 1;
+                
                 setCurrentView('library');
-                fetchMediaLibrary();
+                setActiveSeriesId(null);
+                setSelectedCategory('all');
+                setSelectedSubcategory('all');
+                setLibrarySearchQuery('');
+                setCurrentPage(1);
+                
+                if (isAtTopLevel) {
+                  fetchMediaLibrary();
+                }
               }}
             >
               🎥 Mediathek
@@ -1793,7 +1807,7 @@ function App() {
                   <span className="spinner" style={{ fontSize: '2rem' }}>⏳</span>
                   <p>Mediathek wird gescannt...</p>
                 </div>
-              ) : mediaLibrary.length === 0 ? (
+              ) : (mediaLibrary.length === 0 && !librarySearchQuery && selectedCategory === 'all' && selectedSubcategory === 'all') ? (
                 <div className="empty-state">
                   <span className="empty-state-icon">🎥</span>
                   <p>Keine Mediendateien im Download-Ordner gefunden.</p>
@@ -2264,13 +2278,21 @@ function App() {
                   {filteredLibrary.length === 0 ? (
                     <div className="empty-state" style={{ padding: '2rem' }}>
                       <span className="empty-state-icon">🔍</span>
-                      <p>Keine Übereinstimmung für „{librarySearchQuery}“ gefunden.</p>
+                      {librarySearchQuery ? (
+                        <p>Keine Übereinstimmung für „{librarySearchQuery}“ gefunden.</p>
+                      ) : (
+                        <p>Keine Mediendateien in dieser Kategorie gefunden.</p>
+                      )}
                       <button 
                         className="btn btn-secondary" 
                         style={{ fontSize: '0.75rem', padding: '0.3rem 0.6rem' }} 
-                        onClick={() => setLibrarySearchQuery('')}
+                        onClick={() => {
+                          setLibrarySearchQuery('');
+                          setSelectedCategory('all');
+                          setSelectedSubcategory('all');
+                        }}
                       >
-                        Suche zurücksetzen
+                        Filter zurücksetzen
                       </button>
                     </div>
                   ) : selectedCategory === 'Musik' ? (

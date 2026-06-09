@@ -2154,6 +2154,17 @@ async function fetchImdbMetadata(parsedInfo) {
 }
 
 async function getOrFetchMetadata(filename, ext) {
+  if (MUSIC_EXTENSIONS.has(ext)) {
+    if (!metadataCache[filename] || metadataCache[filename].category !== 'Musik') {
+      metadataCache[filename] = {
+        title: path.parse(filename).name,
+        category: 'Musik'
+      };
+      saveMetadataCache();
+    }
+    return metadataCache[filename];
+  }
+
   if (metadataCache[filename]) {
     // Migration: If item was not found on IMDb but is not categorized as 'Videos', fix it.
     if (metadataCache[filename].notFound && metadataCache[filename].category !== 'Videos') {
@@ -2161,16 +2172,6 @@ async function getOrFetchMetadata(filename, ext) {
       saveMetadataCache();
     }
     return metadataCache[filename];
-  }
-  
-  if (MUSIC_EXTENSIONS.has(ext)) {
-    const data = {
-      title: path.parse(filename).name,
-      category: 'Musik'
-    };
-    metadataCache[filename] = data;
-    saveMetadataCache();
-    return data;
   }
   
   const parsed = parseFilename(filename);
@@ -2396,12 +2397,32 @@ app.get('/api/media-library', async (req, res) => {
   // 2. Compute category counts based on the search-filtered list (just like frontend did)
   const counts = {
     all: filteredRaw.length,
-    Lokal: filteredRaw.filter(item => item.metadata?.category === 'Lokal').length,
-    Filme: filteredRaw.filter(item => (item.metadata?.category || 'Filme') === 'Filme').length,
-    Serien: filteredRaw.filter(item => item.metadata?.category === 'Serien').length,
-    Videos: filteredRaw.filter(item => item.metadata?.category === 'Videos').length,
-    Musik: filteredRaw.filter(item => item.metadata?.category === 'Musik').length,
-    'Live TV': filteredRaw.filter(item => item.metadata?.category === 'Live TV').length
+    Lokal: filteredRaw.filter(item => !item.isXtream).length,
+    Filme: filteredRaw.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === 'Filme' || origCat === 'Filme';
+    }).length,
+    Serien: filteredRaw.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === 'Serien' || origCat === 'Serien';
+    }).length,
+    Videos: filteredRaw.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === 'Videos' || origCat === 'Videos';
+    }).length,
+    Musik: filteredRaw.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === 'Musik' || origCat === 'Musik';
+    }).length,
+    'Live TV': filteredRaw.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === 'Live TV' || origCat === 'Live TV';
+    }).length
   };
 
   // 3. Group the search-filtered items (Series grouping)
@@ -2462,7 +2483,8 @@ app.get('/api/media-library', async (req, res) => {
   if (category !== 'all') {
     filteredGrouped = groupedItems.filter(item => {
       const cat = item.metadata?.category || item.category || 'Videos';
-      return cat === category;
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === category || origCat === category;
     });
   }
 
