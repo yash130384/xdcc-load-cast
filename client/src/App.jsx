@@ -153,6 +153,8 @@ function App() {
   const [showLogs, setShowLogs] = useState(false);
   const [logsContent, setLogsContent] = useState('');
   const [loadingLogs, setLoadingLogs] = useState(false);
+  const [autoScrollActive, setAutoScrollActive] = useState(true);
+  const logsPreRef = useRef(null);
 
   // Xtream Codes state
   const [tempXtreamHost, setTempXtreamHost] = useState('');
@@ -859,6 +861,49 @@ function App() {
       });
   };
 
+  // Logs polling when shown
+  useEffect(() => {
+    if (!showLogs) return;
+
+    // Reset scroll active status on open
+    setAutoScrollActive(true);
+    fetchLogs();
+
+    const interval = setInterval(() => {
+      fetch('/api/logs')
+        .then(res => res.json())
+        .then(data => {
+          setLogsContent(data.logs || 'Keine System-Logs vorhanden.');
+        })
+        .catch(err => {
+          console.error('Error polling logs:', err);
+        });
+    }, 2000);
+
+    return () => clearInterval(interval);
+  }, [showLogs]);
+
+  // Autoscroll logs to bottom when content updates
+  useEffect(() => {
+    if (showLogs && autoScrollActive && logsPreRef.current) {
+      const pre = logsPreRef.current;
+      pre.scrollTop = pre.scrollHeight;
+    }
+  }, [logsContent, autoScrollActive, showLogs]);
+
+  const handleLogsScroll = () => {
+    if (!logsPreRef.current) return;
+    const pre = logsPreRef.current;
+    // Calculate how close the scroll is to the bottom
+    const isAtBottom = pre.scrollHeight - pre.scrollTop - pre.clientHeight < 15;
+    
+    if (isAtBottom) {
+      setAutoScrollActive(true);
+    } else {
+      setAutoScrollActive(false);
+    }
+  };
+
   const handleCheckNow = (imdbId) => {
     setCheckingShowId(imdbId);
     fetch('/api/auto-download/check-now', {
@@ -1248,7 +1293,18 @@ function App() {
           <div className="brand">
             <span className="brand-icon">⚡</span>
             <div>
-              <h1>XDCC Load&Cast</h1>
+              <h1 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                XDCC Load&Cast
+                <span className="version-info-badge" style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-secondary)', background: 'rgba(255, 255, 255, 0.06)', padding: '0.15rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border-color)', verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
+                  <span>v{settings.version || '1.0.0'}</span>
+                  {settings.startTime && (
+                    <>
+                      <span style={{ opacity: 0.5 }}>•</span>
+                      <span>Gestartet: {new Date(settings.startTime).toLocaleString('de-DE')}</span>
+                    </>
+                  )}
+                </span>
+              </h1>
               <span>Local Search & Transfer</span>
             </div>
           </div>
@@ -2835,9 +2891,45 @@ function App() {
               </div>
 
               <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
-                <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                  Hier sind die letzten System-Logs der Anwendung. Du kannst sie ansehen und kopieren.
-                </p>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '0.5rem' }}>
+                  <p style={{ fontSize: '0.85rem', color: 'var(--text-secondary)', margin: 0 }}>
+                    Hier sind die letzten System-Logs der Anwendung. Du kannst sie ansehen und kopieren.
+                  </p>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    <span style={{ 
+                      display: 'inline-flex', 
+                      alignItems: 'center', 
+                      gap: '0.3rem', 
+                      fontSize: '0.75rem', 
+                      fontWeight: 'bold', 
+                      color: autoScrollActive ? 'var(--accent-green)' : 'var(--text-muted)',
+                      background: autoScrollActive ? 'rgba(0, 255, 135, 0.08)' : 'rgba(255, 255, 255, 0.04)',
+                      padding: '0.2rem 0.5rem',
+                      borderRadius: '4px',
+                      border: autoScrollActive ? '1px solid rgba(0, 255, 135, 0.2)' : '1px solid var(--border-color)'
+                    }}>
+                      <span className={autoScrollActive ? "spinner" : ""} style={{ display: 'inline-block' }}>
+                        {autoScrollActive ? "🟢" : "⏸️"}
+                      </span>
+                      <span>{autoScrollActive ? "Live-Stream" : "Pausiert"}</span>
+                    </span>
+                    {!autoScrollActive && (
+                      <button
+                        className="btn btn-secondary"
+                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', borderRadius: '4px', height: 'auto' }}
+                        onClick={() => {
+                          setAutoScrollActive(true);
+                          if (logsPreRef.current) {
+                            const pre = logsPreRef.current;
+                            pre.scrollTop = pre.scrollHeight;
+                          }
+                        }}
+                      >
+                        ⬇️ Scrollen
+                      </button>
+                    )}
+                  </div>
+                </div>
 
                 {loadingLogs ? (
                   <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
@@ -2847,6 +2939,8 @@ function App() {
                 ) : (
                   <div>
                     <pre 
+                      ref={logsPreRef}
+                      onScroll={handleLogsScroll}
                       style={{
                         background: 'rgba(0, 0, 0, 0.5)',
                         border: '1px solid var(--border-color)',

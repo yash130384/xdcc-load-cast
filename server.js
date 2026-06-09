@@ -15,6 +15,19 @@ import { IrcDccDownloader } from './irc-dcc-client.js';
 import crypto from 'crypto';
 import { HttpDownloader } from './http-downloader.js';
 
+// Read version from package.json & record server start time
+let appVersion = '1.0.0';
+try {
+  const packageJsonPath = path.join(process.cwd(), 'package.json');
+  if (fs.existsSync(packageJsonPath)) {
+    const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8'));
+    appVersion = pkg.version || '1.0.0';
+  }
+} catch (e) {
+  console.error('[Startup] Failed to read package.json version:', e.message);
+}
+const serverStartTime = new Date().toISOString();
+
 // Setup global log file interception
 const LOG_FILE = path.join(os.homedir(), '.xdcc_downloader_logs.txt');
 
@@ -736,6 +749,8 @@ app.get('/api/downloads', (req, res) => {
 app.get('/api/settings', (req, res) => {
   const publicConfig = { ...appConfig };
   delete publicConfig.xxxPin;
+  publicConfig.version = appVersion;
+  publicConfig.startTime = serverStartTime;
   return res.json(publicConfig);
 });
 
@@ -805,6 +820,8 @@ app.post('/api/settings', (req, res) => {
 
   const publicConfig = { ...appConfig };
   delete publicConfig.xxxPin;
+  publicConfig.version = appVersion;
+  publicConfig.startTime = serverStartTime;
   return res.json(publicConfig);
 });
 
