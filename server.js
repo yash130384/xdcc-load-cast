@@ -14,6 +14,7 @@ import airplayerCreator from 'airplayer';
 import { IrcDccDownloader } from './irc-dcc-client.js';
 import crypto from 'crypto';
 import { HttpDownloader } from './http-downloader.js';
+import { parseFile } from 'music-metadata';
 
 // Read version from package.json & record server start time
 let appVersion = '1.0.0';
@@ -2196,14 +2197,90 @@ async function fetchImdbMetadata(parsedInfo) {
 
 async function getOrFetchMetadata(filename, ext) {
   if (MUSIC_EXTENSIONS.has(ext)) {
-    if (!metadataCache[filename] || metadataCache[filename].category !== 'Musik') {
-      metadataCache[filename] = {
-        title: path.parse(filename).name,
-        category: 'Musik'
-      };
-      saveMetadataCache();
+    if (metadataCache[filename] && metadataCache[filename].category === 'Musik' && metadataCache[filename].artist) {
+      return metadataCache[filename];
     }
-    return metadataCache[filename];
+
+    const baseName = path.parse(filename).name;
+    const fullPath = getSafeFilePath(filename);
+
+    let title = baseName;
+    let artist = 'Unbekannter Künstler';
+    let album = 'Unbekanntes Album';
+    let genre = 'Musik';
+    let year = null;
+    let track = null;
+    let posterUrl = null;
+
+    if (fullPath && fs.existsSync(fullPath)) {
+      try {
+        console.log(`[Music Parser] Parsing tags for: ${filename}`);
+        const parsed = await parseFile(fullPath, { skipCovers: true });
+        if (parsed && parsed.common) {
+          title = parsed.common.title || title;
+          artist = parsed.common.artist || artist;
+          album = parsed.common.album || album;
+          if (parsed.common.genre && parsed.common.genre.length > 0) {
+            genre = parsed.common.genre[0];
+          }
+          year = parsed.common.year || year;
+          if (parsed.common.track && parsed.common.track.no !== undefined) {
+            track = parsed.common.track.no;
+          }
+        }
+      } catch (err) {
+        console.error(`[Music Parser] Error parsing tags for ${filename}:`, err.message);
+      }
+    }
+
+    if (artist !== 'Unbekannter Künstler') {
+      try {
+        const queryTerm = `${artist} ${album !== 'Unbekanntes Album' ? album : title}`;
+        console.log(`[Music Web Fetch] Querying iTunes API for: "${queryTerm}"`);
+        const itunesRes = await axios.get('https://itunes.apple.com/search', {
+          params: {
+            term: queryTerm,
+            entity: 'song',
+            limit: 1
+          },
+          timeout: 5000
+        });
+
+        if (itunesRes.data && itunesRes.data.results && itunesRes.data.results.length > 0) {
+          const result = itunesRes.data.results[0];
+          if (result.artworkUrl100) {
+            posterUrl = result.artworkUrl100.replace('100x100bb', '600x600bb');
+          }
+          if (genre === 'Musik' && result.primaryGenreName) {
+            genre = result.primaryGenreName;
+          }
+          if (album === 'Unbekanntes Album' && result.collectionName) {
+            album = result.collectionName;
+          }
+          if (!year && result.releaseDate) {
+            year = new Date(result.releaseDate).getFullYear();
+          }
+        }
+      } catch (err) {
+        console.error(`[Music Web Fetch] Failed to fetch details from iTunes for ${artist}:`, err.message);
+      }
+    }
+
+    const data = {
+      title,
+      artist,
+      album,
+      genre,
+      year,
+      track,
+      posterUrl,
+      category: 'Musik',
+      subcategory: artist
+    };
+
+    metadataCache[filename] = data;
+    saveMetadataCache();
+    return data;
   }
 
   if (metadataCache[filename]) {
@@ -2397,6 +2474,7 @@ app.get('/api/media-library', async (req, res) => {
     mappedLive = xtreamLive.map(channel => {
       const streamUrl = `${host}/live/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${channel.stream_id}.ts`;
       const subcat = liveCatMap.get(String(channel.category_id)) || 'Sonstige';
+      const isRadio = subcat.toLowerCase().includes('radio') || channel.name.toLowerCase().includes('radio');
       return {
         filename: streamUrl,
         sizeBytes: 0,
@@ -2407,9 +2485,9 @@ app.get('/api/media-library', async (req, res) => {
         metadata: {
           title: channel.name,
           posterUrl: channel.stream_icon,
-          category: 'Live TV',
-          subcategory: subcat,
-          cast: 'Xtream Live TV Channel'
+          category: isRadio ? 'Musik' : 'Live TV',
+          subcategory: isRadio ? 'Internet-Radio' : subcat,
+          cast: isRadio ? 'Xtream Internet Radio' : 'Xtream Live TV Channel'
         }
       };
     });
@@ -2526,6 +2604,32 @@ app.get('/api/media-library', async (req, res) => {
       const cat = item.metadata?.category || item.category || 'Videos';
       const origCat = item.metadata?.originalCategory || cat;
       return cat === category || origCat === category;
+    });
+  }
+
+  // 4b. Special sorting for Musik category (Artist -> Album -> Track -> Title)
+  if (category === 'Musik') {
+    filteredGrouped.sort((a, b) => {
+      const isRadioA = a.metadata?.subcategory === 'Internet-Radio';
+      const isRadioB = b.metadata?.subcategory === 'Internet-Radio';
+      if (isRadioA && !isRadioB) return 1;
+      if (!isRadioA && isRadioB) return -1;
+      
+      const artistA = (a.metadata?.artist || '').toLowerCase();
+      const artistB = (b.metadata?.artist || '').toLowerCase();
+      if (artistA !== artistB) return artistA.localeCompare(artistB);
+      
+      const albumA = (a.metadata?.album || '').toLowerCase();
+      const albumB = (b.metadata?.album || '').toLowerCase();
+      if (albumA !== albumB) return albumA.localeCompare(albumB);
+      
+      const trackA = a.metadata?.track || 0;
+      const trackB = b.metadata?.track || 0;
+      if (trackA !== trackB) return trackA - trackB;
+      
+      const titleA = (a.metadata?.title || '').toLowerCase();
+      const titleB = (b.metadata?.title || '').toLowerCase();
+      return titleA.localeCompare(titleB);
     });
   }
 

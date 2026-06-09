@@ -2257,7 +2257,7 @@ function App() {
                     </div>
 
                     {/* Subcategories tags container */}
-                    {availableSubcategories.length > 2 && (
+                    {availableSubcategories.length > 1 && (
                       <div className="subcategory-tags-container" style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', padding: '0.5rem 0', margin: '0.2rem 0', scrollbarWidth: 'thin' }}>
                         {availableSubcategories.map(sub => (
                           <button
@@ -2313,13 +2313,44 @@ function App() {
                         return (
                           <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
                             <div className="music-item">
-                              <div className="music-info">
-                                <div className="music-icon">🎵</div>
+                              <div className="music-info" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+                                <div className="music-icon" style={{ width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.04)', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
+                                  {item.metadata?.posterUrl ? (
+                                    <img 
+                                      src={getPosterSrc(item.metadata.posterUrl)} 
+                                      alt="Cover" 
+                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                                    />
+                                  ) : (
+                                    <span style={{ fontSize: '1.2rem' }}>🎵</span>
+                                  )}
+                                </div>
                                 <div className="music-details">
-                                  <div className="music-title" title={item.filename}>
+                                  <div className="music-title" title={item.filename} style={{ fontSize: '0.9rem', fontWeight: '500', color: 'var(--text-primary)' }}>
+                                    {item.metadata?.artist && item.metadata.artist !== 'Unbekannter Künstler' && (
+                                      <span style={{ color: 'var(--accent-cyan)', marginRight: '0.35rem', fontWeight: 'bold' }}>{item.metadata.artist} -</span>
+                                    )}
                                     {item.metadata?.title || item.filename}
                                   </div>
-                                  <div className="music-meta">
+                                  <div className="music-meta" style={{ fontSize: '0.75rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center', color: 'var(--text-secondary)' }}>
+                                    {item.metadata?.album && item.metadata.album !== 'Unbekanntes Album' && (
+                                      <>
+                                        <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>{item.metadata.album}</span>
+                                        <span>•</span>
+                                      </>
+                                    )}
+                                    {item.metadata?.year && (
+                                      <>
+                                        <span>{item.metadata.year}</span>
+                                        <span>•</span>
+                                      </>
+                                    )}
+                                    {item.metadata?.genre && item.metadata.genre !== 'Musik' && (
+                                      <>
+                                        <span style={{ color: 'var(--accent-blue)', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '3px', fontSize: '0.7rem' }}>{item.metadata.genre}</span>
+                                        <span>•</span>
+                                      </>
+                                    )}
                                     <span className="music-size">{formatBytes(item.sizeBytes)}</span>
                                     <span>•</span>
                                     <span>{new Date(item.mtime).toLocaleDateString()}</span>
