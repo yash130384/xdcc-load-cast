@@ -185,6 +185,44 @@ let xtreamLiveCategories = [];
 let lastXtreamFetch = 0;
 let xtreamSyncTimer = null;
 
+const XTREAM_CACHE_FILE = path.join(os.homedir(), '.xdcc_xtream_cache.json');
+
+function loadXtreamCache() {
+  if (fs.existsSync(XTREAM_CACHE_FILE)) {
+    try {
+      const data = JSON.parse(fs.readFileSync(XTREAM_CACHE_FILE, 'utf8'));
+      xtreamMovies = data.xtreamMovies || [];
+      xtreamSeries = data.xtreamSeries || [];
+      xtreamLive = data.xtreamLive || [];
+      xtreamVodCategories = data.xtreamVodCategories || [];
+      xtreamSeriesCategories = data.xtreamSeriesCategories || [];
+      xtreamLiveCategories = data.xtreamLiveCategories || [];
+      lastXtreamFetch = data.lastXtreamFetch || 0;
+      console.log(`[Xtream Cache] Loaded cache from disk. Movies: ${xtreamMovies.length}, Series: ${xtreamSeries.length}, Live: ${xtreamLive.length}, Last Fetch: ${new Date(lastXtreamFetch).toLocaleString()}`);
+    } catch (e) {
+      console.error('[Xtream Cache] Failed to load cache from disk:', e.message);
+    }
+  }
+}
+
+async function saveXtreamCache() {
+  try {
+    const data = {
+      xtreamMovies,
+      xtreamSeries,
+      xtreamLive,
+      xtreamVodCategories,
+      xtreamSeriesCategories,
+      xtreamLiveCategories,
+      lastXtreamFetch
+    };
+    await fs.promises.writeFile(XTREAM_CACHE_FILE, JSON.stringify(data, null, 2), 'utf8');
+    console.log(`[Xtream Cache] Saved cache to disk (${XTREAM_CACHE_FILE}).`);
+  } catch (e) {
+    console.error('[Xtream Cache] Failed to save cache to disk:', e.message);
+  }
+}
+
 function isAdultContent(subcategory, title) {
   const adultKeywords = ['xxx', 'adult', '18+', 'porn', 'erotik', 'redlight', 'pink', 'explicito', 'sensual', 'hot', 'erotic', 'hentai', 'lust', 'sxt'];
   const cat = (subcategory || '').toLowerCase();
@@ -225,6 +263,7 @@ async function fetchXtreamData(force = false) {
   }
   const intervalMs = (appConfig.xtreamSyncIntervalHours || 1) * 60 * 60 * 1000;
   if (!force && (Date.now() - lastXtreamFetch < intervalMs) && xtreamMovies.length > 0) {
+    console.log(`[Xtream] Disk cache is still valid (age: ${Math.round((Date.now() - lastXtreamFetch) / 60000)}m). Skipping network fetch.`);
     return;
   }
   
@@ -327,6 +366,7 @@ async function fetchXtreamData(force = false) {
     
     lastXtreamFetch = Date.now();
     console.log(`[Xtream] Cache updated. Movies: ${xtreamMovies.length}, Series: ${xtreamSeries.length}, Live TV: ${xtreamLive.length}`);
+    await saveXtreamCache();
     broadcastXtreamSyncComplete();
   } catch (err) {
     console.error('[Xtream] Error updating cache:', err.message);
@@ -337,6 +377,7 @@ async function fetchXtreamData(force = false) {
 if (fs.existsSync(CONFIG_FILE)) {
   try {
     appConfig = { ...appConfig, ...JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8')) };
+    loadXtreamCache();
     recreateXtreamSyncInterval();
     if (appConfig.xtreamEnabled) {
       setTimeout(() => {
@@ -3450,6 +3491,41 @@ app.get('/api/chromecast/active', (req, res) => {
   })));
 });
 
+function isImageFile(urlOrPath) {
+  try {
+    const urlObj = new URL(urlOrPath);
+    const pathname = urlObj.pathname.toLowerCase();
+    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'].some(ext => pathname.endsWith(ext));
+  } catch (e) {
+    const ext = path.extname(urlOrPath.split('?')[0]).toLowerCase();
+    return ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'].includes(ext);
+  }
+}
+
+function getImageCacheDir() {
+  const cacheDir = path.join(appConfig.downloadDir, '.image_cache');
+  if (!fs.existsSync(cacheDir)) {
+    fs.mkdirSync(cacheDir, { recursive: true });
+  }
+  return cacheDir;
+}
+
+function getImageCachePath(url) {
+  const hash = crypto.createHash('md5').update(url).digest('hex');
+  let ext = '.jpg';
+  try {
+    const urlObj = new URL(url);
+    const pathname = urlObj.pathname.toLowerCase();
+    const foundExt = ['.jpg', '.jpeg', '.png', '.gif', '.webp', '.svg', '.bmp'].find(e => pathname.endsWith(e));
+    if (foundExt) {
+      ext = foundExt;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return path.join(getImageCacheDir(), `${hash}${ext}`);
+}
+
 // Serving local media files with HTTP Range Requests for streaming and seeking support
 app.get('/api/media/*', async (req, res) => {
   const filename = req.params[0];
@@ -3462,6 +3538,52 @@ app.get('/api/media/*', async (req, res) => {
     filePath = getSafeFilePath(filename);
     if (!filePath || !fs.existsSync(filePath)) {
       return res.status(404).send('Datei nicht gefunden');
+    }
+  }
+
+  // Intercept and cache image URLs
+  if (isUrl && isImageFile(filePath)) {
+    const cachePath = getImageCachePath(filePath);
+    if (fs.existsSync(cachePath)) {
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      const extName = path.extname(cachePath).toLowerCase();
+      let contentType = 'image/jpeg';
+      if (extName === '.png') contentType = 'image/png';
+      else if (extName === '.gif') contentType = 'image/gif';
+      else if (extName === '.webp') contentType = 'image/webp';
+      else if (extName === '.svg') contentType = 'image/svg+xml';
+      res.setHeader('Content-Type', contentType);
+      
+      fs.createReadStream(cachePath).pipe(res);
+      return;
+    }
+
+    try {
+      console.log(`[Image Cache] Cache miss, downloading image: ${filePath}`);
+      const response = await axios({
+        method: 'get',
+        url: filePath,
+        responseType: 'arraybuffer',
+        timeout: 15000
+      });
+
+      const buffer = Buffer.from(response.data);
+      // Save cache asynchronously
+      fs.promises.writeFile(cachePath, buffer).catch(err => {
+        console.error(`[Image Cache] Failed to write cache file: ${cachePath}`, err.message);
+      });
+
+      const contentType = response.headers['content-type'] || 'image/jpeg';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      res.send(buffer);
+      return;
+    } catch (err) {
+      console.error('[Image Cache] Error downloading image:', filePath, err.message);
+      if (!res.headersSent) {
+        return res.status(404).send('Bild konnte nicht geladen werden');
+      }
+      return;
     }
   }
 
