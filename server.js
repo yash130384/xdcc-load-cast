@@ -856,6 +856,124 @@ app.get('/api/settings/files', (req, res) => {
   }
 });
 
+app.post('/api/settings/files/mkdir', (req, res) => {
+  try {
+    const { path: subpath, name } = req.body;
+    if (!name || name.includes('/') || name.includes('\\') || name === '..' || name === '.') {
+      return res.status(400).json({ error: 'Ungültiger Ordnername.' });
+    }
+    const baseDir = path.resolve(appConfig.downloadDir);
+    const targetDir = path.resolve(path.join(baseDir, subpath || ''));
+    
+    // Security check: ensure path does not escape the download directory
+    if (!targetDir.startsWith(baseDir)) {
+      return res.status(403).json({ error: 'Unzulässiger Pfad-Traversal blockiert!' });
+    }
+    
+    const newFolderDir = path.join(targetDir, name);
+    if (fs.existsSync(newFolderDir)) {
+      return res.status(400).json({ error: 'Ordner existiert bereits.' });
+    }
+    
+    fs.mkdirSync(newFolderDir, { recursive: true });
+    console.log(`[File Explorer] Created directory: ${newFolderDir}`);
+    cachedLocalFiles = null; // Invalidate cache
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[File Explorer] mkdir error:', err.message);
+    return res.status(500).json({ error: `Ordner konnte nicht erstellt werden: ${err.message}` });
+  }
+});
+
+app.delete('/api/settings/files', (req, res) => {
+  try {
+    const { path: subpath, name } = req.body;
+    if (!name || name.includes('/') || name.includes('\\') || name === '..' || name === '.') {
+      return res.status(400).json({ error: 'Ungültiger Name.' });
+    }
+    const baseDir = path.resolve(appConfig.downloadDir);
+    const targetDir = path.resolve(path.join(baseDir, subpath || ''));
+    
+    // Security check: ensure path does not escape the download directory
+    if (!targetDir.startsWith(baseDir)) {
+      return res.status(403).json({ error: 'Unzulässiger Pfad-Traversal blockiert!' });
+    }
+    
+    const targetPath = path.join(targetDir, name);
+    if (!fs.existsSync(targetPath)) {
+      return res.status(404).json({ error: 'Datei oder Ordner nicht gefunden.' });
+    }
+    
+    const stat = fs.statSync(targetPath);
+    if (stat.isDirectory()) {
+      fs.rmSync(targetPath, { recursive: true, force: true });
+      console.log(`[File Explorer] Deleted directory: ${targetPath}`);
+    } else {
+      fs.unlinkSync(targetPath);
+      console.log(`[File Explorer] Deleted file: ${targetPath}`);
+    }
+    cachedLocalFiles = null; // Invalidate cache
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[File Explorer] delete error:', err.message);
+    return res.status(500).json({ error: `Konnte nicht gelöscht werden: ${err.message}` });
+  }
+});
+
+app.post('/api/settings/files/move', (req, res) => {
+  try {
+    const { path: subpath, name, destination } = req.body;
+    if (!name || name.includes('/') || name.includes('\\') || name === '..' || name === '.') {
+      return res.status(400).json({ error: 'Ungültiger Quellname.' });
+    }
+    if (!destination) {
+      return res.status(400).json({ error: 'Zielname oder Zielpfad fehlt.' });
+    }
+    const baseDir = path.resolve(appConfig.downloadDir);
+    const srcDir = path.resolve(path.join(baseDir, subpath || ''));
+    
+    // Security check: ensure path does not escape the download directory
+    if (!srcDir.startsWith(baseDir)) {
+      return res.status(403).json({ error: 'Unzulässiger Pfad-Traversal blockiert!' });
+    }
+    
+    const srcPath = path.join(srcDir, name);
+    if (!fs.existsSync(srcPath)) {
+      return res.status(404).json({ error: 'Quelle nicht gefunden.' });
+    }
+    
+    let destPath;
+    if (destination.startsWith('/')) {
+      destPath = path.resolve(path.join(baseDir, destination));
+    } else {
+      destPath = path.resolve(path.join(srcDir, destination));
+    }
+    
+    // Security check: destination must stay inside baseDir
+    if (!destPath.startsWith(baseDir)) {
+      return res.status(403).json({ error: 'Unzulässiger Zielpfad (außerhalb der Mediathek)!' });
+    }
+    
+    if (fs.existsSync(destPath)) {
+      return res.status(400).json({ error: 'Zielpfad existiert bereits.' });
+    }
+    
+    // Ensure destination parent folder exists
+    const destParent = path.dirname(destPath);
+    if (!fs.existsSync(destParent)) {
+      fs.mkdirSync(destParent, { recursive: true });
+    }
+    
+    fs.renameSync(srcPath, destPath);
+    console.log(`[File Explorer] Moved/Renamed: ${srcPath} -> ${destPath}`);
+    cachedLocalFiles = null; // Invalidate cache
+    return res.json({ success: true });
+  } catch (err) {
+    console.error('[File Explorer] move error:', err.message);
+    return res.status(500).json({ error: `Konnte nicht verschoben/umbenannt werden: ${err.message}` });
+  }
+});
+
 app.post('/api/settings', (req, res) => {
   const { 
     downloadDir, useSSLByDefault, keepDays, checkIntervalHours, 
