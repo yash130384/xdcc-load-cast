@@ -394,7 +394,8 @@ function getDownloadDetails(id) {
     status: item.statusOverride || dl.status,
     errorMessage: dl.errorMessage,
     isAuto: !!item.isAuto,
-    isHttp: !!dl.isHttp
+    isHttp: !!dl.isHttp,
+    speedHistory: dl.speedHistory ? [...dl.speedHistory] : []
   };
 }
 

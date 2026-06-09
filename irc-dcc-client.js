@@ -37,6 +37,9 @@ export class IrcDccDownloader extends EventEmitter {
     this.status = 'connecting'; // connecting, registering, joining, requesting, confirm_filename, dcc_negotiating, dcc_downloading, completed, error, cancelled, paused
     this.errorMessage = '';
     this.offeredFilename = '';
+    this.speedHistory = [];
+    this.elapsedTime = 0;
+    this.downloadedBytes = 0;
     
     const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
     const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
@@ -75,6 +78,7 @@ export class IrcDccDownloader extends EventEmitter {
       errorMessage: this.errorMessage,
       filename: this.filename,
       offeredFilename: this.offeredFilename,
+      speedHistory: this.speedHistory ? [...this.speedHistory] : [],
       ...extra
     });
   }
@@ -104,6 +108,9 @@ export class IrcDccDownloader extends EventEmitter {
     } else {
       this.localSize = 0;
       this.bytesReceived = 0;
+      this.speedHistory = [];
+      this.elapsedTime = 0;
+      this.downloadedBytes = 0;
     }
 
     this.connectIrc();
@@ -433,6 +440,9 @@ export class IrcDccDownloader extends EventEmitter {
     } else {
       this.localSize = 0;
       this.bytesReceived = 0;
+      this.speedHistory = [];
+      this.elapsedTime = 0;
+      this.downloadedBytes = 0;
     }
 
     if (this.localSize > 0 && this.localSize < this.expectedSize) {
@@ -445,6 +455,9 @@ export class IrcDccDownloader extends EventEmitter {
           this.log('Resume negotiation timed out. Starting download from scratch.');
           this.localSize = 0;
           this.bytesReceived = 0;
+          this.speedHistory = [];
+          this.elapsedTime = 0;
+          this.downloadedBytes = 0;
           this.startDccConnection(this.ipInt, this.dccPort);
         }, 5000);
       } else {
@@ -453,6 +466,9 @@ export class IrcDccDownloader extends EventEmitter {
     } else {
       this.localSize = 0;
       this.bytesReceived = 0;
+      this.speedHistory = [];
+      this.elapsedTime = 0;
+      this.downloadedBytes = 0;
       this.startDccConnection(this.ipInt, this.dccPort);
     }
   }
@@ -561,7 +577,10 @@ export class IrcDccDownloader extends EventEmitter {
   }
 
   startSpeedCalculator() {
+    this.speedHistory = this.speedHistory || [];
     let lastTime = Date.now();
+    let lastBytes = this.bytesReceived;
+    
     this.speedInterval = setInterval(() => {
       const now = Date.now();
       const timeDiffSec = (now - lastTime) / 1000;
@@ -571,9 +590,32 @@ export class IrcDccDownloader extends EventEmitter {
         this.bytesInLastSecond = 0;
         lastTime = now;
         
+        // Record speed history
+        this.speedHistory.push(this.speed);
+        
+        // Downsample speedHistory if it gets too large (> 2000 points) to prevent memory bloating
+        if (this.speedHistory.length >= 2000) {
+          const newHistory = [];
+          for (let i = 0; i < this.speedHistory.length; i += 2) {
+            const val1 = this.speedHistory[i];
+            const val2 = i + 1 < this.speedHistory.length ? this.speedHistory[i + 1] : val1;
+            newHistory.push(Math.round((val1 + val2) / 2));
+          }
+          this.speedHistory = newHistory;
+        }
+        
+        // Track cumulative active time and bytes for average speed calculation
+        this.elapsedTime = (this.elapsedTime || 0) + timeDiffSec;
+        const deltaBytes = this.bytesReceived - lastBytes;
+        this.downloadedBytes = (this.downloadedBytes || 0) + deltaBytes;
+        lastBytes = this.bytesReceived;
+        
+        // Compute average speed of the entire download run so far
+        const averageSpeed = this.elapsedTime > 0 ? (this.downloadedBytes / this.elapsedTime) : 0;
+        
         const remainingBytes = this.expectedSize - this.bytesReceived;
-        if (this.speed > 0 && remainingBytes > 0) {
-          this.eta = Math.round(remainingBytes / this.speed);
+        if (averageSpeed > 0 && remainingBytes > 0) {
+          this.eta = Math.round(remainingBytes / averageSpeed);
         } else {
           this.eta = 0;
         }
