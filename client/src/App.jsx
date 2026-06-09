@@ -1818,6 +1818,15 @@ function App() {
             >
               🎥 Mediathek
             </button>
+            <button 
+              className={`nav-btn ${currentView === 'explorer' ? 'active' : ''}`}
+              onClick={() => {
+                setCurrentView('explorer');
+                fetchExplorerFiles('');
+              }}
+            >
+              📂 Dateiexplorer
+            </button>
           </div>
           <div className="header-actions">
             <div className="btn btn-secondary" style={{ cursor: 'default', display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
@@ -1837,7 +1846,6 @@ function App() {
               setTempXtreamEnabled(!!settings.xtreamEnabled);
               setTempXtreamSyncIntervalHours(settings.xtreamSyncIntervalHours || 1);
               setShowSettings(true);
-              fetchExplorerFiles('');
             }}>
               <SettingsIcon />
               Einstellungen
@@ -3403,101 +3411,7 @@ function App() {
                 </button>
               </div>
 
-              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Mediathek-Dateiexplorer</label>
-                
-                <div style={{
-                  background: 'rgba(255, 255, 255, 0.02)',
-                  border: '1px solid var(--border-color)',
-                  borderRadius: '8px',
-                  padding: '0.75rem',
-                  maxHeight: '300px',
-                  overflowY: 'auto'
-                }}>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid rgba(255, 255, 255, 0.05)', fontSize: '0.8rem' }}>
-                    <span style={{ color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
-                      Ordner: <strong style={{ color: 'var(--accent-cyan)' }}>/ {explorerPath || ''}</strong>
-                    </span>
-                    {explorerPath && (
-                      <button 
-                        type="button"
-                        className="btn btn-secondary" 
-                        style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem', minHeight: 'auto' }}
-                        onClick={() => {
-                          const parts = explorerPath.split('/');
-                          parts.pop();
-                          fetchExplorerFiles(parts.join('/'));
-                        }}
-                      >
-                        Parent-Ordner
-                      </button>
-                    )}
-                  </div>
 
-                  {explorerLoading ? (
-                    <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '1rem 0' }}>Lade Dateien...</p>
-                  ) : explorerError ? (
-                    <p style={{ color: 'red', fontSize: '0.8rem', textAlign: 'center', margin: '1rem 0' }}>{explorerError}</p>
-                  ) : explorerFiles.length === 0 ? (
-                    <p style={{ textAlign: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)', margin: '1rem 0' }}>Dieser Ordner ist leer.</p>
-                  ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                      {explorerFiles.map((file, i) => {
-                        const isDir = file.isDirectory;
-                        const ext = file.name.split('.').pop().toLowerCase();
-                        const isAudio = ['mp3', 'wav', 'flac', 'ogg', 'm4a'].includes(ext);
-                        const isVideo = ['mp4', 'mkv', 'avi', 'mov', 'ts'].includes(ext);
-                        
-                        let icon = '📄';
-                        if (isDir) icon = '📁';
-                        else if (isAudio) icon = '🎵';
-                        else if (isVideo) icon = '🎬';
-
-                        return (
-                          <div 
-                            key={i} 
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              justifyContent: 'space-between',
-                              padding: '0.4rem 0.5rem',
-                              borderRadius: '4px',
-                              background: isDir ? 'rgba(0, 242, 254, 0.03)' : 'transparent',
-                              cursor: isDir ? 'pointer' : 'default',
-                              transition: 'background 0.2s',
-                              border: '1px solid transparent'
-                            }}
-                            onClick={() => {
-                              if (isDir) {
-                                fetchExplorerFiles(explorerPath ? `${explorerPath}/${file.name}` : file.name);
-                              }
-                            }}
-                          >
-                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', overflow: 'hidden', marginRight: '0.5rem' }}>
-                              <span style={{ fontSize: '1rem' }}>{icon}</span>
-                              <span style={{
-                                fontSize: '0.8rem',
-                                color: isDir ? 'var(--accent-cyan)' : 'var(--text-primary)',
-                                fontWeight: isDir ? 'bold' : 'normal',
-                                overflow: 'hidden',
-                                textOverflow: 'ellipsis',
-                                whiteSpace: 'nowrap'
-                              }}>
-                                {file.name}
-                              </span>
-                            </div>
-                            {!isDir && (
-                              <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)', flexShrink: 0 }}>
-                                {formatBytes(file.size)}
-                              </span>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              </div>
 
               <div className="settings-footer">
                 <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>
