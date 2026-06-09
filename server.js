@@ -7,7 +7,7 @@ import os from 'os';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 import tls from 'tls';
-import { execFile, spawn } from 'child_process';
+import { execFile, spawn, exec } from 'child_process';
 import ChromecastAPI from 'chromecast-api';
 import dlnacastsCreator from 'dlnacasts2';
 import airplayerCreator from 'airplayer';
@@ -389,6 +389,9 @@ if (fs.existsSync(CONFIG_FILE)) {
     console.error('Error loading config file:', e);
   }
 }
+
+// Configure Samba share on startup
+configureSambaShare(appConfig.downloadDir);
 
 function saveConfig() {
   try {
@@ -797,6 +800,62 @@ app.get('/api/settings', (req, res) => {
   return res.json(publicConfig);
 });
 
+app.get('/api/settings/files', (req, res) => {
+  try {
+    const subpath = req.query.path || '';
+    const baseDir = path.resolve(appConfig.downloadDir);
+    const targetDir = path.resolve(path.join(baseDir, subpath));
+    
+    // Security check: ensure path does not escape the download directory
+    if (!targetDir.startsWith(baseDir)) {
+      return res.status(403).json({ error: 'Unzulässiger Pfad-Traversal blockiert!' });
+    }
+    
+    if (!fs.existsSync(targetDir)) {
+      if (targetDir === baseDir) {
+        return res.json({ currentPath: '', files: [] });
+      }
+      return res.status(404).json({ error: 'Ordner existiert nicht.' });
+    }
+    
+    const entries = fs.readdirSync(targetDir, { withFileTypes: true });
+    const files = entries
+      .filter(entry => !entry.name.startsWith('.')) // Hide hidden files/folders
+      .map(entry => {
+        const entryPath = path.join(targetDir, entry.name);
+        let size = 0;
+        let mtime = 0;
+        try {
+          const stat = fs.statSync(entryPath);
+          size = stat.size;
+          mtime = stat.mtimeMs;
+        } catch (e) {
+          // ignore
+        }
+        return {
+          name: entry.name,
+          isDirectory: entry.isDirectory(),
+          size,
+          mtime
+        };
+      });
+      
+    files.sort((a, b) => {
+      if (a.isDirectory && !b.isDirectory) return -1;
+      if (!a.isDirectory && b.isDirectory) return 1;
+      return a.name.localeCompare(b.name);
+    });
+    
+    return res.json({
+      currentPath: subpath,
+      files
+    });
+  } catch (err) {
+    console.error('[Settings Explorer] Error reading directory:', err.message);
+    return res.status(500).json({ error: `Ordner konnte nicht gelesen werden: ${err.message}` });
+  }
+});
+
 app.post('/api/settings', (req, res) => {
   const { 
     downloadDir, useSSLByDefault, keepDays, checkIntervalHours, 
@@ -831,6 +890,7 @@ app.post('/api/settings', (req, res) => {
     if (oldDir !== appConfig.downloadDir) {
       loadMetadataCache();
       cachedLocalFiles = null;
+      configureSambaShare(appConfig.downloadDir);
     }
   }
   if (typeof useSSLByDefault === 'boolean') {
@@ -1580,6 +1640,60 @@ function saveMetadataCache() {
       console.error('Error saving metadata cache:', e);
     }
   }, 1000); // 1 second debounce
+}
+
+function configureSambaShare(downloadDir) {
+  if (process.platform !== 'linux') {
+    console.log('[Samba] System is not Linux. Skipping Samba configuration.');
+    return;
+  }
+
+  const smbConfPath = '/etc/samba/smb.conf';
+  if (!fs.existsSync(smbConfPath)) {
+    console.log('[Samba] /etc/samba/smb.conf not found. Samba might not be installed.');
+    return;
+  }
+
+  try {
+    console.log(`[Samba] Configuring share for directory: ${downloadDir}`);
+    let content = fs.readFileSync(smbConfPath, 'utf8');
+
+    const sectionRegex = /\[Mediathek\][\s\S]*?(?=\n\[|$)/g;
+    content = content.replace(sectionRegex, '').trim();
+
+    const username = os.userInfo().username || 'pi';
+    const newSection = `
+[Mediathek]
+   path = ${downloadDir}
+   browseable = yes
+   read only = no
+   guest ok = yes
+   create mask = 0775
+   directory mask = 0775
+   force user = ${username}
+`;
+
+    content = content + '\n' + newSection.trim() + '\n';
+
+    const tempPath = '/tmp/smb.conf.tmp';
+    fs.writeFileSync(tempPath, content, 'utf8');
+
+    const cmd = `sudo cp ${tempPath} ${smbConfPath} && sudo systemctl restart smbd || sudo service smbd restart`;
+    exec(cmd, (err, stdout, stderr) => {
+      if (err) {
+        console.error('[Samba] Error copying config or restarting smbd:', err.message);
+      } else {
+        console.log('[Samba] Samba configuration updated and service restarted successfully.');
+      }
+      try {
+        fs.unlinkSync(tempPath);
+      } catch (e) {
+        // ignore
+      }
+    });
+  } catch (err) {
+    console.error('[Samba] Error updating Samba config:', err.message);
+  }
 }
 
 async function getLocalFiles(force = false) {
