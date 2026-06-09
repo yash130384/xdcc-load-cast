@@ -222,14 +222,14 @@ function App() {
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [mediaLibrary, setMediaLibrary] = useState([]);
-  const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Lokal' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
+  const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Neu' | 'Lokal' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
   const [selectedSubcategory, setSelectedSubcategory] = useState('all');
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryCounts, setCategoryCounts] = useState({
-    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
+    all: 0, Neu: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
   });
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
@@ -854,7 +854,7 @@ function App() {
         setTotalItems(data.totalItems || 0);
         setTotalPages(data.totalPages || 0);
         setCategoryCounts(data.counts || {
-          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
+          all: 0, Neu: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
         });
         setServerSubcategories(data.availableSubcategories || ['all']);
         setLoadingLibrary(false);
@@ -2207,6 +2207,12 @@ function App() {
                         onClick={() => handleSelectCategory('all')}
                       >
                         📁 Alle ({categoryCounts.all || 0})
+                      </button>
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'Neu' ? 'active' : ''}`}
+                        onClick={() => handleSelectCategory('Neu')}
+                      >
+                        🆕 Neu ({categoryCounts.Neu || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
