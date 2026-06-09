@@ -2304,23 +2304,15 @@ app.get('/api/media-library', async (req, res) => {
     const seriesCatMap = new Map(xtreamSeriesCategories.map(c => [String(c.category_id), c.category_name]));
     const liveCatMap = new Map(xtreamLiveCategories.map(c => [String(c.category_id), c.category_name]));
     
-    const parseXtreamTimestamp = (val) => {
-      if (!val) return 0;
-      const parsed = parseInt(val, 10);
-      if (isNaN(parsed) || parsed <= 0) return 0;
-      return String(parsed).length >= 13 ? parsed : parsed * 1000;
-    };
-
     // Map movies (ALL)
     mappedMovies = xtreamMovies.map(movie => {
       const ext = movie.container_extension || 'mp4';
       const streamUrl = `${host}/movie/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${movie.stream_id}.${ext}`;
       const subcat = vodCatMap.get(String(movie.category_id)) || 'Sonstige';
-      const addedTime = parseXtreamTimestamp(movie.added) || Date.now();
       return {
         filename: streamUrl, // Stream URL directly as filename
         sizeBytes: 0,
-        mtime: addedTime,
+        mtime: Date.now(),
         isXtream: true,
         xtreamStreamId: movie.stream_id,
         metadata: {
@@ -2337,7 +2329,6 @@ app.get('/api/media-library', async (req, res) => {
     // Map series (ALL)
     mappedSeries = xtreamSeries.map(series => {
       const subcat = seriesCatMap.get(String(series.category_id)) || 'Sonstige';
-      const addedTime = parseXtreamTimestamp(series.last_modified) || parseXtreamTimestamp(series.added) || Date.now();
       return {
         filename: `xtream_series_${series.series_id}`,
         isGroup: true,
@@ -2349,7 +2340,6 @@ app.get('/api/media-library', async (req, res) => {
         subcategory: subcat,
         cast: series.plot || 'Xtream Codes Series',
         year: series.rating ? `Rating: ${series.rating}` : null,
-        mtime: addedTime,
         metadata: {
           title: series.name,
           posterUrl: series.cover,
@@ -2448,8 +2438,7 @@ app.get('/api/media-library', async (req, res) => {
         const key = item.xtreamSeriesId || item.title;
         seriesGroups[key] = {
           ...item,
-          files: item.files || [],
-          mtime: item.mtime || 0
+          files: item.files || []
         };
         return;
       }
@@ -2463,8 +2452,7 @@ app.get('/api/media-library', async (req, res) => {
           cast: item.metadata?.cast,
           imdbId: item.metadata?.imdbId,
           category: cat,
-          files: [],
-          mtime: item.mtime || 0
+          files: []
         };
       }
       seriesGroups[seriesKey].files.push(item);
@@ -2473,13 +2461,9 @@ app.get('/api/media-library', async (req, res) => {
     }
   });
 
-  // Sort files within series groups and calculate their group mtime
+  // Sort files within series groups
   Object.values(seriesGroups).forEach(group => {
-    let groupMtime = group.mtime || 0;
-    if (Array.isArray(group.files) && group.files.length > 0) {
-      const fileMtimes = group.files.map(f => f.mtime || 0);
-      groupMtime = Math.max(groupMtime, ...fileMtimes);
-
+    if (Array.isArray(group.files)) {
       group.files.sort((a, b) => {
         const epA = a.metadata?.seasonEpisode || '';
         const epB = b.metadata?.seasonEpisode || '';
@@ -2489,52 +2473,19 @@ app.get('/api/media-library', async (req, res) => {
         return a.filename.localeCompare(b.filename);
       });
     }
-    group.mtime = groupMtime || Date.now();
   });
 
-  const sortedSeries = Object.values(seriesGroups);
+  const sortedSeries = Object.values(seriesGroups).sort((a, b) => a.title.localeCompare(b.title));
   const groupedItems = [...sortedSeries, ...otherItems];
-
-  // Calculate Neu category count
-  const fourteenDaysAgo = Date.now() - 14 * 24 * 60 * 60 * 1000;
-  const nonLiveItems = groupedItems.filter(item => {
-    const cat = item.metadata?.category || item.category || 'Videos';
-    const origCat = item.metadata?.originalCategory || cat;
-    return cat !== 'Live TV' && origCat !== 'Live TV';
-  });
-  const newItemsLast14Days = nonLiveItems.filter(item => (item.mtime || 0) >= fourteenDaysAgo);
-  let neuCount = newItemsLast14Days.length;
-  if (neuCount < 30) {
-    neuCount = Math.min(30, nonLiveItems.length);
-  }
-  counts.Neu = neuCount;
 
   // 4. Filter grouped list by selectedCategory
   let filteredGrouped = groupedItems;
-  if (category === 'Neu') {
-    // Filter and sort for Neu category
-    const sortedNonLive = [...nonLiveItems].sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
-    filteredGrouped = sortedNonLive.slice(0, neuCount);
-  } else {
-    if (category !== 'all') {
-      filteredGrouped = groupedItems.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === category || origCat === category;
-      });
-    }
-
-    // Apply category-specific sorting
-    if (category === 'Live TV') {
-      filteredGrouped.sort((a, b) => {
-        const titleA = a.metadata?.title || a.title || '';
-        const titleB = b.metadata?.title || b.title || '';
-        return titleA.localeCompare(titleB);
-      });
-    } else {
-      // Sort all, Filme, Serien, Videos, Musik, Lokal by mtime descending (newest first)
-      filteredGrouped.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
-    }
+  if (category !== 'all') {
+    filteredGrouped = groupedItems.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === category || origCat === category;
+    });
   }
 
   // 5. Compute available subcategories for the selected category + active search
