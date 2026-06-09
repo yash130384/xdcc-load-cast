@@ -196,6 +196,14 @@ function SpeedChart({ itemId, history }) {
   );
 }
 
+const getPosterSrc = (url) => {
+  if (!url) return '';
+  if (url.startsWith('http://') || url.startsWith('https://')) {
+    return `/api/media/${encodeURIComponent(url)}`;
+  }
+  return url;
+};
+
 function App() {
   const [query, setQuery] = useState('');
   const [results, setResults] = useState(null);
@@ -1846,7 +1854,7 @@ function App() {
                           <div className="media-card" style={{ maxWidth: '100%' }}>
                             <div className="media-poster-container">
                                 <img 
-                                  src={activeSeries.posterUrl} 
+                                  src={getPosterSrc(activeSeries.posterUrl)} 
                                   alt={activeSeries.title} 
                                   className="media-poster" 
                                   style={{ display: activeSeries.posterUrl ? 'block' : 'none' }}
@@ -2469,7 +2477,7 @@ function App() {
                             >
                               <div className="media-poster-container">
                                  <img 
-                                   src={posterUrl} 
+                                   src={getPosterSrc(posterUrl)} 
                                    alt={title} 
                                    className="media-poster" 
                                    loading="lazy" 
@@ -2547,7 +2555,7 @@ function App() {
                           <div key={idx} className="media-card">
                             <div className="media-poster-container">
                               <img 
-                                src={posterUrl} 
+                                src={getPosterSrc(posterUrl)} 
                                 alt={title} 
                                 className="media-poster" 
                                 loading="lazy" 
