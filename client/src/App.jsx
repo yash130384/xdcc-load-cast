@@ -237,7 +237,7 @@ function App() {
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryCounts, setCategoryCounts] = useState({
-    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
+    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0
   });
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
@@ -285,6 +285,19 @@ function App() {
   const [autoDownloads, setAutoDownloads] = useState({});
   const [tempCheckIntervalHours, setTempCheckIntervalHours] = useState(3);
   const [checkingShowId, setCheckingShowId] = useState(null);
+
+  // Audiobook Player States
+  const [activeAudiobook, setActiveAudiobook] = useState(null);
+  const [showAudiobookPlayer, setShowAudiobookPlayer] = useState(false);
+  const [audiobookPlaying, setAudiobookPlaying] = useState(false);
+  const [audiobookDuration, setAudiobookDuration] = useState(0);
+  const [audiobookPosition, setAudiobookPosition] = useState(0);
+  const [audiobookChapters, setAudiobookChapters] = useState([]);
+  const audiobookRef = useRef(null);
+
+  // Sleep Timer States
+  const [sleepTimerActive, setSleepTimerActive] = useState(false);
+  const [sleepTimerTime, setSleepTimerTime] = useState(0); // in seconds
 
   // Settings File Explorer state
   const [explorerPath, setExplorerPath] = useState('');
@@ -707,6 +720,63 @@ function App() {
     fetchMediaLibrary();
   }, [selectedCategory, selectedSubcategory, debouncedSearchQuery, currentPage]);
 
+  // Audiobook Player Initial Setup and Seek
+  useEffect(() => {
+    if (activeAudiobook && audiobookRef.current) {
+      const audio = audiobookRef.current;
+      audio.src = `/api/media/${encodeURIComponent(activeAudiobook.filename)}`;
+      audio.load();
+      
+      const savedPosition = activeAudiobook.progress?.position || 0;
+      audio.currentTime = savedPosition;
+      setAudiobookPosition(savedPosition);
+      
+      audio.play().then(() => {
+        setAudiobookPlaying(true);
+      }).catch(err => {
+        console.error('Audiobook autoplay failed:', err);
+        setAudiobookPlaying(false);
+      });
+    }
+  }, [activeAudiobook]);
+
+  // Save progress periodically during playback
+  useEffect(() => {
+    if (!audiobookPlaying || !activeAudiobook) return;
+    
+    const interval = setInterval(() => {
+      if (audiobookRef.current) {
+        const position = audiobookRef.current.currentTime;
+        saveAudiobookProgress(activeAudiobook.filename, position);
+      }
+    }, 10000);
+    
+    return () => clearInterval(interval);
+  }, [audiobookPlaying, activeAudiobook]);
+
+  // Sleep Timer Tick
+  useEffect(() => {
+    if (!sleepTimerActive || sleepTimerTime <= 0) return;
+    
+    const timer = setInterval(() => {
+      setSleepTimerTime(prev => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          setSleepTimerActive(false);
+          if (audiobookRef.current) {
+            audiobookRef.current.pause();
+            setAudiobookPlaying(false);
+            saveAudiobookProgress(activeAudiobook.filename, audiobookRef.current.currentTime);
+          }
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    
+    return () => clearInterval(timer);
+  }, [sleepTimerActive, sleepTimerTime, activeAudiobook]);
+
   const handleBulkDeleteObsolete = () => {
     if (selectedObsoleteFiles.length === 0) {
       alert("Es sind keine Dateien zum Löschen ausgewählt.");
@@ -874,7 +944,7 @@ function App() {
         setTotalItems(data.totalItems || 0);
         setTotalPages(data.totalPages || 0);
         setCategoryCounts(data.counts || {
-          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
+          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0
         });
         setServerSubcategories(data.availableSubcategories || ['all']);
         setLoadingLibrary(false);
@@ -885,8 +955,111 @@ function App() {
       });
   };
 
-  const playLocalLibrary = (filename) => {
+  const playAudiobook = (item) => {
+    setActiveAudiobook(item);
+    setAudiobookDuration(item.metadata?.duration || 0);
+    setAudiobookChapters(item.metadata?.chapters || []);
+    setShowAudiobookPlayer(true);
+  };
+
+  const playLocalLibrary = (filename, item = null) => {
+    const isM4b = filename.toLowerCase().endsWith('.m4b');
+    if (isM4b) {
+      playAudiobook(item || { filename });
+      return;
+    }
     window.open(`/api/media/${encodeURIComponent(filename)}`, '_blank');
+  };
+
+  const saveAudiobookProgress = (filename, position) => {
+    fetch('/api/media/progress', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, position })
+    })
+    .then(res => res.json())
+    .then(data => {
+      setMediaLibrary(prev => prev.map(item => {
+        if (item.filename === filename) {
+          return { ...item, progress: { position, updatedAt: Date.now() } };
+        }
+        return item;
+      }));
+    })
+    .catch(err => console.error('Failed to save play progress:', err));
+  };
+
+  const toggleAudiobookPlay = () => {
+    if (audiobookRef.current) {
+      if (audiobookPlaying) {
+        audiobookRef.current.pause();
+        setAudiobookPlaying(false);
+        saveAudiobookProgress(activeAudiobook.filename, audiobookRef.current.currentTime);
+      } else {
+        audiobookRef.current.play().then(() => {
+          setAudiobookPlaying(true);
+        }).catch(err => console.error(err));
+      }
+    }
+  };
+
+  const seekAudiobook = (position) => {
+    if (audiobookRef.current) {
+      audiobookRef.current.currentTime = position;
+      setAudiobookPosition(position);
+    }
+  };
+
+  const skipAudiobook = (seconds) => {
+    if (audiobookRef.current) {
+      const newPos = Math.max(0, Math.min(audiobookDuration, audiobookRef.current.currentTime + seconds));
+      audiobookRef.current.currentTime = newPos;
+      setAudiobookPosition(newPos);
+    }
+  };
+
+  const closeAudiobookPlayer = () => {
+    if (audiobookRef.current) {
+      audiobookRef.current.pause();
+      saveAudiobookProgress(activeAudiobook.filename, audiobookRef.current.currentTime);
+    }
+    setAudiobookPlaying(false);
+    setShowAudiobookPlayer(false);
+    setActiveAudiobook(null);
+    setSleepTimerActive(false);
+    setSleepTimerTime(0);
+  };
+
+  const handleAudioTimeUpdate = () => {
+    if (audiobookRef.current) {
+      setAudiobookPosition(audiobookRef.current.currentTime);
+    }
+  };
+
+  const handleAudioLoadedMetadata = () => {
+    if (audiobookRef.current) {
+      setAudiobookDuration(audiobookRef.current.duration);
+    }
+  };
+
+  const handleAudioEnded = () => {
+    setAudiobookPlaying(false);
+    if (activeAudiobook) {
+      saveAudiobookProgress(activeAudiobook.filename, 0);
+    }
+  };
+
+  const formatTime = (seconds) => {
+    if (isNaN(seconds)) return '00:00';
+    const hrs = Math.floor(seconds / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    const secs = Math.floor(seconds % 60);
+    
+    const pad = (num) => String(num).padStart(2, '0');
+    if (hrs > 0) {
+      return `${pad(hrs)}:${pad(mins)}:${pad(secs)}`;
+    }
+    return `${pad(mins)}:${pad(secs)}`;
   };
 
   const startCastLibrary = (filename, deviceName) => {
@@ -1764,6 +1937,262 @@ function App() {
     );
   };
 
+  const renderAudiobookPlayer = () => {
+    if (!showAudiobookPlayer || !activeAudiobook) return null;
+
+    const metadata = activeAudiobook.metadata || {};
+    const title = metadata.title || (activeAudiobook.filename ? activeAudiobook.filename.split('/').pop() : 'Unbekannt');
+    const artist = metadata.artist || 'Unbekannter Autor';
+    const album = metadata.album || 'Unbekanntes Hörbuch';
+    const posterUrl = metadata.posterUrl;
+
+    // Determine current chapter if any
+    let currentChapterName = 'Standard-Kapitel';
+    if (audiobookChapters && audiobookChapters.length > 0) {
+      let activeChapter = null;
+      for (const ch of audiobookChapters) {
+        if (ch.startTime <= audiobookPosition) {
+          if (!activeChapter || ch.startTime > activeChapter.startTime) {
+            activeChapter = ch;
+          }
+        }
+      }
+      if (activeChapter) {
+        currentChapterName = activeChapter.title;
+      }
+    }
+
+    return (
+      <div className="modal-overlay" style={{ zIndex: 1200 }}>
+        <div className="modal" style={{ width: '600px', maxWidth: '95%' }}>
+          <div className="modal-header">
+            <span className="modal-title">🎧 Hörbuch-Player</span>
+            <button className="modal-close" onClick={closeAudiobookPlayer}>&times;</button>
+          </div>
+          
+          <div className="modal-body" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', padding: '1.5rem 0' }}>
+            
+            {/* Audio Element */}
+            <audio 
+              ref={audiobookRef}
+              onTimeUpdate={handleAudioTimeUpdate}
+              onLoadedMetadata={handleAudioLoadedMetadata}
+              onEnded={handleAudioEnded}
+            />
+
+            {/* Info and Cover Row */}
+            <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+              <div 
+                style={{ 
+                  width: '140px', 
+                  height: '140px', 
+                  borderRadius: '12px', 
+                  overflow: 'hidden', 
+                  background: 'rgba(255, 255, 255, 0.03)', 
+                  border: '1px solid var(--border-color)', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center',
+                  boxShadow: '0 8px 32px 0 rgba(0, 0, 0, 0.3)'
+                }}
+              >
+                {posterUrl ? (
+                  <img src={`/api/media/${encodeURIComponent(posterUrl)}`} alt={title} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                ) : (
+                  <div style={{ fontSize: '3.5rem', filter: 'drop-shadow(0 2px 10px rgba(0,242,254,0.5))' }}>🎧</div>
+                )}
+              </div>
+
+              <div style={{ flex: 1, minWidth: '200px' }}>
+                <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 600 }}>{title}</h3>
+                <p style={{ margin: '0 0 0.25rem 0', color: 'var(--text-secondary)' }}><strong>Autor:</strong> {artist}</p>
+                <p style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}><strong>Album:</strong> {album}</p>
+                {audiobookChapters.length > 0 && (
+                  <div style={{ fontSize: '0.85rem', background: 'rgba(0, 242, 254, 0.08)', border: '1px solid rgba(0, 242, 254, 0.2)', borderRadius: '6px', padding: '0.4rem 0.6rem', color: 'var(--accent-cyan)' }}>
+                    <strong>Kapitel:</strong> {currentChapterName}
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Seek Bar / Custom Progress bar */}
+            <div>
+              <input 
+                type="range" 
+                min={0} 
+                max={audiobookDuration || 100} 
+                value={audiobookPosition} 
+                onChange={(e) => seekAudiobook(parseFloat(e.target.value))}
+                style={{ 
+                  width: '100%', 
+                  accentColor: 'var(--accent-cyan)', 
+                  cursor: 'pointer',
+                  background: 'rgba(255, 255, 255, 0.1)',
+                  height: '6px',
+                  borderRadius: '3px'
+                }} 
+              />
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.35rem' }}>
+                <span>{formatTime(audiobookPosition)}</span>
+                <span>{formatTime(audiobookDuration)}</span>
+              </div>
+            </div>
+
+            {/* Playback controls */}
+            <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1.5rem' }}>
+              <button 
+                className="btn btn-secondary btn-icon-only" 
+                style={{ width: '48px', height: '48px', borderRadius: '50%' }}
+                onClick={() => skipAudiobook(-30)}
+                title="30s zurückspringen"
+              >
+                ⏪ 30s
+              </button>
+              
+              <button 
+                className="btn btn-primary" 
+                style={{ 
+                  width: '64px', 
+                  height: '64px', 
+                  borderRadius: '50%', 
+                  display: 'flex', 
+                  alignItems: 'center', 
+                  justifyContent: 'center', 
+                  fontSize: '1.5rem',
+                  background: 'var(--grad-cyan-blue)', 
+                  border: 'none',
+                  boxShadow: '0 4px 15px rgba(0, 242, 254, 0.4)'
+                }}
+                onClick={toggleAudiobookPlay}
+                title={audiobookPlaying ? "Pausieren" : "Abspielen"}
+              >
+                {audiobookPlaying ? '⏸️' : '▶️'}
+              </button>
+
+              <button 
+                className="btn btn-secondary btn-icon-only" 
+                style={{ width: '48px', height: '48px', borderRadius: '50%' }}
+                onClick={() => skipAudiobook(30)}
+                title="30s vorspringen"
+              >
+                30s ⏩
+              </button>
+            </div>
+
+            {/* Downloader & Sleep Timer Row */}
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+              
+              {/* Sleep Timer Card */}
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem' }}>
+                <strong style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>⏱️ Schlaf-Timer</strong>
+                <div style={{ display: 'flex', gap: '0.25rem', flexWrap: 'wrap', marginBottom: '0.5rem' }}>
+                  {[5, 15, 30, 60].map(mins => (
+                    <button 
+                      key={mins}
+                      className="btn btn-secondary"
+                      style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                      onClick={() => {
+                        setSleepTimerTime(mins * 60);
+                        setSleepTimerActive(true);
+                      }}
+                    >
+                      {mins} Min
+                    </button>
+                  ))}
+                  <button 
+                    className="btn btn-danger"
+                    style={{ padding: '0.2rem 0.4rem', fontSize: '0.75rem' }}
+                    onClick={() => {
+                      setSleepTimerActive(false);
+                      setSleepTimerTime(0);
+                    }}
+                  >
+                    Aus
+                  </button>
+                </div>
+                
+                {/* Custom sleep timer input */}
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                  <input 
+                    type="number" 
+                    placeholder="Minuten" 
+                    style={{ width: '70px', padding: '0.25rem', borderRadius: '4px', border: '1px solid var(--border-color)', background: 'rgba(0,0,0,0.2)', color: '#fff', fontSize: '0.8rem' }}
+                    onChange={(e) => {
+                      const v = parseInt(e.target.value);
+                      if (!isNaN(v) && v > 0) {
+                        setSleepTimerTime(v * 60);
+                        setSleepTimerActive(true);
+                      }
+                    }}
+                  />
+                  {sleepTimerActive && (
+                    <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                      ⏳ {Math.floor(sleepTimerTime / 60)}:{(sleepTimerTime % 60).toString().padStart(2, '0')}
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              {/* Chapters List */}
+              <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem', display: 'flex', flexDirection: 'column', height: '115px' }}>
+                <strong style={{ display: 'block', marginBottom: '0.35rem', fontSize: '0.9rem' }}>📖 Kapitel ({audiobookChapters.length})</strong>
+                {audiobookChapters.length > 0 ? (
+                  <select 
+                    style={{ 
+                      width: '100%', 
+                      padding: '0.4rem', 
+                      background: 'rgba(0,0,0,0.3)', 
+                      color: 'white', 
+                      border: '1px solid var(--border-color)', 
+                      borderRadius: '4px',
+                      fontSize: '0.85rem'
+                    }}
+                    value={audiobookChapters.findIndex(c => c.title === currentChapterName)}
+                    onChange={(e) => {
+                      const idx = parseInt(e.target.value);
+                      if (audiobookChapters[idx]) {
+                        seekAudiobook(audiobookChapters[idx].startTime);
+                      }
+                    }}
+                  >
+                    {audiobookChapters.map((ch, idx) => (
+                      <option key={idx} value={idx} style={{ background: '#222', color: 'white' }}>
+                        {formatTime(ch.startTime)} - {ch.title}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <span style={{ fontSize: '0.8rem', color: 'var(--text-muted)', fontStyle: 'italic' }}>Keine Kapitelmarken verfügbar</span>
+                )}
+              </div>
+
+            </div>
+
+            {/* Direct download button */}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '0.5rem' }}>
+              <a 
+                href={`/api/media/${encodeURIComponent(activeAudiobook.filename)}`} 
+                download={activeAudiobook.filename ? activeAudiobook.filename.split('/').pop() : 'hörbuch.m4b'}
+                className="btn btn-secondary" 
+                style={{ 
+                  display: 'inline-flex', 
+                  alignItems: 'center', 
+                  gap: '0.5rem', 
+                  background: 'rgba(0, 242, 254, 0.15)', 
+                  borderColor: 'rgba(0, 242, 254, 0.25)', 
+                  color: 'var(--accent-cyan)' 
+                }}
+              >
+                📥 Hörbuch herunterladen
+              </a>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="app-layout">
       <div className="app-container">
@@ -2403,7 +2832,7 @@ function App() {
                                                 className="btn btn-primary btn-icon-only" 
                                                 style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
                                                 title="Lokal abspielen"
-                                                onClick={() => playLocalLibrary(item.filename)}
+                                                onClick={() => playLocalLibrary(item.filename, item)}
                                               >
                                                 <PlayIcon />
                                               </button>
@@ -2618,6 +3047,12 @@ function App() {
                       >
                         🎵 Musik ({categoryCounts.Musik || 0})
                       </button>
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'Hörbücher' ? 'active' : ''}`}
+                        onClick={() => handleSelectCategory('Hörbücher')}
+                      >
+                        🎧 Hörbücher ({categoryCounts.Hörbücher || 0})
+                      </button>
                       {settings.xtreamEnabled && (
                         <button 
                           className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
@@ -2744,7 +3179,7 @@ function App() {
                                   className="btn btn-primary btn-icon-only" 
                                   style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
                                   title="Lokal abspielen"
-                                  onClick={() => playLocalLibrary(item.filename)}
+                                  onClick={() => playLocalLibrary(item.filename, item)}
                                 >
                                   <PlayIcon />
                                 </button>
@@ -3026,7 +3461,7 @@ function App() {
                                   className="btn btn-primary btn-icon-only" 
                                   style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
                                   title="Lokal abspielen"
-                                  onClick={() => playLocalLibrary(item.filename)}
+                                  onClick={() => playLocalLibrary(item.filename, item)}
                                 >
                                   <PlayIcon />
                                 </button>
@@ -3778,6 +4213,7 @@ function App() {
           </div>
         )}
 
+        {renderAudiobookPlayer()}
       </div>
       
       {/* Status Bar Footer */}

@@ -94,7 +94,7 @@ console.info = (...args) => {
 };
 
 const MEDIA_EXTENSIONS = new Set([
-  '.mp4', '.mkv', '.avi', '.mp3', '.wav', '.m4a', '.mov', '.flac', '.mpeg', '.mpg', '.webm', '.ogg', '.ts'
+  '.mp4', '.mkv', '.avi', '.mp3', '.wav', '.m4a', '.mov', '.flac', '.mpeg', '.mpg', '.webm', '.ogg', '.ts', '.m4b'
 ]);
 
 // Setup default configuration
@@ -1760,6 +1760,31 @@ function saveMetadataCache() {
   }, 1000); // 1 second debounce
 }
 
+let playProgress = {};
+const PLAY_PROGRESS_FILE = path.join(os.homedir(), '.xdcc_play_progress.json');
+
+function loadPlayProgress() {
+  try {
+    if (fs.existsSync(PLAY_PROGRESS_FILE)) {
+      const data = fs.readFileSync(PLAY_PROGRESS_FILE, 'utf8');
+      playProgress = JSON.parse(data);
+      console.log(`[Progress] Loaded playback progress for ${Object.keys(playProgress).length} items`);
+    }
+  } catch (err) {
+    console.error('Failed to load play progress:', err.message);
+    playProgress = {};
+  }
+}
+
+function savePlayProgress() {
+  try {
+    fs.writeFileSync(PLAY_PROGRESS_FILE, JSON.stringify(playProgress, null, 2), 'utf8');
+  } catch (err) {
+    console.error('Failed to save play progress:', err.message);
+  }
+}
+
+
 function configureSambaShare(downloadDir) {
   if (process.platform !== 'linux') {
     console.log('[Samba] System is not Linux. Skipping Samba configuration.');
@@ -2302,7 +2327,7 @@ async function checkSingleShow(sub, mediaFiles) {
 }
 // -----------------------------
 
-const MUSIC_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg']);
+const MUSIC_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.m4b']);
 
 function parseFilename(filename) {
   const baseName = path.basename(filename);
@@ -2429,7 +2454,8 @@ async function fetchImdbMetadata(parsedInfo) {
 
 async function getOrFetchMetadata(filename, ext) {
   if (MUSIC_EXTENSIONS.has(ext)) {
-    if (metadataCache[filename] && metadataCache[filename].category === 'Musik' && metadataCache[filename].artist) {
+    const targetCategory = ext === '.m4b' ? 'Hörbücher' : 'Musik';
+    if (metadataCache[filename] && metadataCache[filename].category === targetCategory && metadataCache[filename].artist) {
       return metadataCache[filename];
     }
 
@@ -2439,15 +2465,17 @@ async function getOrFetchMetadata(filename, ext) {
     let title = baseName;
     let artist = 'Unbekannter Künstler';
     let album = 'Unbekanntes Album';
-    let genre = 'Musik';
+    let genre = ext === '.m4b' ? 'Hörbuch' : 'Musik';
     let year = null;
     let track = null;
     let posterUrl = null;
+    let duration = null;
+    let chapters = [];
 
     if (fullPath && fs.existsSync(fullPath)) {
       try {
         console.log(`[Music Parser] Parsing tags for: ${filename}`);
-        const parsed = await parseFile(fullPath, { skipCovers: true });
+        const parsed = await parseFile(fullPath, { skipCovers: true, includeChapters: true });
         if (parsed && parsed.common) {
           title = parsed.common.title || title;
           artist = parsed.common.artist || artist;
@@ -2459,6 +2487,15 @@ async function getOrFetchMetadata(filename, ext) {
           if (parsed.common.track && parsed.common.track.no !== undefined) {
             track = parsed.common.track.no;
           }
+        }
+        if (parsed && parsed.format) {
+          duration = parsed.format.duration || null;
+        }
+        if (parsed && parsed.chapters && Array.isArray(parsed.chapters)) {
+          chapters = parsed.chapters.map(c => ({
+            title: c.title || '',
+            startTime: c.startTime || 0
+          }));
         }
       } catch (err) {
         console.error(`[Music Parser] Error parsing tags for ${filename}:`, err.message);
@@ -2472,7 +2509,7 @@ async function getOrFetchMetadata(filename, ext) {
         const itunesRes = await axios.get('https://itunes.apple.com/search', {
           params: {
             term: queryTerm,
-            entity: 'song',
+            entity: ext === '.m4b' ? 'audiobook' : 'song',
             limit: 1
           },
           timeout: 5000
@@ -2483,7 +2520,7 @@ async function getOrFetchMetadata(filename, ext) {
           if (result.artworkUrl100) {
             posterUrl = result.artworkUrl100.replace('100x100bb', '600x600bb');
           }
-          if (genre === 'Musik' && result.primaryGenreName) {
+          if (genre === (ext === '.m4b' ? 'Hörbuch' : 'Musik') && result.primaryGenreName) {
             genre = result.primaryGenreName;
           }
           if (album === 'Unbekanntes Album' && result.collectionName) {
@@ -2506,8 +2543,10 @@ async function getOrFetchMetadata(filename, ext) {
       year,
       track,
       posterUrl,
-      category: 'Musik',
-      subcategory: artist
+      category: targetCategory,
+      subcategory: artist,
+      duration,
+      chapters
     };
 
     metadataCache[filename] = data;
@@ -2600,7 +2639,7 @@ async function scanDownloadDir() {
         console.error(`[Metadata] Failed to get metadata for ${file.filename}:`, err);
         file.metadata = {
           title: path.parse(file.filename).name,
-          category: MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos'
+          category: ext === '.m4b' ? 'Hörbücher' : (MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos')
         };
       }
     }
@@ -2624,16 +2663,19 @@ app.get('/api/media-library', async (req, res) => {
   
   // Map local files to category 'Lokal'
   const mappedList = list.map(item => {
+    const ext = path.extname(item.filename).toLowerCase();
     if (item.metadata) {
-      item.metadata.originalCategory = item.metadata.category || 'Videos';
+      item.metadata.originalCategory = item.metadata.category || (ext === '.m4b' ? 'Hörbücher' : (MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos'));
       item.metadata.category = 'Lokal';
     } else {
-      const ext = path.extname(item.filename).toLowerCase();
       item.metadata = {
         title: path.parse(item.filename).name,
         category: 'Lokal',
-        originalCategory: MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos'
+        originalCategory: ext === '.m4b' ? 'Hörbücher' : (MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos')
       };
+    }
+    if (playProgress[item.filename]) {
+      item.progress = playProgress[item.filename];
     }
     return item;
   });
@@ -2773,6 +2815,11 @@ app.get('/api/media-library', async (req, res) => {
       const cat = item.metadata?.category || item.category || 'Videos';
       const origCat = item.metadata?.originalCategory || cat;
       return cat === 'Live TV' || origCat === 'Live TV';
+    }).length,
+    'Hörbücher': filteredRaw.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      const origCat = item.metadata?.originalCategory || cat;
+      return cat === 'Hörbücher' || origCat === 'Hörbücher';
     }).length
   };
 
@@ -2839,8 +2886,8 @@ app.get('/api/media-library', async (req, res) => {
     });
   }
 
-  // 4b. Special sorting for Musik category (Artist -> Album -> Track -> Title)
-  if (category === 'Musik') {
+  // 4b. Special sorting for Musik and Hörbücher category (Artist -> Album -> Track -> Title)
+  if (category === 'Musik' || category === 'Hörbücher') {
     filteredGrouped.sort((a, b) => {
       const isRadioA = a.metadata?.subcategory === 'Internet-Radio';
       const isRadioB = b.metadata?.subcategory === 'Internet-Radio';
@@ -2988,6 +3035,19 @@ app.post('/api/media-library/bulk-delete', async (req, res) => {
   }
 
   return res.json({ success: true, ...results });
+});
+
+app.post('/api/media/progress', (req, res) => {
+  const { filename, position } = req.body;
+  if (!filename) {
+    return res.status(400).json({ error: 'Missing filename' });
+  }
+  playProgress[filename] = {
+    position: parseFloat(position) || 0,
+    updatedAt: Date.now()
+  };
+  savePlayProgress();
+  return res.json({ success: true, progress: playProgress[filename] });
 });
 
 app.post('/api/media-library/play-local', (req, res) => {
@@ -4076,6 +4136,7 @@ app.get('/api/media/*', async (req, res) => {
   if (ext === '.mkv') contentType = 'video/x-matroska';
   else if (ext === '.mp3') contentType = 'audio/mpeg';
   else if (ext === '.wav') contentType = 'audio/wav';
+  else if (ext === '.m4a' || ext === '.m4b') contentType = 'audio/mp4';
 
   if (range) {
     const parts = range.replace(/bytes=/, "").split("-");
@@ -4170,6 +4231,9 @@ server.listen(PORT, '0.0.0.0', () => {
 
   // Load auto-downloads from disk
   loadAutoDownloads();
+
+  // Load play progress from disk
+  loadPlayProgress();
 
   // Setup interval check from configuration
   recreateCheckInterval();
