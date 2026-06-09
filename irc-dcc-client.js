@@ -38,7 +38,10 @@ export class IrcDccDownloader extends EventEmitter {
     this.errorMessage = '';
     this.offeredFilename = '';
     
-    this.nick = 'G_' + Math.floor(100000 + Math.random() * 900000);
+    const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const suffix = Math.floor(100 + Math.random() * 900);
+    this.nick = `${prefix}_${suffix}`;
     this.bytesInLastSecond = 0;
     this.speedInterval = null;
     this.localSize = 0;
@@ -193,6 +196,21 @@ export class IrcDccDownloader extends EventEmitter {
     const sender = parts[0];
     const command = parts[1];
 
+    const joinErrors = {
+      '471': 'Channel ist voll (+l)',
+      '473': 'Channel ist nur auf Einladung (+i)',
+      '474': 'Du bist aus dem Channel gebannt (+b)',
+      '475': 'Falsches Channel-Passwort (+k)',
+      '477': 'Du musst registriert/identifiziert sein, um beizutreten (+r)'
+    };
+
+    if (joinErrors[command]) {
+      const errChannel = parts[3] || 'Channel';
+      const reason = line.substring(line.indexOf(' :', 1) + 2) || joinErrors[command];
+      this.handleError(`Fehler beim Beitreten von ${errChannel}: ${reason}`);
+      return;
+    }
+
     if (command === '376' || command === '422') {
       if (parts[2]) {
         this.nick = parts[2];
@@ -290,7 +308,7 @@ export class IrcDccDownloader extends EventEmitter {
     this.log(`CTCP Received from ${this.botName}: ${ctcpContent}`);
 
     if (ctcpContent.startsWith('DCC SEND ')) {
-      this.isSecureDcc = false;
+      this.isSecureDcc = this.useSsend || false;
       this.handleDccSend(ctcpContent);
     } else if (ctcpContent.startsWith('DCC SSEND ') || ctcpContent.startsWith('DCC TSEND ') || ctcpContent.startsWith('DCC TSSEND ') || ctcpContent.startsWith('DCC STSEND ')) {
       this.isSecureDcc = true;
