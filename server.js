@@ -768,7 +768,12 @@ app.post('/api/settings', (req, res) => {
   }
 
   if (downloadDir) {
+    const oldDir = appConfig.downloadDir;
     appConfig.downloadDir = path.resolve(downloadDir);
+    if (oldDir !== appConfig.downloadDir) {
+      loadMetadataCache();
+      cachedLocalFiles = null;
+    }
   }
   if (typeof useSSLByDefault === 'boolean') {
     appConfig.useSSLByDefault = useSSLByDefault;
@@ -869,7 +874,7 @@ app.post('/api/auto-download/check-now', async (req, res) => {
 
   console.log(`[Auto-Download] Manual 'Search now' triggered for "${sub.title}" (${imdbId})`);
 
-  scanDownloadDir().then(mediaFiles => {
+  getLocalFiles().then(mediaFiles => {
     checkSingleShow(sub, mediaFiles);
   }).catch(err => {
     console.error(`[Auto-Download] Error scanning during manual check:`, err.message);
@@ -1207,6 +1212,7 @@ async function handleDownloadPostProcessing(id, downloader) {
   } finally {
     // Clear override to finish
     downloadQueue.set(id, { downloader, statusOverride: null });
+    cachedLocalFiles = null;
     broadcastStatus(id);
   }
 }
@@ -1260,6 +1266,9 @@ app.post('/api/xtream/download', (req, res) => {
 
   downloader.on('progress', (data) => {
     // HTTP downloads do not require RAR/TAR extraction post-processing
+    if (data.status === 'completed') {
+      cachedLocalFiles = null;
+    }
     broadcastStatus(id);
   });
 
@@ -1389,6 +1398,7 @@ app.delete('/api/download/:id', async (req, res) => {
         if (fs.existsSync(item.downloader.filePath)) {
           await fs.promises.unlink(item.downloader.filePath);
           console.log(`[Server] Deleted file from disk: ${item.downloader.filePath}`);
+          cachedLocalFiles = null;
         }
       } catch (err) {
         console.error(`[Server] Failed to delete file: ${item.downloader.filePath}`, err);
@@ -1439,6 +1449,7 @@ function getSafeFilePath(filename) {
 }
 
 async function deleteMediaFileAndCleanDirs(filename) {
+  cachedLocalFiles = null;
   const filePath = getSafeFilePath(filename);
   if (!filePath || !fs.existsSync(filePath)) {
     throw new Error('Datei existiert nicht auf dem Datenträger');
@@ -1466,6 +1477,10 @@ async function deleteMediaFileAndCleanDirs(filename) {
   }
 }
 
+let cachedLocalFiles = null;
+let lastLocalScanTime = 0;
+const LOCAL_CACHE_TTL = 30000; // 30 seconds
+
 let metadataCache = {};
 
 function getMetadataCachePath() {
@@ -1487,16 +1502,33 @@ function loadMetadataCache() {
   }
 }
 
+let saveMetadataTimeout = null;
 function saveMetadataCache() {
-  const cachePath = getMetadataCachePath();
-  try {
-    if (!fs.existsSync(appConfig.downloadDir)) {
-      fs.mkdirSync(appConfig.downloadDir, { recursive: true });
-    }
-    fs.writeFileSync(cachePath, JSON.stringify(metadataCache, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error saving metadata cache:', e);
+  if (saveMetadataTimeout) {
+    clearTimeout(saveMetadataTimeout);
   }
+  saveMetadataTimeout = setTimeout(async () => {
+    saveMetadataTimeout = null;
+    const cachePath = getMetadataCachePath();
+    try {
+      if (!fs.existsSync(appConfig.downloadDir)) {
+        await fs.promises.mkdir(appConfig.downloadDir, { recursive: true });
+      }
+      await fs.promises.writeFile(cachePath, JSON.stringify(metadataCache, null, 2), 'utf8');
+      console.log(`[Cache] Metadata cache saved to ${cachePath} (${Object.keys(metadataCache).length} items)`);
+    } catch (e) {
+      console.error('Error saving metadata cache:', e);
+    }
+  }, 1000); // 1 second debounce
+}
+
+async function getLocalFiles(force = false) {
+  if (!force && cachedLocalFiles && (Date.now() - lastLocalScanTime < LOCAL_CACHE_TTL)) {
+    return cachedLocalFiles;
+  }
+  cachedLocalFiles = await scanDownloadDir();
+  lastLocalScanTime = Date.now();
+  return cachedLocalFiles;
 }
 
 loadMetadataCache();
@@ -1753,7 +1785,7 @@ async function checkAllAutoDownloads() {
     return;
   }
   
-  const mediaFiles = await scanDownloadDir();
+  const mediaFiles = await getLocalFiles();
   for (const sub of subscriptions) {
     await checkSingleShow(sub, mediaFiles);
   }
@@ -2154,7 +2186,6 @@ async function getOrFetchMetadata(filename, ext) {
 
 async function scanDownloadDir() {
   const dir = appConfig.downloadDir;
-  loadMetadataCache(); // Reload metadata cache for the current download directory
   try {
     if (!fs.existsSync(dir)) {
       return [];
@@ -2213,7 +2244,14 @@ async function scanDownloadDir() {
 }
 
 app.get('/api/media-library', async (req, res) => {
-  const list = await scanDownloadDir();
+  const category = req.query.category || 'all';
+  const subcategory = req.query.subcategory || 'all';
+  const search = (req.query.search || '').trim().toLowerCase();
+  const page = parseInt(req.query.page) || 1;
+  const limit = parseInt(req.query.limit) || 60;
+  const forceScan = req.query.forceScan === 'true';
+
+  const list = await getLocalFiles(forceScan);
   
   // Map local files to category 'Lokal'
   const mappedList = list.map(item => {
@@ -2231,6 +2269,10 @@ app.get('/api/media-library', async (req, res) => {
     return item;
   });
   
+  let mappedMovies = [];
+  let mappedSeries = [];
+  let mappedLive = [];
+
   if (appConfig.xtreamEnabled && appConfig.xtreamHost && appConfig.xtreamUsername && appConfig.xtreamPassword) {
     if (xtreamMovies.length === 0 && xtreamSeries.length === 0 && xtreamLive.length === 0 && lastXtreamFetch === 0) {
       fetchXtreamData().catch(err => console.error('[Xtream] Async fetch in library handler:', err.message));
@@ -2244,7 +2286,7 @@ app.get('/api/media-library', async (req, res) => {
     const liveCatMap = new Map(xtreamLiveCategories.map(c => [String(c.category_id), c.category_name]));
     
     // Map movies (ALL)
-    let mappedMovies = xtreamMovies.map(movie => {
+    mappedMovies = xtreamMovies.map(movie => {
       const ext = movie.container_extension || 'mp4';
       const streamUrl = `${host}/movie/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${movie.stream_id}.${ext}`;
       const subcat = vodCatMap.get(String(movie.category_id)) || 'Sonstige';
@@ -2266,7 +2308,7 @@ app.get('/api/media-library', async (req, res) => {
     });
     
     // Map series (ALL)
-    let mappedSeries = xtreamSeries.map(series => {
+    mappedSeries = xtreamSeries.map(series => {
       const subcat = seriesCatMap.get(String(series.category_id)) || 'Sonstige';
       return {
         filename: `xtream_series_${series.series_id}`,
@@ -2292,7 +2334,7 @@ app.get('/api/media-library', async (req, res) => {
     });
  
     // Map Live TV (ALL)
-    let mappedLive = xtreamLive.map(channel => {
+    mappedLive = xtreamLive.map(channel => {
       const streamUrl = `${host}/live/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${channel.stream_id}.ts`;
       const subcat = liveCatMap.get(String(channel.category_id)) || 'Sonstige';
       return {
@@ -2318,11 +2360,129 @@ app.get('/api/media-library', async (req, res) => {
       mappedSeries = mappedSeries.filter(s => !isAdultContent(s.metadata.subcategory, s.metadata.title));
       mappedLive = mappedLive.filter(l => !isAdultContent(l.metadata.subcategory, l.metadata.title));
     }
-    
-    return res.json([...mappedList, ...mappedMovies, ...mappedSeries, ...mappedLive]);
   }
-  
-  return res.json(mappedList);
+
+  const rawItems = [...mappedList, ...mappedMovies, ...mappedSeries, ...mappedLive];
+
+  // 1. Filter raw items by search query
+  let filteredRaw = rawItems;
+  if (search) {
+    filteredRaw = rawItems.filter(item => {
+      const filenameMatch = item.filename ? item.filename.toLowerCase().includes(search) : false;
+      const titleMatch = (item.metadata?.title || item.title || '').toLowerCase().includes(search);
+      const castMatch = (item.metadata?.cast || item.cast || '').toLowerCase().includes(search);
+      return filenameMatch || titleMatch || castMatch;
+    });
+  }
+
+  // 2. Compute category counts based on the search-filtered list (just like frontend did)
+  const counts = {
+    all: filteredRaw.length,
+    Lokal: filteredRaw.filter(item => item.metadata?.category === 'Lokal').length,
+    Filme: filteredRaw.filter(item => (item.metadata?.category || 'Filme') === 'Filme').length,
+    Serien: filteredRaw.filter(item => item.metadata?.category === 'Serien').length,
+    Videos: filteredRaw.filter(item => item.metadata?.category === 'Videos').length,
+    Musik: filteredRaw.filter(item => item.metadata?.category === 'Musik').length,
+    'Live TV': filteredRaw.filter(item => item.metadata?.category === 'Live TV').length
+  };
+
+  // 3. Group the search-filtered items (Series grouping)
+  const seriesGroups = {};
+  const otherItems = [];
+
+  filteredRaw.forEach(item => {
+    const cat = item.metadata?.category || 'Videos';
+    const originalCategory = item.metadata?.originalCategory || cat;
+    
+    if (cat === 'Serien' || originalCategory === 'Serien') {
+      if (item.isGroup) {
+        const key = item.xtreamSeriesId || item.title;
+        seriesGroups[key] = {
+          ...item,
+          files: item.files || []
+        };
+        return;
+      }
+      const seriesKey = item.metadata?.imdbId || item.metadata?.title || 'Unknown Series';
+      if (!seriesGroups[seriesKey]) {
+        seriesGroups[seriesKey] = {
+          isGroup: true,
+          title: item.metadata?.title || 'Unbekannte Serie',
+          posterUrl: item.metadata?.posterUrl,
+          year: item.metadata?.year,
+          cast: item.metadata?.cast,
+          imdbId: item.metadata?.imdbId,
+          category: cat,
+          files: []
+        };
+      }
+      seriesGroups[seriesKey].files.push(item);
+    } else {
+      otherItems.push(item);
+    }
+  });
+
+  // Sort files within series groups
+  Object.values(seriesGroups).forEach(group => {
+    if (Array.isArray(group.files)) {
+      group.files.sort((a, b) => {
+        const epA = a.metadata?.seasonEpisode || '';
+        const epB = b.metadata?.seasonEpisode || '';
+        if (epA && epB) {
+          return epA.localeCompare(epB, undefined, { numeric: true, sensitivity: 'base' });
+        }
+        return a.filename.localeCompare(b.filename);
+      });
+    }
+  });
+
+  const sortedSeries = Object.values(seriesGroups).sort((a, b) => a.title.localeCompare(b.title));
+  const groupedItems = [...sortedSeries, ...otherItems];
+
+  // 4. Filter grouped list by selectedCategory
+  let filteredGrouped = groupedItems;
+  if (category !== 'all') {
+    filteredGrouped = groupedItems.filter(item => {
+      const cat = item.metadata?.category || item.category || 'Videos';
+      return cat === category;
+    });
+  }
+
+  // 5. Compute available subcategories for the selected category + active search
+  const subcats = new Set();
+  filteredGrouped.forEach(item => {
+    const sub = item.metadata?.subcategory || item.subcategory;
+    if (sub) {
+      subcats.add(sub);
+    }
+  });
+  const availableSubcategories = ['all', ...Array.from(subcats).sort()];
+
+  // 6. Filter by subcategory if applicable
+  if (subcategory !== 'all') {
+    filteredGrouped = filteredGrouped.filter(item => {
+      const subcat = item.metadata?.subcategory || item.subcategory || '';
+      return subcat === subcategory;
+    });
+  }
+
+  // 7. Paginate results
+  const totalItems = filteredGrouped.length;
+  const totalPages = Math.ceil(totalItems / limit);
+  const currentPage = Math.max(1, Math.min(page, totalPages || 1));
+  const startIndex = (currentPage - 1) * limit;
+  const endIndex = currentPage * limit;
+
+  const paginatedItems = filteredGrouped.slice(startIndex, endIndex);
+
+  return res.json({
+    items: paginatedItems,
+    totalItems,
+    totalPages,
+    currentPage,
+    counts,
+    availableSubcategories
+  });
 });
 
 app.get('/api/xtream/series-episodes', async (req, res) => {

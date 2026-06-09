@@ -112,10 +112,18 @@ function App() {
   const [activeCasts, setActiveCasts] = useState([]);
   const [pendingCasts, setPendingCasts] = useState({});
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [mediaLibrary, setMediaLibrary] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Lokal' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
   const [selectedSubcategory, setSelectedSubcategory] = useState('all');
   const [loadingLibrary, setLoadingLibrary] = useState(false);
+  const [totalPages, setTotalPages] = useState(0);
+  const [totalItems, setTotalItems] = useState(0);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [categoryCounts, setCategoryCounts] = useState({
+    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
+  });
+  const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
   const [currentView, setCurrentView] = useState('downloads'); // 'downloads' | 'library'
   const [activeSeriesId, setActiveSeriesId] = useState(null);
@@ -192,9 +200,6 @@ function App() {
 
     // Fetch active Chromecast streams
     fetchActiveCasts();
-
-    // Fetch local Media Library files
-    fetchMediaLibrary();
 
     // Fetch initial auto downloads
     fetch('/api/auto-download')
@@ -512,108 +517,9 @@ function App() {
     return mediaLibrary.filter(item => item.mtime < cutoff);
   };
 
-  const availableSubcategories = useMemo(() => {
-    const baseItems = mediaLibrary.filter(item => {
-      const query = librarySearchQuery.toLowerCase();
-      const filenameMatch = item.filename ? item.filename.toLowerCase().includes(query) : false;
-      const titleMatch = (item.metadata?.title || item.title || '').toLowerCase().includes(query);
-      const castMatch = (item.metadata?.cast || item.cast || '').toLowerCase().includes(query);
-      const matchesSearch = filenameMatch || titleMatch || castMatch;
-      
-      if (!matchesSearch) return false;
-      if (selectedCategory === 'all') return true;
-      const cat = item.metadata?.category || item.category || 'Videos';
-      return cat === selectedCategory;
-    });
-    
-    const subcats = new Set();
-    baseItems.forEach(item => {
-      const sub = item.metadata?.subcategory || item.subcategory;
-      if (sub) {
-        subcats.add(sub);
-      }
-    });
-    
-    return ['all', ...Array.from(subcats).sort()];
-  }, [mediaLibrary, selectedCategory, librarySearchQuery]);
-
-  const filteredLibrary = mediaLibrary.filter(item => {
-    const query = librarySearchQuery.toLowerCase();
-    const filenameMatch = item.filename ? item.filename.toLowerCase().includes(query) : false;
-    const titleMatch = (item.metadata?.title || item.title || '').toLowerCase().includes(query);
-    const castMatch = (item.metadata?.cast || item.cast || '').toLowerCase().includes(query);
-    const matchesSearch = filenameMatch || titleMatch || castMatch;
-    
-    if (!matchesSearch) return false;
-    
-    if (selectedCategory !== 'all') {
-      const cat = item.metadata?.category || item.category || 'Videos';
-      if (cat !== selectedCategory) return false;
-    }
-    
-    if (selectedSubcategory !== 'all') {
-      const subcat = item.metadata?.subcategory || item.subcategory || '';
-      if (subcat !== selectedSubcategory) return false;
-    }
-    
-    return true;
-  });
-
-  const getGroupedLibrary = () => {
-    const seriesGroups = {};
-    const otherItems = [];
-
-    filteredLibrary.forEach(item => {
-      const category = item.metadata?.category || 'Videos';
-      const originalCategory = item.metadata?.originalCategory || category;
-      
-      if (category === 'Serien' || originalCategory === 'Serien') {
-        if (item.isGroup) {
-          // Already a group (e.g. Xtream series)
-          const key = item.xtreamSeriesId || item.title;
-          seriesGroups[key] = {
-            ...item,
-            files: item.files || []
-          };
-          return;
-        }
-        const seriesKey = item.metadata?.imdbId || item.metadata?.title || 'Unknown Series';
-        if (!seriesGroups[seriesKey]) {
-          seriesGroups[seriesKey] = {
-            isGroup: true,
-            title: item.metadata?.title || 'Unbekannte Serie',
-            posterUrl: item.metadata?.posterUrl,
-            year: item.metadata?.year,
-            cast: item.metadata?.cast,
-            imdbId: item.metadata?.imdbId,
-            category: category,
-            files: []
-          };
-        }
-        seriesGroups[seriesKey].files.push(item);
-      } else {
-        otherItems.push(item);
-      }
-    });
-
-    Object.values(seriesGroups).forEach(group => {
-      if (Array.isArray(group.files)) {
-        group.files.sort((a, b) => {
-          const epA = a.metadata?.seasonEpisode || '';
-          const epB = b.metadata?.seasonEpisode || '';
-          if (epA && epB) {
-            return epA.localeCompare(epB, undefined, { numeric: true, sensitivity: 'base' });
-          }
-          return a.filename.localeCompare(b.filename);
-        });
-      }
-    });
-
-    const sortedSeries = Object.values(seriesGroups).sort((a, b) => a.title.localeCompare(b.title));
-    return [...sortedSeries, ...otherItems];
-  };
-
-  const groupedLibrary = getGroupedLibrary();
+  const availableSubcategories = serverSubcategories;
+  const filteredLibrary = mediaLibrary;
+  const groupedLibrary = mediaLibrary;
   
   const activeSeries = activeSeriesId 
     ? groupedLibrary.find(g => g.isGroup && (g.imdbId === activeSeriesId || g.title === activeSeriesId || (g.isXtream && g.xtreamSeriesId === activeSeriesId)))
@@ -647,6 +553,29 @@ function App() {
   useEffect(() => {
     setActiveSeriesId(null);
   }, [selectedCategory, currentView]);
+
+  const handleSelectCategory = (cat) => {
+    setSelectedCategory(cat);
+    setSelectedSubcategory('all');
+    setCurrentPage(1);
+  };
+
+  const handleSelectSubcategory = (sub) => {
+    setSelectedSubcategory(sub);
+    setCurrentPage(1);
+  };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearchQuery(librarySearchQuery);
+      setCurrentPage(1);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [librarySearchQuery]);
+
+  useEffect(() => {
+    fetchMediaLibrary();
+  }, [selectedCategory, selectedSubcategory, debouncedSearchQuery, currentPage]);
 
   const handleBulkDeleteObsolete = () => {
     if (selectedObsoleteFiles.length === 0) {
@@ -795,12 +724,29 @@ function App() {
       .catch(err => console.error('Connection error during control:', err));
   };
 
-  const fetchMediaLibrary = () => {
+  const fetchMediaLibrary = (forceScan = false) => {
     setLoadingLibrary(true);
-    fetch('/api/media-library')
+    const isForce = forceScan === true;
+    const params = new URLSearchParams({
+      category: selectedCategory,
+      subcategory: selectedSubcategory,
+      search: debouncedSearchQuery,
+      page: String(currentPage),
+      limit: '60'
+    });
+    if (isForce) {
+      params.append('forceScan', 'true');
+    }
+    fetch(`/api/media-library?${params.toString()}`)
       .then(res => res.json())
       .then(data => {
-        setMediaLibrary(data);
+        setMediaLibrary(data.items || []);
+        setTotalItems(data.totalItems || 0);
+        setTotalPages(data.totalPages || 0);
+        setCategoryCounts(data.counts || {
+          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0
+        });
+        setServerSubcategories(data.availableSubcategories || ['all']);
         setLoadingLibrary(false);
       })
       .catch(err => {
@@ -1689,7 +1635,7 @@ function App() {
                   <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
                     Unterstützte Formate: MP4, MKV, AVI, MP3, WAV, M4A, MOV, FLAC
                   </p>
-                  <button className="btn btn-secondary" style={{ marginTop: '0.5rem' }} onClick={fetchMediaLibrary}>
+                  <button className="btn btn-secondary" style={{ marginTop: '0.5rem' }} onClick={() => fetchMediaLibrary(true)}>
                     Ordner erneut scannen 🔄
                   </button>
                 </div>
@@ -1708,7 +1654,7 @@ function App() {
                         <button 
                           className="btn btn-secondary" 
                           style={{ padding: '0.4rem 0.8rem', fontSize: '0.8rem' }} 
-                          onClick={fetchMediaLibrary} 
+                          onClick={() => fetchMediaLibrary(true)} 
                           disabled={loadingLibrary}
                         >
                           {loadingLibrary ? '⏳ Scanne...' : 'Aktualisieren 🔄'}
@@ -2018,7 +1964,7 @@ function App() {
                     <>
                       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.8rem', color: 'var(--text-secondary)' }}>
                         <span>Gefundene Mediendateien:</span>
-                    <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={fetchMediaLibrary} disabled={loadingLibrary}>
+                    <button className="btn btn-secondary" style={{ padding: '0.2rem 0.5rem', fontSize: '0.75rem' }} onClick={() => fetchMediaLibrary(true)} disabled={loadingLibrary}>
                       {loadingLibrary ? '⏳ Scanne...' : 'Aktualisieren 🔄'}
                     </button>
                   </div>
@@ -2079,46 +2025,46 @@ function App() {
                     <div className="category-tabs-container">
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'all' ? 'active' : ''}`}
-                        onClick={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); }}
+                        onClick={() => handleSelectCategory('all')}
                       >
-                        📁 Alle ({mediaLibrary.length})
+                        📁 Alle ({categoryCounts.all || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
-                        onClick={() => { setSelectedCategory('Lokal'); setSelectedSubcategory('all'); }}
+                        onClick={() => handleSelectCategory('Lokal')}
                       >
-                        💾 Lokal ({mediaLibrary.filter(item => item.metadata?.category === 'Lokal').length})
+                        💾 Lokal ({categoryCounts.Lokal || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
-                        onClick={() => { setSelectedCategory('Filme'); setSelectedSubcategory('all'); }}
+                        onClick={() => handleSelectCategory('Filme')}
                       >
-                        🎬 Filme ({mediaLibrary.filter(item => (item.metadata?.category || 'Filme') === 'Filme').length})
+                        🎬 Filme ({categoryCounts.Filme || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
-                        onClick={() => { setSelectedCategory('Serien'); setSelectedSubcategory('all'); }}
+                        onClick={() => handleSelectCategory('Serien')}
                       >
-                        📺 Serien ({mediaLibrary.filter(item => item.metadata?.category === 'Serien').length})
+                        📺 Serien ({categoryCounts.Serien || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}
-                        onClick={() => { setSelectedCategory('Videos'); setSelectedSubcategory('all'); }}
+                        onClick={() => handleSelectCategory('Videos')}
                       >
-                        📹 Videos ({mediaLibrary.filter(item => item.metadata?.category === 'Videos').length})
+                        📹 Videos ({categoryCounts.Videos || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Musik' ? 'active' : ''}`}
-                        onClick={() => { setSelectedCategory('Musik'); setSelectedSubcategory('all'); }}
+                        onClick={() => handleSelectCategory('Musik')}
                       >
-                        🎵 Musik ({mediaLibrary.filter(item => item.metadata?.category === 'Musik').length})
+                        🎵 Musik ({categoryCounts.Musik || 0})
                       </button>
                       {settings.xtreamEnabled && (
                         <button 
                           className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
-                          onClick={() => { setSelectedCategory('Live TV'); setSelectedSubcategory('all'); }}
+                          onClick={() => handleSelectCategory('Live TV')}
                         >
-                          📡 Live TV ({mediaLibrary.filter(item => item.metadata?.category === 'Live TV').length})
+                          📡 Live TV ({categoryCounts['Live TV'] || 0})
                         </button>
                       )}
                     </div>
@@ -2130,7 +2076,7 @@ function App() {
                           <button
                             key={sub}
                             className={`subcategory-tag-btn ${selectedSubcategory === sub ? 'active' : ''}`}
-                            onClick={() => setSelectedSubcategory(sub)}
+                            onClick={() => handleSelectSubcategory(sub)}
                             style={{
                               padding: '0.35rem 0.75rem',
                               borderRadius: '20px',
@@ -2594,6 +2540,41 @@ function App() {
                           </div>
                         );
                       })}
+                    </div>
+                  )}
+
+                  {/* Pagination Controls */}
+                  {totalPages > 1 && (
+                    <div className="library-pagination" style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '1rem',
+                      marginTop: '1.5rem',
+                      paddingTop: '1rem',
+                      borderTop: '1px solid var(--border-color)'
+                    }}>
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1}
+                        style={{ padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                      >
+                        ◀ Zurück
+                      </button>
+                      
+                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
+                        Seite <strong style={{ color: 'var(--text-primary)' }}>{currentPage}</strong> von <strong style={{ color: 'var(--text-primary)' }}>{totalPages}</strong>
+                      </span>
+                      
+                      <button
+                        className="btn btn-secondary"
+                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage === totalPages}
+                        style={{ padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
+                      >
+                        Weiter ▶
+                      </button>
                     </div>
                   )}
                 </>
