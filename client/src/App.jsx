@@ -1,6 +1,24 @@
 import React, { useState, useEffect, useRef, useMemo } from 'react';
 
 // Custom inline SVG Icons for zero-dependency and clean layout
+const PulseCastLogo = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="url(#logoGrad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 5px rgba(6, 182, 212, 0.4))' }}>
+    <defs>
+      <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="var(--accent-cyan)" />
+        <stop offset="100%" stopColor="var(--accent-blue)" />
+      </linearGradient>
+    </defs>
+    <path d="M2 12h3l2-5 3 10 2-7 2 5 2-3h3" />
+    <path d="M15 5a8 8 0 0 1 5 5" strokeWidth="2" opacity="0.8" />
+    <path d="M17 3a11 11 0 0 1 6 6" strokeWidth="1.5" opacity="0.5" />
+  </svg>
+);
+
+const MediaIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="2" width="20" height="20" rx="2.18" ry="2.18"></rect><line x1="7" y1="2" x2="7" y2="22"></line><line x1="17" y1="2" x2="17" y2="22"></line><line x1="2" y1="12" x2="22" y2="12"></line><line x1="2" y1="7" x2="7" y2="7"></line><line x1="2" y1="17" x2="7" y2="17"></line><line x1="17" y1="17" x2="22" y2="17"></line><line x1="17" y1="7" x2="22" y2="7"></line></svg>
+);
+
 const SearchIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
 );
@@ -2705,10 +2723,10 @@ function App() {
         {/* Header */}
         <header className="app-header">
           <div className="brand">
-            <span className="brand-icon">⚡</span>
+            <PulseCastLogo />
             <div>
               <h1 style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
-                XDCC Load&Cast
+                PulseCast
                 <span className="version-info-badge" style={{ fontSize: '0.75rem', fontWeight: 'normal', color: 'var(--text-secondary)', background: 'rgba(255, 255, 255, 0.06)', padding: '0.15rem 0.4rem', borderRadius: '4px', border: '1px solid var(--border-color)', verticalAlign: 'middle', display: 'inline-flex', alignItems: 'center', gap: '0.3rem' }}>
                   <span>v{settings.version || '1.0.0'}</span>
                   {settings.startTime && (
@@ -2727,12 +2745,12 @@ function App() {
               className={`nav-btn ${currentView === 'downloads' ? 'active' : ''}`}
               onClick={() => setCurrentView('downloads')}
             >
-              📥 Downloads
+              <DownloadIcon />
+              Downloads
             </button>
             <button 
               className={`nav-btn ${currentView === 'library' ? 'active' : ''}`}
               onClick={() => {
-                const wasLibrary = currentView === 'library';
                 const isAtTopLevel = selectedCategory === 'all' &&
                                      selectedSubcategory === 'all' &&
                                      librarySearchQuery === '' &&
@@ -2750,7 +2768,8 @@ function App() {
                 }
               }}
             >
-              🎥 Mediathek
+              <MediaIcon />
+              Mediathek
             </button>
             <button 
               className={`nav-btn ${currentView === 'explorer' ? 'active' : ''}`}
@@ -2759,7 +2778,8 @@ function App() {
                 fetchExplorerFiles('');
               }}
             >
-              📂 Dateiexplorer
+              <FolderIcon />
+              Dateiexplorer
             </button>
           </div>
           <div className="header-actions">

@@ -1,7 +1,7 @@
 {
-  "name": "xdcc-load-cast",
+  "name": "pulse-cast",
   "version": "1.0.0",
-  "description": "Local web-based XDCC search, transfer, and cast client",
+  "description": "PulseCast - Local web-based XDCC search, transfer, and cast client",
   "main": "server.js",
   "type": "module",
   "scripts": {

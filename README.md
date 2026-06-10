@@ -1,9 +1,9 @@
-# ⚡ XDCC Load & Cast
+# 📡 PulseCast
 
 > **„XDCC? Ist das nicht dieses uralte IRC-Dateitransfer-Ding aus den 90ern?“**
 > Ja, genau! Aber diesmal im schicken Anzug, mit Fernbedienung und ohne dass du Kryptografie studieren musst.
 
-**XDCC Load & Cast** ist dein lokales Web-Dashboard, um IRC-Bots nach Dateien zu durchsuchen, sie per DCC herunterzuladen und direkt auf deinen Chromecast zu streamen (oder lokal abzuspielen). Suchen, laden, glotzen – alles aus einem modernen Webinterface.
+**PulseCast** ist dein lokales Web-Dashboard, um IRC-Bots nach Dateien zu durchsuchen, sie per DCC herunterzuladen und direkt auf deinen Chromecast zu streamen (oder lokal abzuspielen). Suchen, laden, glotzen – alles aus einem modernen Webinterface.
 
 ---
 
