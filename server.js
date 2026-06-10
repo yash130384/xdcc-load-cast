@@ -1873,14 +1873,22 @@ function updateMappedXtreamData() {
   const seriesCatMap = new Map(xtreamSeriesCategories.map(c => [String(c.category_id), c.category_name]));
   const liveCatMap = new Map(xtreamLiveCategories.map(c => [String(c.category_id), c.category_name]));
   
+  const parseXtreamTimestamp = (val) => {
+    if (!val) return 0;
+    const parsed = parseInt(val, 10);
+    if (isNaN(parsed) || parsed <= 0) return 0;
+    return String(parsed).length >= 13 ? parsed : parsed * 1000;
+  };
+  
   cachedMappedMovies = xtreamMovies.map(movie => {
     const ext = movie.container_extension || 'mp4';
     const streamUrl = `${host}/movie/${appConfig.xtreamUsername}/${appConfig.xtreamPassword}/${movie.stream_id}.${ext}`;
     const subcat = vodCatMap.get(String(movie.category_id)) || 'Sonstige';
+    const addedTime = parseXtreamTimestamp(movie.added) || Date.now();
     return {
       filename: streamUrl,
       sizeBytes: 0,
-      mtime: Date.now(),
+      mtime: addedTime,
       isXtream: true,
       xtreamStreamId: movie.stream_id,
       metadata: {
@@ -1896,6 +1904,7 @@ function updateMappedXtreamData() {
   
   cachedMappedSeries = xtreamSeries.map(series => {
     const subcat = seriesCatMap.get(String(series.category_id)) || 'Sonstige';
+    const addedTime = parseXtreamTimestamp(series.last_modified) || parseXtreamTimestamp(series.added) || Date.now();
     return {
       filename: `xtream_series_${series.series_id}`,
       isGroup: true,
@@ -1907,6 +1916,7 @@ function updateMappedXtreamData() {
       subcategory: subcat,
       cast: series.plot || 'Xtream Codes Series',
       year: series.rating ? `Rating: ${series.rating}` : null,
+      mtime: addedTime,
       metadata: {
         title: series.name,
         posterUrl: series.cover,
@@ -3063,6 +3073,16 @@ app.get('/api/media-library', async (req, res) => {
     await updateLocalMappedList(forceScan);
   }
 
+  // Trigger background sync if Xtream is enabled and either cache is empty or interval has passed
+  if (appConfig.xtreamEnabled) {
+    const intervalMs = (appConfig.xtreamSyncIntervalHours || 1) * 60 * 60 * 1000;
+    const isExpired = Date.now() - lastXtreamFetch >= intervalMs;
+    if (xtreamMovies.length === 0 || isExpired) {
+      console.log(`[Xtream] Cache empty or expired (age: ${Math.round((Date.now() - lastXtreamFetch) / 60000)}m). Triggering background fetch.`);
+      fetchXtreamData(false).catch(err => console.error('[Xtream] Background sync error:', err.message));
+    }
+  }
+
   // 2. Filter raw items by search query
   let filteredRaw = cachedRawItems;
   if (search) {
@@ -3118,7 +3138,8 @@ app.get('/api/media-library', async (req, res) => {
       const isFav = favorites.has(String(favKey));
       const hasProgress = !item.isGroup && playProgress[item.filename];
       return isFav || hasProgress;
-    }).length
+    }).length,
+    Neu: 0
   };
 
   // 4. Group series
@@ -3134,7 +3155,8 @@ app.get('/api/media-library', async (req, res) => {
         const key = item.xtreamSeriesId || item.title;
         seriesGroups[key] = {
           ...item,
-          files: item.files || []
+          files: item.files || [],
+          mtime: item.mtime || 0
         };
         return;
       }
@@ -3148,7 +3170,8 @@ app.get('/api/media-library', async (req, res) => {
           cast: item.metadata?.cast,
           imdbId: item.metadata?.imdbId,
           category: cat,
-          files: []
+          files: [],
+          mtime: item.mtime || 0
         };
       }
       seriesGroups[seriesKey].files.push(item);
@@ -3157,9 +3180,13 @@ app.get('/api/media-library', async (req, res) => {
     }
   });
 
-  // Sort files within series groups
+  // Sort files within series groups and calculate their group mtime
   Object.values(seriesGroups).forEach(group => {
-    if (Array.isArray(group.files)) {
+    let groupMtime = group.mtime || 0;
+    if (Array.isArray(group.files) && group.files.length > 0) {
+      const fileMtimes = group.files.map(f => f.mtime || 0);
+      groupMtime = Math.max(groupMtime, ...fileMtimes);
+      
       group.files.sort((a, b) => {
         const epA = a.metadata?.seasonEpisode || '';
         const epB = b.metadata?.seasonEpisode || '';
@@ -3169,14 +3196,27 @@ app.get('/api/media-library', async (req, res) => {
         return a.filename.localeCompare(b.filename);
       });
     }
+    group.mtime = groupMtime || Date.now();
   });
 
-  const sortedSeries = Object.values(seriesGroups).sort((a, b) => a.title.localeCompare(b.title));
+  const sortedSeries = Object.values(seriesGroups);
   const groupedItems = [...sortedSeries, ...otherItems];
+
+  // Calculate Neu category count (within the last 5 days, excluding Live TV & Musik)
+  const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
+  const nonLiveItems = groupedItems.filter(item => {
+    const cat = item.metadata?.category || item.category || 'Videos';
+    const origCat = item.metadata?.originalCategory || cat;
+    return cat !== 'Live TV' && origCat !== 'Live TV' && cat !== 'Musik' && origCat !== 'Musik' && cat !== 'Hörbücher' && origCat !== 'Hörbücher';
+  });
+  const newItemsLast5Days = nonLiveItems.filter(item => (item.mtime || 0) >= fiveDaysAgo);
+  counts.Neu = newItemsLast5Days.length;
 
   // 5. Filter grouped list by category
   let filteredGrouped = groupedItems;
-  if (category === 'Favoriten') {
+  if (category === 'Neu') {
+    filteredGrouped = nonLiveItems.filter(item => (item.mtime || 0) >= fiveDaysAgo);
+  } else if (category === 'Favoriten') {
     filteredGrouped = groupedItems.filter(item => {
       const isFav = favorites.has(String(item.isGroup
         ? (item.xtreamSeriesId || item.imdbId || item.title || item.metadata?.imdbId || item.metadata?.title)
@@ -3190,6 +3230,17 @@ app.get('/api/media-library', async (req, res) => {
       const origCat = item.metadata?.originalCategory || cat;
       return cat === category || origCat === category;
     });
+  }
+
+  // Sort by mtime descending (newest first) for all except Live TV, Musik, Hörbücher
+  if (category === 'Live TV') {
+    filteredGrouped.sort((a, b) => {
+      const titleA = a.metadata?.title || a.title || '';
+      const titleB = b.metadata?.title || b.title || '';
+      return titleA.localeCompare(titleB);
+    });
+  } else if (category !== 'Musik' && category !== 'Hörbücher') {
+    filteredGrouped.sort((a, b) => (b.mtime || 0) - (a.mtime || 0));
   }
 
   // Musik / Hörbücher sorting

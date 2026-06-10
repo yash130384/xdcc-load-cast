@@ -241,7 +241,7 @@ function App() {
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryCounts, setCategoryCounts] = useState({
-    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0, Favoriten: 0
+    all: 0, Neu: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0, Favoriten: 0
   });
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
@@ -960,7 +960,7 @@ function App() {
         setTotalItems(data.totalItems || 0);
         setTotalPages(data.totalPages || 0);
         setCategoryCounts(data.counts || {
-          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0, Favoriten: 0
+          all: 0, Neu: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0, Favoriten: 0
         });
         setServerSubcategories(data.availableSubcategories || ['all']);
         setLoadingLibrary(false);
@@ -3531,6 +3531,12 @@ function App() {
                         }}
                       >
                         ❤️ Favoriten ({categoryCounts.Favoriten || 0})
+                      </button>
+                      <button 
+                        className={`category-tab-btn ${selectedCategory === 'Neu' ? 'active' : ''}`}
+                        onClick={() => handleSelectCategory('Neu')}
+                      >
+                        🆕 Neu ({categoryCounts.Neu || 0})
                       </button>
                       <button 
                         className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
