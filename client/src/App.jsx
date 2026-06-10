@@ -33,6 +33,10 @@ const TrashIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path><line x1="10" y1="11" x2="10" y2="17"></line><line x1="14" y1="11" x2="14" y2="17"></line></svg>
 );
 
+const HeartIcon = ({ filled }) => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill={filled ? "var(--accent-red, #ff3366)" : "none"} stroke={filled ? "var(--accent-red, #ff3366)" : "currentColor"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"></path></svg>
+);
+
 const TerminalIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><polyline points="4 17 10 11 4 5"></polyline><line x1="12" y1="19" x2="20" y2="19"></line></svg>
 );
@@ -237,7 +241,7 @@ function App() {
   const [totalItems, setTotalItems] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
   const [categoryCounts, setCategoryCounts] = useState({
-    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0
+    all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0, Favoriten: 0
   });
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue'); // 'queue' or 'library'
@@ -927,12 +931,13 @@ function App() {
   const fetchMediaLibrary = (forceScan = false) => {
     setLoadingLibrary(true);
     const isForce = forceScan === true;
+    const limitVal = selectedCategory === 'Favoriten' ? '1000' : '60';
     const params = new URLSearchParams({
       category: selectedCategory,
       subcategory: selectedSubcategory,
       search: debouncedSearchQuery,
       page: String(currentPage),
-      limit: '60'
+      limit: limitVal
     });
     if (isForce) {
       params.append('forceScan', 'true');
@@ -940,11 +945,22 @@ function App() {
     fetch(`/api/media-library?${params.toString()}`)
       .then(res => res.json())
       .then(data => {
-        setMediaLibrary(data.items || []);
+        setMediaLibrary(prev => {
+          if (currentPage === 1) {
+            return data.items || [];
+          } else {
+            const existingIds = new Set(prev.map(i => i.isGroup ? (i.imdbId || i.title || i.xtreamSeriesId) : i.filename));
+            const newItems = (data.items || []).filter(i => {
+              const id = i.isGroup ? (i.imdbId || i.title || i.xtreamSeriesId) : i.filename;
+              return !existingIds.has(id);
+            });
+            return [...prev, ...newItems];
+          }
+        });
         setTotalItems(data.totalItems || 0);
         setTotalPages(data.totalPages || 0);
         setCategoryCounts(data.counts || {
-          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0
+          all: 0, Lokal: 0, Filme: 0, Serien: 0, Videos: 0, Musik: 0, 'Live TV': 0, 'Hörbücher': 0, Favoriten: 0
         });
         setServerSubcategories(data.availableSubcategories || ['all']);
         setLoadingLibrary(false);
@@ -953,6 +969,495 @@ function App() {
         console.error('Error fetching media library:', err);
         setLoadingLibrary(false);
       });
+  };
+
+  const toggleFavorite = (item) => {
+    const isGroup = item.isGroup;
+    const favKey = isGroup
+      ? (item.xtreamSeriesId || item.imdbId || item.title || item.metadata?.imdbId || item.metadata?.title)
+      : item.filename;
+    
+    const nextFavorite = !item.favorite;
+    
+    setMediaLibrary(prev => prev.map(i => {
+      const k = i.isGroup
+        ? (i.xtreamSeriesId || i.imdbId || i.title || i.metadata?.imdbId || i.metadata?.title)
+        : i.filename;
+      if (String(k) === String(favKey)) {
+        return { ...i, favorite: nextFavorite };
+      }
+      return i;
+    }));
+    
+    fetch('/api/favorites/toggle', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ id: favKey, isFavorite: nextFavorite })
+    })
+      .then(res => res.json())
+      .then(data => {
+        fetchMediaLibrary();
+      })
+      .catch(err => {
+        console.error('Error toggling favorite:', err);
+        fetchMediaLibrary();
+      });
+  };
+
+  const handleScroll = (e) => {
+    const target = e.target;
+    if (target.scrollHeight - target.scrollTop - target.clientHeight < 150) {
+      if (!loadingLibrary && currentPage < totalPages) {
+        setCurrentPage(prev => prev + 1);
+      }
+    }
+  };
+
+  const renderMediaCard = (item, idx) => {
+    if (item.isGroup) {
+      const title = item.title;
+      const posterUrl = item.posterUrl;
+      const year = item.year;
+      const cast = item.cast;
+      const imdbLink = item.imdbId ? `https://www.imdb.com/title/${item.imdbId}` : null;
+      const fileCount = item.files ? item.files.length : 0;
+      
+      return (
+        <div 
+          key={idx} 
+          className="media-card series-group-card" 
+          onClick={() => setActiveSeriesId(item.imdbId || item.title || (item.isXtream && item.xtreamSeriesId))}
+          style={{ cursor: 'pointer', position: 'relative' }}
+        >
+          <div className="media-poster-container" style={{ position: 'relative' }}>
+             <img 
+               src={getPosterSrc(posterUrl)} 
+               alt={title} 
+               className="media-poster" 
+               loading="lazy" 
+               style={{ display: posterUrl ? 'block' : 'none' }}
+               onError={(e) => {
+                 e.target.style.display = 'none';
+                 const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
+                 if (fallback) fallback.style.display = 'flex';
+               }}
+             />
+             <div className="media-poster-fallback" style={{ display: posterUrl ? 'none' : 'flex' }}>
+               <span className="media-poster-fallback-icon">📺</span>
+               <span className="media-poster-fallback-title">{title}</span>
+             </div>
+            
+            {year && <span className="media-badge-year">{year}</span>}
+            <span className="media-badge-type">Serie</span>
+            <span className="media-badge-episode">{fileCount} {fileCount === 1 ? 'Datei' : 'Dateien'}</span>
+
+            {/* Favorite button overlay */}
+            <button
+              className="btn-favorite"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFavorite(item);
+              }}
+              style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                zIndex: 10,
+                background: 'rgba(0,0,0,0.6)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: item.favorite ? 'var(--accent-red)' : 'rgba(255,255,255,0.7)',
+                transition: 'transform 0.2s, background 0.2s',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
+              }}
+              title={item.favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+            >
+              <HeartIcon filled={item.favorite} />
+            </button>
+          </div>
+          
+          <div className="media-card-body">
+            <div className="media-card-details">
+              <div className="media-card-title" title={title}>
+                {title}
+              </div>
+              {cast && (
+                <div className="media-card-cast" title={cast}>
+                  {cast}
+                </div>
+              )}
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                  📂 Anzeigen ({fileCount})
+                </span>
+                {imdbLink && (
+                  <a 
+                    href={imdbLink} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="media-imdb-link"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    ⭐ IMDb
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      );
+    }
+
+    // Otherwise normal card
+    const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
+    const isPending = !!pendingCasts[item.filename];
+    
+    const meta = item.metadata || {};
+    const title = meta.title || item.filename;
+    const posterUrl = meta.posterUrl;
+    const year = meta.year || null;
+    const cast = meta.cast || null;
+    const rawCategory = meta.category || 'Videos';
+    const category = rawCategory === 'Sonstige' ? 'Videos' : rawCategory;
+    const originalCategory = meta.originalCategory || category;
+    
+    const imdbLink = meta.imdbId ? `https://www.imdb.com/title/${meta.imdbId}` : null;
+    
+    let fallbackIcon = '📹';
+    if (category === 'Filme' || originalCategory === 'Filme') fallbackIcon = '🎬';
+    else if (category === 'Serien' || originalCategory === 'Serien') fallbackIcon = '📺';
+    else if (category === 'Live TV' || originalCategory === 'Live TV') fallbackIcon = '📡';
+    else if (category === 'Musik' || originalCategory === 'Musik') fallbackIcon = '🎵';
+    
+    return (
+      <div key={idx} className="media-card" style={{ position: 'relative' }}>
+        <div className="media-poster-container" style={{ position: 'relative' }}>
+          <img 
+            src={getPosterSrc(posterUrl)} 
+            alt={title} 
+            className="media-poster" 
+            loading="lazy" 
+            style={{ display: posterUrl ? 'block' : 'none' }}
+            onError={(e) => {
+              e.target.style.display = 'none';
+              const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
+              if (fallback) fallback.style.display = 'flex';
+            }}
+          />
+          <div className="media-poster-fallback" style={{ display: posterUrl ? 'none' : 'flex' }}>
+            <span className="media-poster-fallback-icon">{fallbackIcon}</span>
+            <span className="media-poster-fallback-title">{title}</span>
+          </div>
+          
+          {/* Badges on Poster */}
+          {year && <span className="media-badge-year">{year}</span>}
+          <span className="media-badge-type">
+            {category === 'Serien' || originalCategory === 'Serien' ? 'Serie' : category === 'Filme' || originalCategory === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : category === 'Musik' || originalCategory === 'Musik' ? 'Musik' : 'Video'}
+          </span>
+          {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
+
+          {/* Favorite button overlay */}
+          {(category === 'Filme' || originalCategory === 'Filme' || category === 'Serien' || originalCategory === 'Serien' || category === 'Live TV') && (
+            <button
+              className="btn-favorite"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFavorite(item);
+              }}
+              style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                zIndex: 10,
+                background: 'rgba(0,0,0,0.6)',
+                border: 'none',
+                borderRadius: '50%',
+                width: '32px',
+                height: '32px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                color: item.favorite ? 'var(--accent-red)' : 'rgba(255,255,255,0.7)',
+                transition: 'transform 0.2s, background 0.2s',
+                boxShadow: '0 2px 5px rgba(0,0,0,0.3)'
+              }}
+              title={item.favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+            >
+              <HeartIcon filled={item.favorite} />
+            </button>
+          )}
+        </div>
+        
+        <div className="media-card-body">
+          <div className="media-card-details">
+            <div className="media-card-title" title={title}>
+              {title}
+            </div>
+            {cast && (
+              <div className="media-card-cast" title={cast}>
+                {cast}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
+              <span className="media-card-size">{formatBytes(item.sizeBytes)}</span>
+              {imdbLink && (
+                <a href={imdbLink} target="_blank" rel="noopener noreferrer" className="media-imdb-link">
+                  ⭐ IMDb
+                </a>
+              )}
+            </div>
+          </div>
+          
+          <div className="media-card-actions">
+            {item.isXtream && !item.isLive && (
+              <button 
+                className="btn btn-secondary btn-icon-only" 
+                style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
+                title="Herunterladen"
+                onClick={() => triggerXtreamDownload(item)}
+              >
+                <DownloadIcon />
+              </button>
+            )}
+            {!item.isXtream && (
+              <button 
+                className="btn btn-danger btn-icon-only" 
+                title="Datei löschen"
+                onClick={() => handleDeleteMediaFile(item.filename)}
+              >
+                <TrashIcon />
+              </button>
+            )}
+            <button 
+              className="btn btn-primary btn-icon-only" 
+              style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+              title="Abspielen"
+              onClick={() => playLocalLibrary(item.filename, item)}
+            >
+              <PlayIcon />
+            </button>
+            <button 
+              className="btn btn-secondary btn-icon-only" 
+              style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+              title="Auf TV streamen (Cast)"
+              disabled={isPending}
+              onClick={() => {
+                setCastingItem(item);
+                fetchDevices();
+              }}
+            >
+              {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+            </button>
+          </div>
+
+          {/* Active cast status */}
+          {activeCastForFile && (
+            <div style={{
+              background: 'rgba(0, 242, 254, 0.08)',
+              border: '1px solid rgba(0, 242, 254, 0.25)',
+              borderRadius: '8px',
+              padding: '0.5rem 0.75rem',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.4rem',
+              marginTop: '0.5rem',
+              color: 'var(--text-primary)',
+              width: '100%',
+              boxSizing: 'border-box'
+            }}>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                  📺 Streamt auf {activeCastForFile.device}
+                </span>
+                <span style={{ fontSize: '0.7rem', opacity: 0.8 }}>
+                  {activeCastForFile.playerState || 'Verbinden'}
+                </span>
+              </div>
+
+              {activeCastForFile.duration > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.1rem' }}>
+                  <input 
+                    type="range"
+                    min={0}
+                    max={activeCastForFile.duration}
+                    value={activeCastForFile.currentTime || 0}
+                    onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                    style={{
+                      width: '100%',
+                      accentColor: 'var(--accent-cyan)',
+                      cursor: 'pointer',
+                      height: '4px'
+                    }}
+                  />
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.65rem', color: 'var(--text-muted)' }}>
+                    <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                    <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                  </div>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginTop: '0.1rem' }}>
+                {activeCastForFile.playerState === 'PAUSED' ? (
+                  <button 
+                    className="btn btn-secondary btn-icon-only" 
+                    style={{ padding: '0.2rem', height: 'auto', minWidth: '26px' }}
+                    onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
+                    title="Wiedergabe fortsetzen"
+                  >
+                    <PlayIcon />
+                  </button>
+                ) : (
+                  <button 
+                    className="btn btn-secondary btn-icon-only" 
+                    style={{ padding: '0.2rem', height: 'auto', minWidth: '26px' }}
+                    onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
+                    title="Wiedergabe pausieren"
+                  >
+                    <PauseIcon />
+                  </button>
+                )}
+                
+                <button 
+                  className="btn btn-danger" 
+                  style={{ padding: '0.2rem 0.5rem', fontSize: '0.7rem', marginLeft: 'auto' }}
+                  onClick={() => stopCast(activeCastForFile.device)}
+                >
+                  Stoppen
+                </button>
+              </div>
+            </div>
+          )}
+
+          {isPending && !activeCastForFile && (
+            <div style={{
+              background: 'rgba(0, 242, 254, 0.05)',
+              border: '1px solid rgba(0, 242, 254, 0.2)',
+              borderRadius: '8px',
+              padding: '0.4rem 0.6rem',
+              fontSize: '0.75rem',
+              marginTop: '0.5rem',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              color: 'var(--text-secondary)',
+              width: '100%',
+              boxSizing: 'border-box'
+            }}>
+              <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
+  const renderFavoritesOverview = () => {
+    const watchingSeries = mediaLibrary.filter(item => 
+      item.isGroup && item.files && item.files.some(ep => ep.progress || (playProgress && playProgress[ep.filename]))
+    );
+    
+    watchingSeries.sort((a, b) => {
+      const getLatestProgressTime = (group) => {
+        let maxTime = 0;
+        if (group.files) {
+          group.files.forEach(ep => {
+            const prog = ep.progress || (playProgress && playProgress[ep.filename]);
+            if (prog && prog.updatedAt > maxTime) {
+              maxTime = prog.updatedAt;
+            }
+          });
+        }
+        return maxTime;
+      };
+      return getLatestProgressTime(b) - getLatestProgressTime(a);
+    });
+
+    const favChannels = mediaLibrary.filter(item => 
+      !item.isGroup && 
+      (item.metadata?.category === 'Live TV' || item.category === 'Live TV') && 
+      item.favorite
+    );
+
+    const favMovies = mediaLibrary.filter(item => 
+      !item.isGroup && 
+      (item.metadata?.category === 'Filme' || item.category === 'Filme' || item.metadata?.originalCategory === 'Filme') && 
+      item.favorite
+    );
+
+    const favSeries = mediaLibrary.filter(item => 
+      item.isGroup && 
+      item.favorite && 
+      !watchingSeries.some(ws => (ws.imdbId === item.imdbId && ws.title === item.title) || (ws.isXtream && ws.xtreamSeriesId === item.xtreamSeriesId))
+    );
+
+    if (watchingSeries.length === 0 && favChannels.length === 0 && favMovies.length === 0 && favSeries.length === 0) {
+      return (
+        <div className="empty-state" style={{ padding: '3rem' }}>
+          <span className="empty-state-icon" style={{ color: 'var(--accent-red)' }}>❤️</span>
+          <h3 style={{ color: 'var(--text-primary)' }}>Deine Favoritenübersicht ist leer</h3>
+          <p style={{ maxWidth: '400px', margin: '0.5rem auto', color: 'var(--text-secondary)' }}>
+            Markiere Filme, Serien oder Live TV-Sender mit dem Herz-Symbol, um sie hier schnell wiederzufinden. Serien, die du gerade anschaust, erscheinen automatisch hier.
+          </p>
+        </div>
+      );
+    }
+
+    return (
+      <div className="favorites-overview" style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', width: '100%' }}>
+        {watchingSeries.length > 0 && (
+          <div>
+            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              📺 Gerade geschaut (Serien)
+            </h3>
+            <div className="media-grid">
+              {watchingSeries.map((item, idx) => renderMediaCard(item, idx))}
+            </div>
+          </div>
+        )}
+
+        {favChannels.length > 0 && (
+          <div>
+            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              📡 Lieblings-Sender (Live TV)
+            </h3>
+            <div className="media-grid">
+              {favChannels.map((item, idx) => renderMediaCard(item, idx))}
+            </div>
+          </div>
+        )}
+
+        {favMovies.length > 0 && (
+          <div>
+            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              🎬 Lieblings-Filme
+            </h3>
+            <div className="media-grid">
+              {favMovies.map((item, idx) => renderMediaCard(item, idx))}
+            </div>
+          </div>
+        )}
+
+        {favSeries.length > 0 && (
+          <div>
+            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-pink)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              📺 Lieblings-Serien
+            </h3>
+            <div className="media-grid">
+              {favSeries.map((item, idx) => renderMediaCard(item, idx))}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   };
 
   const playAudiobook = (item) => {
@@ -3018,6 +3523,16 @@ function App() {
                         📁 Alle ({categoryCounts.all || 0})
                       </button>
                       <button 
+                        className={`category-tab-btn ${selectedCategory === 'Favoriten' ? 'active' : ''}`}
+                        onClick={() => handleSelectCategory('Favoriten')}
+                        style={{
+                          border: selectedCategory === 'Favoriten' ? '1px solid var(--accent-red)' : '1px solid transparent',
+                          boxShadow: selectedCategory === 'Favoriten' ? '0 0 8px rgba(255, 51, 102, 0.2)' : 'none'
+                        }}
+                      >
+                        ❤️ Favoriten ({categoryCounts.Favoriten || 0})
+                      </button>
+                      <button 
                         className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
                         onClick={() => handleSelectCategory('Lokal')}
                       >
@@ -3112,7 +3627,7 @@ function App() {
                     </div>
                   ) : selectedCategory === 'Musik' ? (
                     /* Compact Music Track Item List */
-                    <div className="music-list" style={{ maxHeight: '650px', overflowY: 'auto' }}>
+                    <div className="music-list" style={{ maxHeight: '650px', overflowY: 'auto' }} onScroll={handleScroll}>
                       {filteredLibrary.map((item, idx) => {
                         const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
                         const isPending = !!pendingCasts[item.filename];
@@ -3293,323 +3808,35 @@ function App() {
                           </div>
                         );
                       })}
+                      {loadingLibrary && currentPage > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', width: '100%', padding: '1rem', color: 'var(--text-secondary)' }}>
+                          <span className="spinner">⏳</span> Lade mehr...
+                        </div>
+                      )}
+                    </div>
+                  ) : selectedCategory === 'Favoriten' ? (
+                    /* Favorites overview dashboard */
+                    <div style={{ maxHeight: '750px', overflowY: 'auto' }} onScroll={handleScroll}>
+                      {renderFavoritesOverview()}
+                      {loadingLibrary && (
+                        <div style={{ display: 'flex', justifyContent: 'center', width: '100%', padding: '1rem', color: 'var(--text-secondary)' }}>
+                          <span className="spinner">⏳</span> Lade...
+                        </div>
+                      )}
                     </div>
                   ) : (
-                    /* Movies/Series Card Grid View */
-                    <div className="media-grid" style={{ maxHeight: '750px', overflowY: 'auto' }}>
-                      {groupedLibrary.map((item, idx) => {
-                        if (item.isGroup) {
-                          const title = item.title;
-                          const posterUrl = item.posterUrl;
-                          const year = item.year;
-                          const cast = item.cast;
-                          const imdbLink = item.imdbId ? `https://www.imdb.com/title/${item.imdbId}` : null;
-                          const fileCount = item.files.length;
-                          
-                          return (
-                            <div 
-                              key={idx} 
-                              className="media-card series-group-card" 
-                              onClick={() => setActiveSeriesId(item.imdbId || item.title)}
-                              style={{ cursor: 'pointer' }}
-                            >
-                              <div className="media-poster-container">
-                                 <img 
-                                   src={getPosterSrc(posterUrl)} 
-                                   alt={title} 
-                                   className="media-poster" 
-                                   loading="lazy" 
-                                   style={{ display: posterUrl ? 'block' : 'none' }}
-                                   onError={(e) => {
-                                     e.target.style.display = 'none';
-                                     const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
-                                     if (fallback) fallback.style.display = 'flex';
-                                   }}
-                                 />
-                                 <div className="media-poster-fallback" style={{ display: posterUrl ? 'none' : 'flex' }}>
-                                   <span className="media-poster-fallback-icon">📺</span>
-                                   <span className="media-poster-fallback-title">{title}</span>
-                                 </div>
-                                
-                                {year && <span className="media-badge-year">{year}</span>}
-                                <span className="media-badge-type">Serie</span>
-                                <span className="media-badge-episode">{fileCount} {fileCount === 1 ? 'Datei' : 'Dateien'}</span>
-                              </div>
-                              
-                              <div className="media-card-body">
-                                <div className="media-card-details">
-                                  <div className="media-card-title" title={title}>
-                                    {title}
-                                  </div>
-                                  {cast && (
-                                    <div className="media-card-cast" title={cast}>
-                                      {cast}
-                                    </div>
-                                  )}
-                                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
-                                    <span style={{ fontSize: '0.75rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                                      📂 Anzeigen ({fileCount})
-                                    </span>
-                                    {imdbLink && (
-                                      <a 
-                                        href={imdbLink} 
-                                        target="_blank" 
-                                        rel="noopener noreferrer" 
-                                        className="media-imdb-link"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        ⭐ IMDb
-                                      </a>
-                                    )}
-                                  </div>
-                                </div>
-                              </div>
-                            </div>
-                          );
-                        }
-
-                        // Otherwise normal card
-                        const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
-                        const isPending = !!pendingCasts[item.filename];
-                        
-                        const meta = item.metadata || {};
-                        const title = meta.title || item.filename;
-                        const posterUrl = meta.posterUrl;
-                        const year = meta.year || null;
-                        const cast = meta.cast || null;
-                        const rawCategory = meta.category || 'Videos';
-                        const category = rawCategory === 'Sonstige' ? 'Videos' : rawCategory;
-                        const originalCategory = meta.originalCategory || category;
-                        
-                        const imdbLink = meta.imdbId ? `https://www.imdb.com/title/${meta.imdbId}` : null;
-                        
-                        let fallbackIcon = '📹';
-                        if (category === 'Filme' || originalCategory === 'Filme') fallbackIcon = '🎬';
-                        else if (category === 'Serien' || originalCategory === 'Serien') fallbackIcon = '📺';
-                        else if (category === 'Live TV' || originalCategory === 'Live TV') fallbackIcon = '📡';
-                        else if (category === 'Musik' || originalCategory === 'Musik') fallbackIcon = '🎵';
-                        
-                        return (
-                          <div key={idx} className="media-card">
-                            <div className="media-poster-container">
-                              <img 
-                                src={getPosterSrc(posterUrl)} 
-                                alt={title} 
-                                className="media-poster" 
-                                loading="lazy" 
-                                style={{ display: posterUrl ? 'block' : 'none' }}
-                                onError={(e) => {
-                                  e.target.style.display = 'none';
-                                  const fallback = e.target.parentElement.querySelector('.media-poster-fallback');
-                                  if (fallback) fallback.style.display = 'flex';
-                                }}
-                              />
-                              <div className="media-poster-fallback" style={{ display: posterUrl ? 'none' : 'flex' }}>
-                                <span className="media-poster-fallback-icon">{fallbackIcon}</span>
-                                <span className="media-poster-fallback-title">{title}</span>
-                              </div>
-                              
-                              {/* Badges on Poster */}
-                              {year && <span className="media-badge-year">{year}</span>}
-                              <span className="media-badge-type">
-                                {category === 'Serien' || originalCategory === 'Serien' ? 'Serie' : category === 'Filme' || originalCategory === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : category === 'Musik' || originalCategory === 'Musik' ? 'Musik' : 'Video'}
-                              </span>
-                              {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
-                            </div>
-                            
-                            <div className="media-card-body">
-                              <div className="media-card-details">
-                                <div className="media-card-title" title={title}>
-                                  {title}
-                                </div>
-                                {cast && (
-                                  <div className="media-card-cast" title={cast}>
-                                    {cast}
-                                  </div>
-                                )}
-                                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '0.2rem' }}>
-                                  <span className="media-card-size">{formatBytes(item.sizeBytes)}</span>
-                                  {imdbLink && (
-                                    <a href={imdbLink} target="_blank" rel="noopener noreferrer" className="media-imdb-link">
-                                      ⭐ IMDb
-                                    </a>
-                                  )}
-                                </div>
-                              </div>
-                              
-                              <div className="media-card-actions">
-                                {item.isXtream && !item.isLive && (
-                                  <button 
-                                    className="btn btn-secondary btn-icon-only" 
-                                    style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
-                                    title="Herunterladen"
-                                    onClick={() => triggerXtreamDownload(item)}
-                                  >
-                                    <DownloadIcon />
-                                  </button>
-                                )}
-                                {!item.isXtream && (
-                                  <button 
-                                    className="btn btn-danger btn-icon-only" 
-                                    title="Datei löschen"
-                                    onClick={() => handleDeleteMediaFile(item.filename)}
-                                  >
-                                    <TrashIcon />
-                                  </button>
-                                )}
-                                <button 
-                                  className="btn btn-primary btn-icon-only" 
-                                  style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                  title="Lokal abspielen"
-                                  onClick={() => playLocalLibrary(item.filename, item)}
-                                >
-                                  <PlayIcon />
-                                </button>
-                                <button 
-                                  className="btn btn-secondary btn-icon-only" 
-                                  style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                  title="Auf TV streamen (Cast)"
-                                  disabled={isPending}
-                                  onClick={() => {
-                                    setCastingItem(item);
-                                    fetchDevices();
-                                  }}
-                                >
-                                  {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Casting status */}
-                            {activeCastForFile && (
-                              <div style={{
-                                background: 'rgba(0, 242, 254, 0.08)',
-                                borderTop: '1px solid rgba(0, 242, 254, 0.25)',
-                                padding: '0.75rem',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.5rem',
-                                color: 'var(--text-primary)'
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                                    📺 {activeCastForFile.device}
-                                  </span>
-                                  <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                    {activeCastForFile.playerState || 'Verbinden'}
-                                  </span>
-                                </div>
-
-                                {/* Progress bar and time labels */}
-                                {activeCastForFile.duration > 0 && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                    <input 
-                                      type="range"
-                                      min={0}
-                                      max={activeCastForFile.duration}
-                                      value={activeCastForFile.currentTime || 0}
-                                      onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                                      style={{
-                                        width: '100%',
-                                        accentColor: 'var(--accent-cyan)',
-                                        cursor: 'pointer',
-                                        height: '4px'
-                                      }}
-                                    />
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                      <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                                      <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Control Buttons */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-                                  {activeCastForFile.playerState === 'PAUSED' ? (
-                                    <button 
-                                      className="btn btn-secondary btn-icon-only" 
-                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                      onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
-                                      title="Wiedergabe fortsetzen"
-                                    >
-                                      <PlayIcon />
-                                    </button>
-                                  ) : (
-                                    <button 
-                                      className="btn btn-secondary btn-icon-only" 
-                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                      onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
-                                      title="Wiedergabe pausieren"
-                                    >
-                                      <PauseIcon />
-                                    </button>
-                                  )}
-                                  
-                                  <button 
-                                    className="btn btn-danger" 
-                                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-                                    onClick={() => stopCast(activeCastForFile.device)}
-                                  >
-                                    Stoppen
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {isPending && !activeCastForFile && (
-                              <div style={{
-                                background: 'rgba(0, 242, 254, 0.05)',
-                                borderTop: '1px solid rgba(0, 242, 254, 0.2)',
-                                padding: '0.5rem 0.75rem',
-                                fontSize: '0.8rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                color: 'var(--text-secondary)'
-                              }}>
-                                <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                    /* Movies/Series Card Grid View with Endless Scroll */
+                    <div className="media-grid" style={{ maxHeight: '750px', overflowY: 'auto' }} onScroll={handleScroll}>
+                      {groupedLibrary.map((item, idx) => renderMediaCard(item, idx))}
+                      {loadingLibrary && currentPage > 1 && (
+                        <div style={{ display: 'flex', justifyContent: 'center', width: '100%', padding: '1rem', gridColumn: '1 / -1', color: 'var(--text-secondary)' }}>
+                          <span className="spinner">⏳</span> Lade mehr...
+                        </div>
+                      )}
                     </div>
                   )}
 
-                  {/* Pagination Controls */}
-                  {totalPages > 1 && (
-                    <div className="library-pagination" style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '1rem',
-                      marginTop: '1.5rem',
-                      paddingTop: '1rem',
-                      borderTop: '1px solid var(--border-color)'
-                    }}>
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                        disabled={currentPage === 1}
-                        style={{ padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                      >
-                        ◀ Zurück
-                      </button>
-                      
-                      <span style={{ fontSize: '0.85rem', color: 'var(--text-secondary)' }}>
-                        Seite <strong style={{ color: 'var(--text-primary)' }}>{currentPage}</strong> von <strong style={{ color: 'var(--text-primary)' }}>{totalPages}</strong>
-                      </span>
-                      
-                      <button
-                        className="btn btn-secondary"
-                        onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                        disabled={currentPage === totalPages}
-                        style={{ padding: '0.45rem 1rem', display: 'flex', alignItems: 'center', gap: '0.25rem' }}
-                      >
-                        Weiter ▶
-                      </button>
-                    </div>
-                  )}
+
                 </>
               )}
             </div>
