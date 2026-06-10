@@ -1362,7 +1362,7 @@ function App() {
 
   const renderFavoritesOverview = () => {
     const watchingSeries = mediaLibrary.filter(item => 
-      item.isGroup && item.files && item.files.some(ep => ep.progress || (playProgress && playProgress[ep.filename]))
+      item.isGroup && item.files && item.files.some(ep => ep.progress)
     );
     
     watchingSeries.sort((a, b) => {
@@ -1370,7 +1370,7 @@ function App() {
         let maxTime = 0;
         if (group.files) {
           group.files.forEach(ep => {
-            const prog = ep.progress || (playProgress && playProgress[ep.filename]);
+            const prog = ep.progress;
             if (prog && prog.updatedAt > maxTime) {
               maxTime = prog.updatedAt;
             }
