@@ -3674,7 +3674,8 @@ function getLocalIp() {
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      if (iface.family === 'IPv4' && !iface.internal) {
+      // Ignore loopback and Tailscale's 100.x.y.z subnet
+      if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('100.')) {
         return iface.address;
       }
     }

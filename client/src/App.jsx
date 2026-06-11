@@ -254,6 +254,7 @@ function App() {
   const [mediaLibrary, setMediaLibrary] = useState([]);
   const [selectedCategory, setSelectedCategory] = useState('all'); // 'all' | 'Lokal' | 'Filme' | 'Serien' | 'Musik' | 'Sonstige'
   const [selectedSubcategory, setSelectedSubcategory] = useState('all');
+  const [favoritesFilter, setFavoritesFilter] = useState('all'); // 'all' | 'Filme' | 'Serien' | 'Musik' | 'Hörbuch'
   const [loadingLibrary, setLoadingLibrary] = useState(false);
   const [totalPages, setTotalPages] = useState(0);
   const [totalItems, setTotalItems] = useState(0);
@@ -1033,6 +1034,200 @@ function App() {
     }
   };
 
+  const renderMusicItem = (item, idx) => {
+    const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
+    const isPending = !!pendingCasts[item.filename];
+    
+    return (
+      <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+        <div className="music-item">
+          <div className="music-info" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
+            <div className="music-icon" style={{ width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.04)', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
+              {item.metadata?.posterUrl ? (
+                <img 
+                  src={getPosterSrc(item.metadata.posterUrl)} 
+                  alt="Cover" 
+                  style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
+                />
+              ) : (
+                <span style={{ fontSize: '1.2rem' }}>🎵</span>
+              )}
+            </div>
+            <div className="music-details">
+              <div className="music-title" title={item.filename} style={{ fontSize: '0.9rem', fontWeight: '500', color: 'var(--text-primary)' }}>
+                {item.metadata?.artist && item.metadata.artist !== 'Unbekannter Künstler' && (
+                  <span style={{ color: 'var(--accent-cyan)', marginRight: '0.35rem', fontWeight: 'bold' }}>{item.metadata.artist} -</span>
+                )}
+                {item.metadata?.title || item.filename}
+              </div>
+              <div className="music-meta" style={{ fontSize: '0.75rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center', color: 'var(--text-secondary)' }}>
+                {item.metadata?.album && item.metadata.album !== 'Unbekanntes Album' && (
+                  <>
+                    <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>{item.metadata.album}</span>
+                    <span>•</span>
+                  </>
+                )}
+                {item.metadata?.year && (
+                  <>
+                    <span>{item.metadata.year}</span>
+                    <span>•</span>
+                  </>
+                )}
+                {item.metadata?.genre && item.metadata.genre !== 'Musik' && (
+                  <>
+                    <span style={{ color: 'var(--accent-blue)', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '3px', fontSize: '0.7rem' }}>{item.metadata.genre}</span>
+                    <span>•</span>
+                  </>
+                )}
+                <span className="music-size">{formatBytes(item.sizeBytes)}</span>
+                <span>•</span>
+                <span>{new Date(item.mtime).toLocaleDateString()}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="music-actions">
+            <button
+              className="btn btn-secondary btn-icon-only btn-favorite"
+              onClick={(e) => {
+                e.stopPropagation();
+                toggleFavorite(item);
+              }}
+              style={{
+                color: item.favorite ? 'var(--accent-red)' : 'rgba(255,255,255,0.7)',
+                borderColor: item.favorite ? 'rgba(255, 51, 102, 0.2)' : 'rgba(255,255,255,0.1)',
+                background: 'rgba(255, 255, 255, 0.03)'
+              }}
+              title={item.favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
+            >
+              <HeartIcon filled={item.favorite} />
+            </button>
+            {!item.isXtream && (
+              <button 
+                className="btn btn-danger btn-icon-only" 
+                title="Datei von Festplatte löschen"
+                onClick={() => handleDeleteMediaFile(item.filename)}
+              >
+                <TrashIcon />
+              </button>
+            )}
+            <button 
+              className="btn btn-primary btn-icon-only" 
+              style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+              title="Lokal abspielen"
+              onClick={() => playLocalLibrary(item.filename, item)}
+            >
+              <PlayIcon />
+            </button>
+            <button 
+              className="btn btn-secondary btn-icon-only" 
+              style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+              title="Auf TV streamen (Cast)"
+              disabled={isPending}
+              onClick={() => {
+                setCastingItem(item);
+                fetchDevices();
+              }}
+            >
+              {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+            </button>
+          </div>
+        </div>
+
+        {/* Casting status */}
+        {activeCastForFile && (
+          <div style={{
+            background: 'rgba(0, 242, 254, 0.08)',
+            border: '1px solid rgba(0, 242, 254, 0.25)',
+            borderRadius: '10px',
+            padding: '0.75rem 1rem',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '0.5rem',
+            color: 'var(--text-primary)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+              <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                📺 Streamt auf {activeCastForFile.device}
+              </span>
+              <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                {activeCastForFile.playerState || 'Verbinden'}
+              </span>
+            </div>
+
+            {activeCastForFile.duration > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                <input 
+                  type="range"
+                  min={0}
+                  max={activeCastForFile.duration}
+                  value={activeCastForFile.currentTime || 0}
+                  onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                  style={{
+                    width: '100%',
+                    accentColor: 'var(--accent-cyan)',
+                    cursor: 'pointer',
+                    height: '4px'
+                  }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                  <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                </div>
+              </div>
+            )}
+
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
+              {activeCastForFile.playerState === 'PAUSED' ? (
+                <button 
+                  className="btn btn-secondary btn-icon-only" 
+                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                  onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
+                  title="Wiedergabe fortsetzen"
+                >
+                  <PlayIcon />
+                </button>
+              ) : (
+                <button 
+                  className="btn btn-secondary btn-icon-only" 
+                  style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                  onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
+                  title="Wiedergabe pausieren"
+                >
+                  <PauseIcon />
+                </button>
+              )}
+              
+              <button 
+                className="btn btn-danger" 
+                style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
+                onClick={() => stopCast(activeCastForFile.device)}
+              >
+                Stoppen
+              </button>
+            </div>
+          </div>
+        )}
+
+        {isPending && !activeCastForFile && (
+          <div style={{
+            background: 'rgba(0, 242, 254, 0.05)',
+            border: '1px solid rgba(0, 242, 254, 0.2)',
+            borderRadius: '8px',
+            padding: '0.5rem 0.75rem',
+            fontSize: '0.8rem',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            color: 'var(--text-secondary)'
+          }}>
+            <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
+          </div>
+        )}
+      </div>
+    );
+  };
+
   const renderMediaCard = (item, idx) => {
     if (item.isGroup) {
       const title = item.title;
@@ -1178,12 +1373,12 @@ function App() {
           {/* Badges on Poster */}
           {year && <span className="media-badge-year">{year}</span>}
           <span className="media-badge-type">
-            {category === 'Serien' || originalCategory === 'Serien' ? 'Serie' : category === 'Filme' || originalCategory === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : category === 'Musik' || originalCategory === 'Musik' ? 'Musik' : 'Video'}
+            {category === 'Serien' || originalCategory === 'Serien' ? 'Serie' : category === 'Filme' || originalCategory === 'Filme' ? 'Film' : category === 'Live TV' ? 'Live TV' : category === 'Musik' || originalCategory === 'Musik' ? 'Musik' : category === 'Hörbücher' || originalCategory === 'Hörbücher' ? 'Hörbuch' : 'Video'}
           </span>
           {meta.seasonEpisode && <span className="media-badge-episode">{meta.seasonEpisode}</span>}
 
           {/* Favorite button overlay */}
-          {(category === 'Filme' || originalCategory === 'Filme' || category === 'Serien' || originalCategory === 'Serien' || category === 'Live TV') && (
+          {(category === 'Filme' || originalCategory === 'Filme' || category === 'Serien' || originalCategory === 'Serien' || category === 'Live TV' || category === 'Hörbücher' || originalCategory === 'Hörbücher') && (
             <button
               className="btn-favorite"
               onClick={(e) => {
@@ -1399,12 +1594,6 @@ function App() {
       return getLatestProgressTime(b) - getLatestProgressTime(a);
     });
 
-    const favChannels = mediaLibrary.filter(item => 
-      !item.isGroup && 
-      (item.metadata?.category === 'Live TV' || item.category === 'Live TV') && 
-      item.favorite
-    );
-
     const favMovies = mediaLibrary.filter(item => 
       !item.isGroup && 
       (item.metadata?.category === 'Filme' || item.category === 'Filme' || item.metadata?.originalCategory === 'Filme') && 
@@ -1417,61 +1606,213 @@ function App() {
       !watchingSeries.some(ws => (ws.imdbId === item.imdbId && ws.title === item.title) || (ws.isXtream && ws.xtreamSeriesId === item.xtreamSeriesId))
     );
 
-    if (watchingSeries.length === 0 && favChannels.length === 0 && favMovies.length === 0 && favSeries.length === 0) {
-      return (
-        <div className="empty-state" style={{ padding: '3rem' }}>
-          <span className="empty-state-icon" style={{ color: 'var(--accent-red)' }}>❤️</span>
-          <h3 style={{ color: 'var(--text-primary)' }}>Deine Favoritenübersicht ist leer</h3>
-          <p style={{ maxWidth: '400px', margin: '0.5rem auto', color: 'var(--text-secondary)' }}>
-            Markiere Filme, Serien oder Live TV-Sender mit dem Herz-Symbol, um sie hier schnell wiederzufinden. Serien, die du gerade anschaust, erscheinen automatisch hier.
-          </p>
-        </div>
-      );
-    }
+    const favMusic = mediaLibrary.filter(item => 
+      !item.isGroup && 
+      (item.metadata?.category === 'Musik' || item.category === 'Musik' || item.metadata?.originalCategory === 'Musik') && 
+      item.favorite
+    );
+
+    const favAudiobooks = mediaLibrary.filter(item => 
+      !item.isGroup && 
+      (item.metadata?.category === 'Hörbücher' || item.category === 'Hörbücher' || item.metadata?.originalCategory === 'Hörbücher') && 
+      item.favorite
+    );
+
+    const hasAnyFilteredItems = (() => {
+      if (favoritesFilter === 'all') {
+        return watchingSeries.length > 0 || favMovies.length > 0 || favSeries.length > 0 || favMusic.length > 0 || favAudiobooks.length > 0;
+      } else if (favoritesFilter === 'Filme') {
+        return favMovies.length > 0;
+      } else if (favoritesFilter === 'Serien') {
+        return watchingSeries.length > 0 || favSeries.length > 0;
+      } else if (favoritesFilter === 'Musik') {
+        return favMusic.length > 0;
+      } else if (favoritesFilter === 'Hörbuch') {
+        return favAudiobooks.length > 0;
+      }
+      return false;
+    })();
 
     return (
-      <div className="favorites-overview" style={{ display: 'flex', flexDirection: 'column', gap: '2.5rem', width: '100%' }}>
-        {watchingSeries.length > 0 && (
-          <div>
-            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              📺 Gerade geschaut (Serien)
-            </h3>
-            <div className="media-grid">
-              {watchingSeries.map((item, idx) => renderMediaCard(item, idx))}
-            </div>
-          </div>
-        )}
+      <div className="favorites-overview" style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem', width: '100%' }}>
+        {/* Favorites filter tabs */}
+        <div className="favorites-filter-container" style={{ display: 'flex', gap: '0.5rem', overflowX: 'auto', padding: '0.2rem 0', borderBottom: '1px solid rgba(255,255,255,0.05)', marginBottom: '0.5rem', scrollbarWidth: 'thin' }}>
+          <button
+            onClick={() => setFavoritesFilter('all')}
+            className={`subcategory-tag-btn ${favoritesFilter === 'all' ? 'active' : ''}`}
+            style={{
+              padding: '0.35rem 0.8rem',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              background: favoritesFilter === 'all' ? 'var(--grad-cyan-blue)' : 'rgba(255, 255, 255, 0.05)',
+              color: favoritesFilter === 'all' ? '#fff' : 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            ❤️ Alle ({watchingSeries.length + favMovies.length + favSeries.length + favMusic.length + favAudiobooks.length})
+          </button>
+          <button
+            onClick={() => setFavoritesFilter('Filme')}
+            className={`subcategory-tag-btn ${favoritesFilter === 'Filme' ? 'active' : ''}`}
+            style={{
+              padding: '0.35rem 0.8rem',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              background: favoritesFilter === 'Filme' ? 'var(--grad-cyan-blue)' : 'rgba(255, 255, 255, 0.05)',
+              color: favoritesFilter === 'Filme' ? '#fff' : 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            🎬 Filme ({favMovies.length})
+          </button>
+          <button
+            onClick={() => setFavoritesFilter('Serien')}
+            className={`subcategory-tag-btn ${favoritesFilter === 'Serien' ? 'active' : ''}`}
+            style={{
+              padding: '0.35rem 0.8rem',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              background: favoritesFilter === 'Serien' ? 'var(--grad-cyan-blue)' : 'rgba(255, 255, 255, 0.05)',
+              color: favoritesFilter === 'Serien' ? '#fff' : 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            📺 Serien ({watchingSeries.length + favSeries.length})
+          </button>
+          <button
+            onClick={() => setFavoritesFilter('Musik')}
+            className={`subcategory-tag-btn ${favoritesFilter === 'Musik' ? 'active' : ''}`}
+            style={{
+              padding: '0.35rem 0.8rem',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              background: favoritesFilter === 'Musik' ? 'var(--grad-cyan-blue)' : 'rgba(255, 255, 255, 0.05)',
+              color: favoritesFilter === 'Musik' ? '#fff' : 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            🎵 Musik ({favMusic.length})
+          </button>
+          <button
+            onClick={() => setFavoritesFilter('Hörbuch')}
+            className={`subcategory-tag-btn ${favoritesFilter === 'Hörbuch' ? 'active' : ''}`}
+            style={{
+              padding: '0.35rem 0.8rem',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              background: favoritesFilter === 'Hörbuch' ? 'var(--grad-cyan-blue)' : 'rgba(255, 255, 255, 0.05)',
+              color: favoritesFilter === 'Hörbuch' ? '#fff' : 'var(--text-secondary)',
+              fontSize: '0.75rem',
+              fontWeight: '500',
+              cursor: 'pointer',
+              whiteSpace: 'nowrap',
+              transition: 'all 0.2s ease',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.3rem'
+            }}
+          >
+            🎧 Hörbücher ({favAudiobooks.length})
+          </button>
+        </div>
 
-        {favChannels.length > 0 && (
-          <div>
-            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              📡 Lieblings-Sender (Live TV)
-            </h3>
-            <div className="media-grid">
-              {favChannels.map((item, idx) => renderMediaCard(item, idx))}
-            </div>
+        {!hasAnyFilteredItems ? (
+          <div className="empty-state" style={{ padding: '3rem' }}>
+            <span className="empty-state-icon" style={{ color: 'var(--accent-red)' }}>❤️</span>
+            <h3 style={{ color: 'var(--text-primary)' }}>Hier ist noch nichts zu sehen</h3>
+            <p style={{ maxWidth: '400px', margin: '0.5rem auto', color: 'var(--text-secondary)' }}>
+              Markiere deine Lieblingsinhalte mit dem Herz-Symbol, um sie in dieser Kategorie anzuzeigen.
+            </p>
           </div>
-        )}
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '2rem' }}>
+            {/* Watching Series */}
+            {(favoritesFilter === 'all' || favoritesFilter === 'Serien') && watchingSeries.length > 0 && (
+              <div>
+                <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  📺 Gerade geschaut (Serien)
+                </h3>
+                <div className="media-grid">
+                  {watchingSeries.map((item, idx) => renderMediaCard(item, idx))}
+                </div>
+              </div>
+            )}
 
-        {favMovies.length > 0 && (
-          <div>
-            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              🎬 Lieblings-Filme
-            </h3>
-            <div className="media-grid">
-              {favMovies.map((item, idx) => renderMediaCard(item, idx))}
-            </div>
-          </div>
-        )}
+            {/* Favorite Movies */}
+            {(favoritesFilter === 'all' || favoritesFilter === 'Filme') && favMovies.length > 0 && (
+              <div>
+                <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-blue)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  🎬 Lieblings-Filme
+                </h3>
+                <div className="media-grid">
+                  {favMovies.map((item, idx) => renderMediaCard(item, idx))}
+                </div>
+              </div>
+            )}
 
-        {favSeries.length > 0 && (
-          <div>
-            <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-pink)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-              📺 Lieblings-Serien
-            </h3>
-            <div className="media-grid">
-              {favSeries.map((item, idx) => renderMediaCard(item, idx))}
-            </div>
+            {/* Favorite Series */}
+            {(favoritesFilter === 'all' || favoritesFilter === 'Serien') && favSeries.length > 0 && (
+              <div>
+                <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-pink)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  📺 Lieblings-Serien
+                </h3>
+                <div className="media-grid">
+                  {favSeries.map((item, idx) => renderMediaCard(item, idx))}
+                </div>
+              </div>
+            )}
+
+            {/* Favorite Music */}
+            {(favoritesFilter === 'all' || favoritesFilter === 'Musik') && favMusic.length > 0 && (
+              <div>
+                <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  🎵 Lieblings-Musik
+                </h3>
+                <div className="music-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                  {favMusic.map((item, idx) => renderMusicItem(item, idx))}
+                </div>
+              </div>
+            )}
+
+            {/* Favorite Audiobooks */}
+            {(favoritesFilter === 'all' || favoritesFilter === 'Hörbuch') && favAudiobooks.length > 0 && (
+              <div>
+                <h3 style={{ borderBottom: '1px solid rgba(255,255,255,0.08)', paddingBottom: '0.5rem', marginBottom: '1rem', color: 'var(--accent-orange)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  🎧 Lieblings-Hörbücher
+                </h3>
+                <div className="media-grid">
+                  {favAudiobooks.map((item, idx) => renderMediaCard(item, idx))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -3654,186 +3995,7 @@ function App() {
                   ) : selectedCategory === 'Musik' ? (
                     /* Compact Music Track Item List */
                     <div className="music-list" style={{ maxHeight: '650px', overflowY: 'auto' }} onScroll={handleScroll}>
-                      {filteredLibrary.map((item, idx) => {
-                        const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
-                        const isPending = !!pendingCasts[item.filename];
-                        
-                        return (
-                          <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                            <div className="music-item">
-                              <div className="music-info" style={{ display: 'flex', gap: '0.75rem', alignItems: 'center' }}>
-                                <div className="music-icon" style={{ width: '42px', height: '42px', display: 'flex', alignItems: 'center', justifyContent: 'center', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.04)', overflow: 'hidden', border: '1px solid rgba(255, 255, 255, 0.08)', flexShrink: 0 }}>
-                                  {item.metadata?.posterUrl ? (
-                                    <img 
-                                      src={getPosterSrc(item.metadata.posterUrl)} 
-                                      alt="Cover" 
-                                      style={{ width: '100%', height: '100%', objectFit: 'cover' }} 
-                                    />
-                                  ) : (
-                                    <span style={{ fontSize: '1.2rem' }}>🎵</span>
-                                  )}
-                                </div>
-                                <div className="music-details">
-                                  <div className="music-title" title={item.filename} style={{ fontSize: '0.9rem', fontWeight: '500', color: 'var(--text-primary)' }}>
-                                    {item.metadata?.artist && item.metadata.artist !== 'Unbekannter Künstler' && (
-                                      <span style={{ color: 'var(--accent-cyan)', marginRight: '0.35rem', fontWeight: 'bold' }}>{item.metadata.artist} -</span>
-                                    )}
-                                    {item.metadata?.title || item.filename}
-                                  </div>
-                                  <div className="music-meta" style={{ fontSize: '0.75rem', display: 'flex', gap: '0.35rem', flexWrap: 'wrap', alignItems: 'center', color: 'var(--text-secondary)' }}>
-                                    {item.metadata?.album && item.metadata.album !== 'Unbekanntes Album' && (
-                                      <>
-                                        <span style={{ color: 'var(--text-secondary)', fontStyle: 'italic' }}>{item.metadata.album}</span>
-                                        <span>•</span>
-                                      </>
-                                    )}
-                                    {item.metadata?.year && (
-                                      <>
-                                        <span>{item.metadata.year}</span>
-                                        <span>•</span>
-                                      </>
-                                    )}
-                                    {item.metadata?.genre && item.metadata.genre !== 'Musik' && (
-                                      <>
-                                        <span style={{ color: 'var(--accent-blue)', background: 'rgba(56, 189, 248, 0.1)', padding: '1px 5px', borderRadius: '3px', fontSize: '0.7rem' }}>{item.metadata.genre}</span>
-                                        <span>•</span>
-                                      </>
-                                    )}
-                                    <span className="music-size">{formatBytes(item.sizeBytes)}</span>
-                                    <span>•</span>
-                                    <span>{new Date(item.mtime).toLocaleDateString()}</span>
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className="music-actions">
-                                {!item.isXtream && (
-                                  <button 
-                                    className="btn btn-danger btn-icon-only" 
-                                    title="Datei von Festplatte löschen"
-                                    onClick={() => handleDeleteMediaFile(item.filename)}
-                                  >
-                                    <TrashIcon />
-                                  </button>
-                                )}
-                                <button 
-                                  className="btn btn-primary btn-icon-only" 
-                                  style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                  title="Lokal abspielen"
-                                  onClick={() => playLocalLibrary(item.filename, item)}
-                                >
-                                  <PlayIcon />
-                                </button>
-                                <button 
-                                  className="btn btn-secondary btn-icon-only" 
-                                  style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                  title="Auf TV streamen (Cast)"
-                                  disabled={isPending}
-                                  onClick={() => {
-                                    setCastingItem(item);
-                                    fetchDevices();
-                                  }}
-                                >
-                                  {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                                </button>
-                              </div>
-                            </div>
-
-                            {/* Casting status */}
-                            {activeCastForFile && (
-                              <div style={{
-                                background: 'rgba(0, 242, 254, 0.08)',
-                                border: '1px solid rgba(0, 242, 254, 0.25)',
-                                borderRadius: '10px',
-                                padding: '0.75rem 1rem',
-                                display: 'flex',
-                                flexDirection: 'column',
-                                gap: '0.5rem',
-                                color: 'var(--text-primary)'
-                              }}>
-                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                                    📺 Streamt auf {activeCastForFile.device}
-                                  </span>
-                                  <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                    {activeCastForFile.playerState || 'Verbinden'}
-                                  </span>
-                                </div>
-
-                                {/* Progress bar and time labels */}
-                                {activeCastForFile.duration > 0 && (
-                                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                    <input 
-                                      type="range"
-                                      min={0}
-                                      max={activeCastForFile.duration}
-                                      value={activeCastForFile.currentTime || 0}
-                                      onChange={(e) => handleCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                                      style={{
-                                        width: '100%',
-                                        accentColor: 'var(--accent-cyan)',
-                                        cursor: 'pointer',
-                                        height: '4px'
-                                      }}
-                                    />
-                                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                      <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                                      <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-                                    </div>
-                                  </div>
-                                )}
-
-                                {/* Control Buttons */}
-                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-                                  {activeCastForFile.playerState === 'PAUSED' ? (
-                                    <button 
-                                      className="btn btn-secondary btn-icon-only" 
-                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                      onClick={() => handleCastControl(activeCastForFile.device, 'resume')}
-                                      title="Wiedergabe fortsetzen"
-                                    >
-                                      <PlayIcon />
-                                    </button>
-                                  ) : (
-                                    <button 
-                                      className="btn btn-secondary btn-icon-only" 
-                                      style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                      onClick={() => handleCastControl(activeCastForFile.device, 'pause')}
-                                      title="Wiedergabe pausieren"
-                                    >
-                                      <PauseIcon />
-                                    </button>
-                                  )}
-                                  
-                                  <button 
-                                    className="btn btn-danger" 
-                                    style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-                                    onClick={() => stopCast(activeCastForFile.device)}
-                                  >
-                                    Stoppen
-                                  </button>
-                                </div>
-                              </div>
-                            )}
-
-                            {isPending && !activeCastForFile && (
-                              <div style={{
-                                background: 'rgba(0, 242, 254, 0.05)',
-                                border: '1px solid rgba(0, 242, 254, 0.2)',
-                                borderRadius: '8px',
-                                padding: '0.5rem 0.75rem',
-                                fontSize: '0.8rem',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'space-between',
-                                color: 'var(--text-secondary)'
-                              }}>
-                                <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
+                      {filteredLibrary.map((item, idx) => renderMusicItem(item, idx))}
                       {loadingLibrary && currentPage > 1 && (
                         <div style={{ display: 'flex', justifyContent: 'center', width: '100%', padding: '1rem', color: 'var(--text-secondary)' }}>
                           <span className="spinner">⏳</span> Lade mehr...
