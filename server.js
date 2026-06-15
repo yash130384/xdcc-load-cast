@@ -903,6 +903,354 @@ async function searchXdccEu(queryStr) {
   }
 }
 
+// ==========================================
+// VCR / Videorekorder & EPG Manager
+// ==========================================
+
+const RECORDINGS_FILE = path.join(os.homedir(), '.xdcc_recordings.json');
+let recordings = [];
+const activeVcrJobs = new Map();
+
+function decodeBase64Safe(str) {
+  if (!str) return '';
+  const trimmed = str.trim();
+  if (trimmed.length > 0 && /^[A-Za-z0-9+/]+={0,2}$/.test(trimmed) && trimmed.length % 4 === 0) {
+    try {
+      const decoded = Buffer.from(trimmed, 'base64').toString('utf8');
+      const hasControl = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/.test(decoded);
+      if (!hasControl && decoded.length > 0) {
+        return decoded;
+      }
+    } catch (e) {}
+  }
+  return str;
+}
+
+function loadRecordings() {
+  if (fs.existsSync(RECORDINGS_FILE)) {
+    try {
+      recordings = JSON.parse(fs.readFileSync(RECORDINGS_FILE, 'utf8'));
+      // Reset any active recording to error or completed if server crashed
+      recordings.forEach(rec => {
+        if (rec.status === 'recording') {
+          rec.status = 'error';
+          rec.errorMessage = 'Aufnahme durch Server-Neustart unterbrochen';
+        }
+      });
+    } catch (e) {
+      console.error('[VCR] Failed to load recordings:', e.message);
+      recordings = [];
+    }
+  } else {
+    recordings = [];
+  }
+}
+
+function saveRecordings() {
+  try {
+    fs.writeFileSync(RECORDINGS_FILE, JSON.stringify(recordings, null, 2), 'utf8');
+  } catch (e) {
+    console.error('[VCR] Failed to save recordings:', e.message);
+  }
+}
+
+function broadcastVcrStatus() {
+  if (typeof wss !== 'undefined' && wss && wss.clients) {
+    const list = recordings.map(rec => {
+      const active = activeVcrJobs.get(rec.id);
+      return {
+        ...rec,
+        bytesReceived: active ? active.bytesReceived : (rec.bytesReceived || 0),
+        speed: active ? active.speed : 0
+      };
+    });
+    const message = JSON.stringify({ type: 'vcr-status', data: list });
+    wss.clients.forEach((client) => {
+      if (client.readyState === 1) { // OPEN
+        client.send(message);
+      }
+    });
+  }
+}
+
+async function startVcrRecording(rec) {
+  if (activeVcrJobs.has(rec.id)) return;
+
+  console.log(`[VCR] Starting recording for ${rec.title} (${rec.channelName})...`);
+  
+  if (!fs.existsSync(appConfig.downloadDir)) {
+    fs.mkdirSync(appConfig.downloadDir, { recursive: true });
+  }
+
+  const cleanTitle = rec.title.replace(/[^a-zA-Z0-9-_]/g, '_');
+  const cleanChannel = rec.channelName.replace(/[^a-zA-Z0-9-_]/g, '_');
+  const dateStr = new Date(rec.startTime).toISOString().slice(0, 16).replace(/:/g, '-');
+  const filename = `Aufnahme_${cleanChannel}_${cleanTitle}_${dateStr}.ts`;
+  const filePath = path.join(appConfig.downloadDir, filename);
+
+  rec.filename = filename;
+  rec.filePath = filePath;
+  rec.status = 'recording';
+  saveRecordings();
+  broadcastVcrStatus();
+
+  const abortController = new AbortController();
+  const fileStream = fs.createWriteStream(filePath);
+  
+  const job = {
+    abortController,
+    fileStream,
+    bytesReceived: 0,
+    bytesInLastTick: 0,
+    speed: 0,
+    startTime: Date.now()
+  };
+
+  activeVcrJobs.set(rec.id, job);
+
+  try {
+    const response = await axios({
+      method: 'get',
+      url: rec.streamUrl,
+      responseType: 'stream',
+      signal: abortController.signal,
+      timeout: 30000
+    });
+
+    const responseStream = response.data;
+    
+    responseStream.on('data', (chunk) => {
+      job.bytesReceived += chunk.length;
+      fileStream.write(chunk);
+    });
+
+    responseStream.on('end', () => {
+      console.log(`[VCR] Stream end reached for ${rec.title}`);
+      stopVcrRecordingJob(rec.id, 'completed');
+    });
+
+    responseStream.on('error', (err) => {
+      if (rec.status === 'recording') {
+        console.error(`[VCR] Stream error for ${rec.title}:`, err.message);
+        stopVcrRecordingJob(rec.id, 'error', `Stream-Fehler: ${err.message}`);
+      }
+    });
+
+  } catch (err) {
+    if (axios.isCancel(err) || err.name === 'CanceledError') {
+      console.log(`[VCR] Recording canceled for ${rec.title}`);
+    } else {
+      console.error(`[VCR] Connection failed for ${rec.title}:`, err.message);
+      stopVcrRecordingJob(rec.id, 'error', `Verbindungsfehler: ${err.message}`);
+    }
+  }
+}
+
+function stopVcrRecordingJob(id, targetStatus = 'completed', errorMessage = '') {
+  const job = activeVcrJobs.get(id);
+  const rec = recordings.find(r => r.id === id);
+
+  if (job) {
+    try {
+      job.abortController.abort();
+    } catch (e) {}
+    try {
+      job.fileStream.end();
+    } catch (e) {}
+    activeVcrJobs.delete(id);
+  }
+
+  if (rec && rec.status === 'recording') {
+    rec.status = targetStatus;
+    if (job) {
+      rec.bytesReceived = job.bytesReceived;
+    }
+    if (errorMessage) {
+      rec.errorMessage = errorMessage;
+    }
+    saveRecordings();
+    broadcastVcrStatus();
+    console.log(`[VCR] Recording stopped for ${rec.title} with status ${targetStatus}`);
+
+    updateLocalMappedList(true).catch(err => console.error('[VCR] Media library update error:', err));
+  }
+}
+
+async function checkVcrRecordings() {
+  const now = Date.now();
+  let changed = false;
+
+  for (const rec of recordings) {
+    const start = new Date(rec.startTime).getTime();
+    const end = new Date(rec.endTime).getTime();
+
+    // Start scheduled recording
+    if (rec.status === 'scheduled' && now >= start) {
+      if (now < end) {
+        startVcrRecording(rec).catch(err => {
+          console.error(`[VCR] Failed to start recording ${rec.title}:`, err.message);
+          rec.status = 'error';
+          rec.errorMessage = `Fehler beim Start: ${err.message}`;
+          saveRecordings();
+          broadcastVcrStatus();
+        });
+        changed = true;
+      } else {
+        rec.status = 'error';
+        rec.errorMessage = 'Aufnahmezeitfenster verpasst (Server offline)';
+        changed = true;
+      }
+    }
+
+    // Stop active recording
+    if (rec.status === 'recording' && now >= end) {
+      stopVcrRecordingJob(rec.id, 'completed');
+      changed = true;
+    }
+  }
+
+  // Update speeds
+  for (const [id, job] of activeVcrJobs.entries()) {
+    const bytesReceived = job.bytesReceived;
+    const bytesDiff = bytesReceived - job.bytesInLastTick;
+    job.speed = Math.round(bytesDiff / 10);
+    job.bytesInLastTick = bytesReceived;
+    changed = true;
+  }
+
+  if (changed) {
+    saveRecordings();
+    broadcastVcrStatus();
+  }
+}
+
+// GET EPG for a live channel
+app.get('/api/epg/:streamId', async (req, res) => {
+  if (!appConfig.xtreamEnabled || !appConfig.xtreamHost) {
+    return res.status(400).json({ error: 'Xtream ist nicht aktiviert' });
+  }
+
+  const { streamId } = req.params;
+  const host = appConfig.xtreamHost.replace(/\/$/, '');
+
+  try {
+    const response = await axios.get(`${host}/player_api.php`, {
+      params: {
+        username: appConfig.xtreamUsername,
+        password: appConfig.xtreamPassword,
+        action: 'get_short_epg',
+        stream_id: streamId
+      },
+      timeout: 10000
+    });
+
+    if (response.data && response.data.epg_listings) {
+      const listings = response.data.epg_listings.map(item => {
+        const title = decodeBase64Safe(item.title);
+        const description = decodeBase64Safe(item.description);
+        return {
+          ...item,
+          title,
+          description
+        };
+      });
+      return res.json({ epg_listings: listings });
+    }
+
+    return res.json({ epg_listings: [] });
+  } catch (error) {
+    console.error(`[EPG] Error fetching for stream ${streamId}:`, error.message);
+    return res.status(500).json({ error: `EPG konnte nicht geladen werden: ${error.message}` });
+  }
+});
+
+// GET recordings
+app.get('/api/recordings', (req, res) => {
+  const list = recordings.map(rec => {
+    const active = activeVcrJobs.get(rec.id);
+    return {
+      ...rec,
+      bytesReceived: active ? active.bytesReceived : (rec.bytesReceived || 0),
+      speed: active ? active.speed : 0
+    };
+  });
+  return res.json(list);
+});
+
+// POST new recording
+app.post('/api/recordings', (req, res) => {
+  const { streamId, channelName, streamUrl, title, startTime, endTime } = req.body;
+  if (!channelName || !streamUrl || !startTime || !endTime) {
+    return res.status(400).json({ error: 'Fehlende Aufnahmedetails' });
+  }
+
+  const rec = {
+    id: Date.now().toString() + '_' + Math.random().toString(36).slice(2, 9),
+    streamId: streamId || '',
+    channelName,
+    streamUrl,
+    title: title || 'Manuelle Aufnahme',
+    startTime,
+    endTime,
+    status: 'scheduled',
+    bytesReceived: 0,
+    filename: '',
+    filePath: ''
+  };
+
+  recordings.push(rec);
+  saveRecordings();
+  broadcastVcrStatus();
+  console.log(`[VCR] Programmed recording: ${rec.title} for channel ${rec.channelName} (${rec.startTime} to ${rec.endTime})`);
+  return res.json(rec);
+});
+
+// POST stop active recording
+app.post('/api/recordings/:id/stop', (req, res) => {
+  const { id } = req.params;
+  const rec = recordings.find(r => r.id === id);
+  if (!rec) {
+    return res.status(404).json({ error: 'Aufnahme nicht gefunden' });
+  }
+
+  if (rec.status !== 'recording') {
+    return res.status(400).json({ error: 'Aufnahme ist nicht aktiv' });
+  }
+
+  stopVcrRecordingJob(id, 'completed');
+  return res.json({ success: true });
+});
+
+// DELETE recording
+app.delete('/api/recordings/:id', (req, res) => {
+  const { id } = req.params;
+  const index = recordings.findIndex(r => r.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: 'Aufnahme nicht gefunden' });
+  }
+
+  const rec = recordings[index];
+  
+  if (rec.status === 'recording') {
+    stopVcrRecordingJob(id, 'error', 'Gelöscht');
+  }
+
+  if (rec.filePath && fs.existsSync(rec.filePath)) {
+    try {
+      fs.unlinkSync(rec.filePath);
+      console.log(`[VCR] Deleted recording file: ${rec.filePath}`);
+    } catch (e) {
+      console.error(`[VCR] Failed to delete recording file: ${rec.filePath}`, e.message);
+    }
+  }
+
+  recordings.splice(index, 1);
+  saveRecordings();
+  broadcastVcrStatus();
+  console.log(`[VCR] Deleted recording: ${rec.title} (${rec.id})`);
+  return res.json({ success: true });
+});
+
 // 1. Search endpoint
 app.get('/api/search', async (req, res) => {
   const query = req.query.q;
@@ -4792,6 +5140,17 @@ wss.on('connection', (ws) => {
   // Send current auto-downloads on connection
   ws.send(JSON.stringify({ type: 'auto-downloads', data: autoDownloads }));
 
+  // Send current VCR recordings on connection
+  const vcrList = recordings.map(rec => {
+    const active = activeVcrJobs.get(rec.id);
+    return {
+      ...rec,
+      bytesReceived: active ? active.bytesReceived : (rec.bytesReceived || 0),
+      speed: active ? active.speed : 0
+    };
+  });
+  ws.send(JSON.stringify({ type: 'vcr-status', data: vcrList }));
+
   ws.on('close', () => {
     console.log('WS Client disconnected.');
   });
@@ -4812,6 +5171,9 @@ server.listen(PORT, '0.0.0.0', () => {
   // Load favorites from disk
   loadFavorites();
 
+  // Load VCR recordings from disk
+  loadRecordings();
+
   // Initialize cached local mapped list
   updateLocalMappedList().catch(err => console.error('[Startup] Local scan cache error:', err));
 
@@ -4823,6 +5185,9 @@ server.listen(PORT, '0.0.0.0', () => {
 
   // Start background timeout checker for auto-downloads
   setInterval(checkDownloadsTimeout, 30 * 1000);
+
+  // Start background checker for VCR recordings
+  setInterval(checkVcrRecordings, 10000);
 
   // Trigger initial check after 5 seconds
   setTimeout(checkAllAutoDownloads, 5000);

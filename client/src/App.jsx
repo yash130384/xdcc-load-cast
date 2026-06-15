@@ -31,6 +31,10 @@ const CloseIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
 );
 
+const CalendarIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
+);
+
 const DownloadIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="7 10 12 15 17 10"></polyline><line x1="12" y1="15" x2="12" y2="3"></line></svg>
 );
@@ -277,6 +281,25 @@ function App() {
   const [showSettings, setShowSettings] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
+  // VCR and EPG states
+  const [recordings, setRecordings] = useState([]);
+  const [vcrChannels, setVcrChannels] = useState([]);
+  const [showVcrModal, setShowVcrModal] = useState(false);
+  const [showEpgModal, setShowEpgModal] = useState(false);
+  const [epgChannel, setEpgChannel] = useState(null);
+  const [epgListings, setEpgListings] = useState([]);
+  const [loadingEpg, setLoadingEpg] = useState(false);
+  const [epgError, setEpgError] = useState('');
+  const [vcrActiveTab, setVcrActiveTab] = useState('list'); // 'list' | 'new'
+
+  // VCR Manual Form states
+  const [vcrChannelId, setVcrChannelId] = useState('');
+  const [vcrTitle, setVcrTitle] = useState('');
+  const [vcrStartTime, setVcrStartTime] = useState('');
+  const [vcrEndTime, setVcrEndTime] = useState('');
+  const [vcrError, setVcrError] = useState('');
+  const [vcrSaving, setVcrSaving] = useState(false);
+
   // Parental Control/PIN states
   const [tempXxxHideEnabled, setTempXxxHideEnabled] = useState(false);
   const [verifyPin, setVerifyPin] = useState('');
@@ -379,6 +402,12 @@ function App() {
       .then(data => setAutoDownloads(data))
       .catch(err => console.error('Error fetching auto downloads:', err));
 
+    // Fetch initial VCR recordings
+    fetch('/api/recordings')
+      .then(res => res.json())
+      .then(data => setRecordings(data))
+      .catch(err => console.error('Error fetching VCR recordings:', err));
+
     // Connect WebSocket
     const connectWS = () => {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -444,6 +473,8 @@ function App() {
           setAutoDownloads(message.data);
         } else if (message.type === 'xtream-sync-complete') {
           fetchMediaLibrary();
+        } else if (message.type === 'vcr-status') {
+          setRecordings(message.data);
         }
       };
 
@@ -953,6 +984,192 @@ function App() {
       .catch(err => console.error('Connection error during control:', err));
   };
 
+  const fetchRecordings = () => {
+    fetch('/api/recordings')
+      .then(res => res.json())
+      .then(data => setRecordings(data))
+      .catch(err => console.error('Error fetching recordings:', err));
+  };
+
+  const handleShowEpg = (channel) => {
+    setEpgChannel(channel);
+    setEpgListings([]);
+    setEpgError('');
+    setLoadingEpg(true);
+    setShowEpgModal(true);
+
+    const streamId = channel.xtreamStreamId;
+    fetch(`/api/epg/${streamId}`)
+      .then(res => {
+        if (!res.ok) throw new Error('EPG-Serverfehler');
+        return res.json();
+      })
+      .then(data => {
+        setEpgListings(data.epg_listings || []);
+        setLoadingEpg(false);
+      })
+      .catch(err => {
+        setEpgError(err.message || 'Fehler beim Laden des EPG');
+        setLoadingEpg(false);
+      });
+  };
+
+  const handleStopRecording = (id) => {
+    fetch(`/api/recordings/${id}/stop`, { method: 'POST' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          alert(`Fehler: ${data.error}`);
+        } else {
+          fetchRecordings();
+        }
+      })
+      .catch(err => console.error('Error stopping recording:', err));
+  };
+
+  const handleDeleteRecording = (id) => {
+    if (!confirm('Aufnahme wirklich löschen? Dies bricht ggf. die aktive Aufnahme ab und löscht die Videodatei.')) return;
+    fetch(`/api/recordings/${id}`, { method: 'DELETE' })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          alert(`Fehler: ${data.error}`);
+        } else {
+          fetchRecordings();
+        }
+      })
+      .catch(err => console.error('Error deleting recording:', err));
+  };
+
+  const handleAddRecording = (e) => {
+    e.preventDefault();
+    if (!vcrChannelId || !vcrStartTime || !vcrEndTime) {
+      setVcrError('Bitte fülle alle Pflichtfelder aus.');
+      return;
+    }
+
+    const start = new Date(vcrStartTime).getTime();
+    const end = new Date(vcrEndTime).getTime();
+    if (start >= end) {
+      setVcrError('Die Startzeit muss vor der Endzeit liegen.');
+      return;
+    }
+
+    // Find channel metadata
+    // Use raw mediaLibrary items (which are mapped live streams in client)
+    const liveChannels = mediaLibrary.filter(item => item.isLive);
+    const channel = liveChannels.find(item => String(item.xtreamStreamId) === String(vcrChannelId));
+    if (!channel) {
+      setVcrError('Sender nicht gefunden.');
+      return;
+    }
+
+    setVcrSaving(true);
+    setVcrError('');
+
+    fetch('/api/recordings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        streamId: channel.xtreamStreamId,
+        channelName: channel.metadata?.title || channel.filename,
+        streamUrl: channel.filename,
+        title: vcrTitle || 'Manuelle Aufnahme',
+        startTime: new Date(vcrStartTime).toISOString(),
+        endTime: new Date(vcrEndTime).toISOString()
+      })
+    })
+      .then(res => {
+        if (!res.ok) throw new Error('Fehler beim Speichern');
+        return res.json();
+      })
+      .then(() => {
+        setVcrSaving(false);
+        setVcrTitle('');
+        setVcrStartTime('');
+        setVcrEndTime('');
+        setVcrActiveTab('list');
+        fetchRecordings();
+      })
+      .catch(err => {
+        setVcrError(err.message || 'Fehler beim Speichern');
+        setVcrSaving(false);
+      });
+  };
+
+  const handleScheduleEpgRecording = (prog) => {
+    if (!epgChannel) return;
+    
+    let startIso, endIso;
+    if (prog.start_timestamp) {
+      startIso = new Date(parseInt(prog.start_timestamp) * 1000).toISOString();
+    } else {
+      startIso = new Date(prog.start.replace(' ', 'T')).toISOString();
+    }
+
+    if (prog.end_timestamp) {
+      endIso = new Date(parseInt(prog.end_timestamp) * 1000).toISOString();
+    } else {
+      endIso = new Date(prog.end.replace(' ', 'T')).toISOString();
+    }
+
+    fetch('/api/recordings', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        streamId: epgChannel.xtreamStreamId,
+        channelName: epgChannel.metadata?.title || epgChannel.filename,
+        streamUrl: epgChannel.filename,
+        title: prog.title || 'EPG Aufnahme',
+        startTime: startIso,
+        endTime: endIso
+      })
+    })
+      .then(res => res.json())
+      .then(data => {
+        if (data.error) {
+          alert(`Fehler: ${data.error}`);
+        } else {
+          alert(`Sendung "${prog.title}" wurde zur Aufnahme programmiert!`);
+          fetchRecordings();
+        }
+      })
+      .catch(err => console.error('Error scheduling EPG recording:', err));
+  };
+
+  const handleOpenManualFromEpg = () => {
+    if (!epgChannel) return;
+    setVcrChannelId(String(epgChannel.xtreamStreamId));
+    setVcrTitle('');
+    const now = new Date();
+    const future = new Date(now.getTime() + 60 * 60 * 1000);
+    const formatLocal = (d) => {
+      const pad = (n) => String(n).padStart(2, '0');
+      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    };
+    setVcrStartTime(formatLocal(now));
+    setVcrEndTime(formatLocal(future));
+    setVcrActiveTab('new');
+    setShowEpgModal(false);
+    setShowVcrModal(true);
+    fetchRecordings();
+  };
+
+  const openVcrModalAndLoad = () => {
+    fetchRecordings();
+    setShowVcrModal(true);
+    const params = new URLSearchParams({
+      category: 'Live TV',
+      limit: '1000'
+    });
+    fetch(`/api/media-library?${params.toString()}`)
+      .then(res => res.json())
+      .then(data => {
+        setVcrChannels(data.items || []);
+      })
+      .catch(err => console.error('Error fetching VCR channels:', err));
+  };
+
   const fetchMediaLibrary = (forceScan = false) => {
     setLoadingLibrary(true);
     const isForce = forceScan === true;
@@ -1437,6 +1654,16 @@ function App() {
           </div>
           
           <div className="media-card-actions">
+            {item.isLive && (
+              <button 
+                className="btn btn-secondary btn-icon-only" 
+                style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
+                title="EPG / Programm anzeigen"
+                onClick={() => handleShowEpg(item)}
+              >
+                📅
+              </button>
+            )}
             {item.isXtream && !item.isLive && (
               <button 
                 className="btn btn-secondary btn-icon-only" 
@@ -3139,6 +3366,13 @@ function App() {
                 {settings.downloadDir || 'Lädt Ordner...'}
               </span>
             </div>
+            {settings.xtreamEnabled && (
+              <button className="btn btn-secondary" style={{ marginRight: '0.5rem', display: 'flex', gap: '0.4rem', alignItems: 'center' }} onClick={() => {
+                openVcrModalAndLoad();
+              }}>
+                📹 Videorekorder
+              </button>
+            )}
             <button className="btn btn-primary" onClick={() => {
               setTempDownloadDir(settings.downloadDir);
               setTempUseSSL(settings.useSSLByDefault);
@@ -4331,6 +4565,392 @@ function App() {
                 </button>
                 <button className="btn btn-primary" onClick={handleSaveSettings}>
                   Speichern
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* VCR Modal */}
+        {showVcrModal && (
+          <div className="modal-overlay" style={{ zIndex: 1100 }}>
+            <div className="modal" style={{ width: '850px', maxWidth: '95%' }}>
+              <div className="modal-header">
+                <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                  📹 Videorekorder & Aufnahmen
+                </span>
+                <button className="modal-close" onClick={() => setShowVcrModal(false)}>
+                  <CloseIcon />
+                </button>
+              </div>
+
+              {/* Tab navigation inside modal */}
+              <div style={{ display: 'flex', gap: '1rem', borderBottom: '1px solid var(--border-color)', marginBottom: '1.25rem', paddingBottom: '0.5rem' }}>
+                <button 
+                  className={`category-tab-btn ${vcrActiveTab === 'list' ? 'active' : ''}`}
+                  onClick={() => setVcrActiveTab('list')}
+                  style={{ background: 'none', border: 'none', padding: '0.5rem 1rem', fontSize: '0.9rem', cursor: 'pointer' }}
+                >
+                  📋 Aufnahmen ({recordings.length})
+                </button>
+                <button 
+                  className={`category-tab-btn ${vcrActiveTab === 'new' ? 'active' : ''}`}
+                  onClick={() => {
+                    setVcrActiveTab('new');
+                    setVcrError('');
+                    if (vcrChannels.length > 0 && !vcrChannelId) {
+                      setVcrChannelId(String(vcrChannels[0].xtreamStreamId));
+                    }
+                    const now = new Date();
+                    const future = new Date(now.getTime() + 60 * 60 * 1000);
+                    const formatLocal = (d) => {
+                      const pad = (n) => String(n).padStart(2, '0');
+                      return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+                    };
+                    if (!vcrStartTime) setVcrStartTime(formatLocal(now));
+                    if (!vcrEndTime) setVcrEndTime(formatLocal(future));
+                  }}
+                  style={{ background: 'none', border: 'none', padding: '0.5rem 1rem', fontSize: '0.9rem', cursor: 'pointer' }}
+                >
+                  ➕ Neue Aufnahme planen
+                </button>
+              </div>
+
+              {vcrActiveTab === 'list' ? (
+                /* Recordings list view */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '500px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                  {recordings.length === 0 ? (
+                    <div className="empty-state" style={{ padding: '3rem' }}>
+                      <span className="empty-state-icon" style={{ fontSize: '2.5rem' }}>📹</span>
+                      <p style={{ marginTop: '1rem', color: 'var(--text-secondary)' }}>Keine programmierten oder aktiven Aufnahmen vorhanden.</p>
+                      <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={() => setVcrActiveTab('new')}>
+                        Aufnahme manuell planen
+                      </button>
+                    </div>
+                  ) : (
+                    recordings.slice().reverse().map(rec => {
+                      const startLocal = new Date(rec.startTime).toLocaleString();
+                      const endLocal = new Date(rec.endTime).toLocaleString();
+                      
+                      let statusBadgeColor = 'var(--text-muted)';
+                      let statusText = rec.status;
+                      let isRecording = rec.status === 'recording';
+                      
+                      if (rec.status === 'scheduled') {
+                        statusBadgeColor = 'rgba(255, 153, 0, 0.15)';
+                        statusText = '⏳ Geplant';
+                      } else if (rec.status === 'recording') {
+                        statusBadgeColor = 'rgba(255, 51, 102, 0.15)';
+                        statusText = '🔴 Nimmt auf';
+                      } else if (rec.status === 'completed') {
+                        statusBadgeColor = 'rgba(0, 242, 254, 0.15)';
+                        statusText = '✅ Fertig';
+                      } else if (rec.status === 'error') {
+                        statusBadgeColor = 'rgba(255, 75, 75, 0.15)';
+                        statusText = `⚠️ Fehler: ${rec.errorMessage || 'Unbekannt'}`;
+                      }
+
+                      return (
+                        <div key={rec.id} style={{ 
+                          background: 'rgba(255, 255, 255, 0.02)', 
+                          border: '1px solid var(--border-color)', 
+                          borderRadius: '10px', 
+                          padding: '1rem',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          gap: '0.75rem'
+                        }}>
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '0.5rem' }}>
+                            <div>
+                              <div style={{ fontWeight: 'bold', fontSize: '1rem', color: 'var(--text-primary)' }}>
+                                {rec.title}
+                              </div>
+                              <div style={{ fontSize: '0.8rem', color: 'var(--accent-pink)', marginTop: '0.2rem', fontWeight: '500' }}>
+                                📡 {rec.channelName}
+                              </div>
+                            </div>
+                            <span style={{ 
+                              padding: '0.25rem 0.6rem', 
+                              borderRadius: '20px', 
+                              fontSize: '0.75rem', 
+                              fontWeight: '600',
+                              background: statusBadgeColor,
+                              color: rec.status === 'recording' ? 'var(--accent-red)' : rec.status === 'scheduled' ? 'var(--accent-orange)' : rec.status === 'completed' ? 'var(--accent-cyan)' : 'var(--accent-red)',
+                              border: `1px solid ${rec.status === 'recording' ? 'rgba(255, 51, 102, 0.25)' : 'transparent'}`
+                            }}>
+                              {statusText}
+                            </span>
+                          </div>
+
+                          <div style={{ display: 'flex', gap: '1rem', fontSize: '0.8rem', color: 'var(--text-secondary)', flexWrap: 'wrap' }}>
+                            <div><strong>Start:</strong> {startLocal}</div>
+                            <div><strong>Ende:</strong> {endLocal}</div>
+                          </div>
+
+                          {isRecording && (
+                            <div style={{ 
+                              background: 'rgba(255,255,255,0.01)', 
+                              border: '1px solid rgba(255,255,255,0.04)',
+                              borderRadius: '6px',
+                              padding: '0.5rem 0.75rem',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'space-between',
+                              fontSize: '0.8rem'
+                            }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                                <span className="spinner" style={{ color: 'var(--accent-red)', animation: 'pulse 1.5s infinite' }}>🔴</span>
+                                <span>Bereits aufgenommen: <strong>{formatBytes(rec.bytesReceived || 0)}</strong></span>
+                              </div>
+                              {rec.speed > 0 && (
+                                <span>Geschwindigkeit: <strong>{formatBytes(rec.speed)}/s</strong></span>
+                              )}
+                            </div>
+                          )}
+
+                          <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.25rem' }}>
+                            {isRecording && (
+                              <button 
+                                className="btn btn-secondary"
+                                style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem', color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.3)' }}
+                                onClick={() => handleStopRecording(rec.id)}
+                              >
+                                <StopIcon /> Aufnahme stoppen
+                              </button>
+                            )}
+                            <button 
+                              className="btn btn-danger"
+                              style={{ padding: '0.35rem 0.75rem', fontSize: '0.8rem' }}
+                              onClick={() => handleDeleteRecording(rec.id)}
+                            >
+                              <TrashIcon /> Löschen
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })
+                  )}
+                </div>
+              ) : (
+                /* Manual recording form */
+                <form onSubmit={handleAddRecording} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                  {vcrError && (
+                    <div style={{ background: 'rgba(255, 75, 75, 0.1)', border: '1px solid rgba(255, 75, 75, 0.3)', borderRadius: '6px', padding: '0.75rem', color: 'var(--accent-red)', fontSize: '0.85rem' }}>
+                      ⚠️ {vcrError}
+                    </div>
+                  )}
+
+                  <div className="form-group">
+                    <label>Sender auswählen</label>
+                    <select
+                      className="input-text"
+                      value={vcrChannelId}
+                      onChange={(e) => setVcrChannelId(e.target.value)}
+                      style={{ background: 'var(--bg-secondary, #151525)', color: 'var(--text-primary)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0.55rem' }}
+                    >
+                      {vcrChannels.length === 0 ? (
+                        <option value="">Keine Sender verfügbar (bitte Xtream aktivieren)</option>
+                      ) : (
+                        vcrChannels.map(ch => (
+                          <option key={ch.xtreamStreamId} value={ch.xtreamStreamId}>
+                            {ch.metadata?.title || ch.filename}
+                          </option>
+                        ))
+                      )}
+                    </select>
+                  </div>
+
+                  <div className="form-group">
+                    <label>Aufnahme-Titel</label>
+                    <input
+                      type="text"
+                      className="input-text"
+                      value={vcrTitle}
+                      onChange={(e) => setVcrTitle(e.target.value)}
+                      placeholder="z. B. Tagesschau"
+                    />
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
+                    <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                      <label>Startzeit</label>
+                      <input
+                        type="datetime-local"
+                        className="input-text"
+                        value={vcrStartTime}
+                        onChange={(e) => setVcrStartTime(e.target.value)}
+                        required
+                      />
+                    </div>
+                    <div className="form-group" style={{ flex: 1, minWidth: '200px' }}>
+                      <label>Endzeit</label>
+                      <input
+                        type="datetime-local"
+                        className="input-text"
+                        value={vcrEndTime}
+                        onChange={(e) => setVcrEndTime(e.target.value)}
+                        required
+                      />
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.75rem', marginTop: '1rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                    <button type="button" className="btn btn-secondary" onClick={() => setVcrActiveTab('list')}>
+                      Abbrechen
+                    </button>
+                    <button type="submit" className="btn btn-primary" disabled={vcrSaving || vcrChannels.length === 0}>
+                      {vcrSaving ? '⏳ Speichern...' : 'Aufnahme planen 💾'}
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
+          </div>
+        )}
+
+        {/* EPG Modal */}
+        {showEpgModal && epgChannel && (
+          <div className="modal-overlay" style={{ zIndex: 1100 }}>
+            <div className="modal" style={{ width: '750px', maxWidth: '95%' }}>
+              <div className="modal-header">
+                <div>
+                  <span className="modal-title" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+                    📅 Programmführer (EPG)
+                  </span>
+                  <span style={{ fontSize: '0.8rem', color: 'var(--accent-pink)', fontWeight: '500', marginTop: '0.2rem', display: 'block' }}>
+                    {epgChannel.metadata?.title || epgChannel.filename}
+                  </span>
+                </div>
+                <button className="modal-close" onClick={() => setShowEpgModal(false)}>
+                  <CloseIcon />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '1rem', maxHeight: '550px', overflowY: 'auto', paddingRight: '0.5rem' }}>
+                {loadingEpg ? (
+                  <div style={{ padding: '4rem', textAlign: 'center', color: 'var(--text-muted)' }}>
+                    <span className="spinner" style={{ fontSize: '2rem', marginBottom: '1rem' }}>⏳</span>
+                    <p>Lade elektronischen Programmführer vom IPTV Server...</p>
+                  </div>
+                ) : epgError ? (
+                  <div style={{ padding: '2rem', textAlign: 'center' }}>
+                    <p style={{ color: 'var(--accent-red)' }}>{epgError}</p>
+                    <p style={{ fontSize: '0.85rem', color: 'var(--text-muted)', marginTop: '0.5rem' }}>
+                      Kein automatisches EPG für diesen Sender verfügbar. Du kannst eine manuelle Aufnahme planen.
+                    </p>
+                    <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={handleOpenManualFromEpg}>
+                      Manuelle Aufnahme planen ✍️
+                    </button>
+                  </div>
+                ) : epgListings.length === 0 ? (
+                  <div style={{ padding: '2rem', textAlign: 'center' }}>
+                    <p style={{ color: 'var(--text-secondary)' }}>Keine Programmdaten für diesen Sender verfügbar.</p>
+                    <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={handleOpenManualFromEpg}>
+                      Manuelle Aufnahme planen ✍️
+                    </button>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
+                    {epgListings.map((prog, idx) => {
+                      const startMs = prog.start_timestamp ? parseInt(prog.start_timestamp) * 1000 : new Date(prog.start.replace(' ', 'T')).getTime();
+                      const endMs = prog.end_timestamp ? parseInt(prog.end_timestamp) * 1000 : new Date(prog.end.replace(' ', 'T')).getTime();
+                      
+                      const startDate = new Date(startMs);
+                      const endDate = new Date(endMs);
+                      const timeStr = `${startDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - ${endDate.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}`;
+                      const dateStr = startDate.toLocaleDateString();
+
+                      const nowMs = Date.now();
+                      const isCurrent = nowMs >= startMs && nowMs < endMs;
+                      const isPast = nowMs >= endMs;
+
+                      const isScheduled = recordings.some(rec => 
+                        rec.streamId === epgChannel.xtreamStreamId && 
+                        Math.abs(new Date(rec.startTime).getTime() - startMs) < 60000 &&
+                        (rec.status === 'scheduled' || rec.status === 'recording')
+                      );
+
+                      return (
+                        <div key={idx} style={{ 
+                          background: isCurrent ? 'rgba(0, 242, 254, 0.04)' : 'rgba(255, 255, 255, 0.015)',
+                          border: isCurrent ? '1px solid rgba(0, 242, 254, 0.25)' : '1px solid var(--border-color)',
+                          borderRadius: '8px',
+                          padding: '0.9rem 1.1rem',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                          gap: '1rem'
+                        }}>
+                          <div style={{ flex: 1 }}>
+                            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', flexWrap: 'wrap' }}>
+                              <span style={{ fontSize: '0.75rem', fontWeight: 'bold', color: isCurrent ? 'var(--accent-cyan)' : 'var(--text-muted)' }}>
+                                📅 {dateStr} | ⏰ {timeStr}
+                              </span>
+                              {isCurrent && (
+                                <span style={{ 
+                                  padding: '0.15rem 0.4rem', 
+                                  background: 'rgba(0, 242, 254, 0.15)', 
+                                  color: 'var(--accent-cyan)', 
+                                  borderRadius: '4px', 
+                                  fontSize: '0.65rem',
+                                  fontWeight: 'bold'
+                                }}>
+                                  LÄUFT JETZT
+                                </span>
+                              )}
+                              {isScheduled && (
+                                <span style={{ 
+                                  padding: '0.15rem 0.4rem', 
+                                  background: 'rgba(255, 153, 0, 0.15)', 
+                                  color: 'var(--accent-orange)', 
+                                  borderRadius: '4px', 
+                                  fontSize: '0.65rem',
+                                  fontWeight: 'bold'
+                                }}>
+                                  GEPLANT 🔴
+                                </span>
+                              )}
+                            </div>
+                            <div style={{ fontWeight: 'bold', fontSize: '0.95rem', color: 'var(--text-primary)', marginTop: '0.3rem' }}>
+                              {prog.title}
+                            </div>
+                            {prog.description && (
+                              <div style={{ fontSize: '0.8rem', color: 'var(--text-muted)', marginTop: '0.25rem', lineHeight: '1.4' }}>
+                                {prog.description}
+                              </div>
+                            )}
+                          </div>
+
+                          <div style={{ flexShrink: 0 }}>
+                            {!isPast && (
+                              <button 
+                                className="btn btn-secondary"
+                                style={{ 
+                                  padding: '0.35rem 0.75rem', 
+                                  fontSize: '0.75rem',
+                                  borderColor: isScheduled ? 'rgba(255, 153, 0, 0.3)' : 'var(--border-color)',
+                                  color: isScheduled ? 'var(--accent-orange)' : 'var(--text-primary)'
+                                }}
+                                disabled={isScheduled}
+                                onClick={() => handleScheduleEpgRecording(prog)}
+                              >
+                                {isScheduled ? 'Geplant 🔴' : 'Aufnehmen 📹'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+              
+              <div style={{ marginTop: '1.25rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                  Keine passende Sendung dabei?
+                </span>
+                <button className="btn btn-secondary" style={{ fontSize: '0.75rem', padding: '0.35rem 0.75rem' }} onClick={handleOpenManualFromEpg}>
+                  Manuelles Zeitfenster aufnehmen ✍️
                 </button>
               </div>
             </div>
