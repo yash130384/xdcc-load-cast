@@ -493,7 +493,10 @@ function searchMoviegodsIRC(queryStr) {
   return new Promise((resolve, reject) => {
     const server = 'irc.abjects.net';
     const port = 6697;
-    const nick = 'G_' + Math.floor(100000 + Math.random() * 900000);
+    const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const suffix = Math.floor(100 + Math.random() * 900);
+    const nick = `${prefix}_${suffix}`;
     const channel1 = '#moviegods';
     const channel2 = '#mg-chat';
     
@@ -698,6 +701,145 @@ function searchMoviegodsIRC(queryStr) {
       cleanup(`IRC-Verbindungsfehler: ${e.message}`);
     }
   });
+}
+
+// Startup connectivity checks for both searches
+async function testXdccEuReachability() {
+  try {
+    const start = Date.now();
+    await axios.get('https://www.xdcc.eu/search.php?searchkey=test', {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      },
+      timeout: 8000
+    });
+    const duration = Date.now() - start;
+    return { success: true, duration };
+  } catch (err) {
+    return { success: false, error: err.message };
+  }
+}
+
+function testMoviegodsIRCReachability() {
+  return new Promise((resolve) => {
+    const server = 'irc.abjects.net';
+    const port = 6697;
+    const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
+    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+    const suffix = Math.floor(100 + Math.random() * 900);
+    const nick = `${prefix}_${suffix}`;
+    const channel1 = '#moviegods';
+    const channel2 = '#mg-chat';
+    
+    let socket;
+    let buffer = '';
+    let resolved = false;
+    const start = Date.now();
+    
+    const timeoutTimer = setTimeout(() => {
+      finish(false, 'Timeout connecting to Abjects IRC server');
+    }, 15000);
+    
+    function finish(success, errorMsg = null) {
+      if (resolved) return;
+      resolved = true;
+      clearTimeout(timeoutTimer);
+      
+      if (socket) {
+        try {
+          if (socket.writable) {
+            socket.write('QUIT :Startup check complete\r\n');
+          }
+          socket.destroy();
+        } catch (e) {}
+        socket = null;
+      }
+      
+      const duration = Date.now() - start;
+      if (success) {
+        resolve({ success: true, duration });
+      } else {
+        resolve({ success: false, error: errorMsg });
+      }
+    }
+    
+    try {
+      socket = tls.connect({ host: server, port: port, rejectUnauthorized: false }, () => {
+        socket.write(`NICK ${nick}\r\n`);
+        socket.write(`USER ${nick} 0 * :Startup Check Client\r\n`);
+      });
+      
+      socket.on('data', (data) => {
+        buffer += data.toString('utf8');
+        const lines = buffer.split('\r\n');
+        buffer = lines.pop();
+        
+        for (const line of lines) {
+          if (line.startsWith('PING')) {
+            const token = line.split(' :')[1] || line.substring(5);
+            if (socket && socket.writable) {
+              socket.write(`PONG :${token}\r\n`);
+            }
+            continue;
+          }
+          
+          if (line.includes(' 376 ') || line.includes(' 422 ')) {
+            if (socket && socket.writable) {
+              socket.write(`JOIN ${channel1},${channel2}\r\n`);
+            }
+            continue;
+          }
+          
+          if (line.includes(' 366 ') && line.includes(channel2)) {
+            finish(true);
+            return;
+          }
+          
+          const parts = line.split(' ');
+          const command = parts[1];
+          if (command === '474') {
+            finish(false, 'Banned from channels (+b)');
+            return;
+          } else if (command === '473') {
+            finish(false, 'Invite-only (+i)');
+            return;
+          } else if (command === '477') {
+            finish(false, 'Registration required (+r)');
+            return;
+          }
+        }
+      });
+      
+      socket.on('error', (err) => {
+        finish(false, `Socket connection error: ${err.message}`);
+      });
+      
+      socket.on('close', () => {
+        finish(false, 'Connection closed by remote host');
+      });
+    } catch (e) {
+      finish(false, `Unexpected error: ${e.message}`);
+    }
+  });
+}
+
+async function runStartupTests() {
+  console.log('[Startup-Checks] Starting connectivity checks for search sources...');
+  
+  const [xdccResult, moviegodsResult] = await Promise.all([
+    testXdccEuReachability(),
+    testMoviegodsIRCReachability()
+  ]);
+  
+  if (xdccResult.success && moviegodsResult.success) {
+    console.log('[Startup-Checks] ✅ All startup connectivity checks passed successfully!');
+    console.log(`[Startup-Checks] - xdcc.eu search: REACHABLE (duration: ${xdccResult.duration}ms)`);
+    console.log(`[Startup-Checks] - Moviegods IRC: REACHABLE (duration: ${moviegodsResult.duration}ms)`);
+  } else {
+    console.error('[Startup-Checks] ⚠️ STARTUP CONNECTIVITY CHECK FAILED!');
+    console.error(`[Startup-Checks] - xdcc.eu search: ${xdccResult.success ? `REACHABLE (duration: ${xdccResult.duration}ms)` : `UNREACHABLE (Reason: ${xdccResult.error})`}`);
+    console.error(`[Startup-Checks] - Moviegods IRC: ${moviegodsResult.success ? `REACHABLE (duration: ${moviegodsResult.duration}ms)` : `UNREACHABLE (Reason: ${moviegodsResult.error})`}`);
+  }
 }
 
 // Reusable xdcc.eu search helper
@@ -4657,6 +4799,9 @@ wss.on('connection', (ws) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server started at http://localhost:${PORT}`);
+
+  // Run startup checks after 3 seconds
+  setTimeout(runStartupTests, 3000);
 
   // Load auto-downloads from disk
   loadAutoDownloads();
