@@ -278,6 +278,9 @@ function App() {
   const [tempTailscaleBypassIrc, setTempTailscaleBypassIrc] = useState(true);
   const [tempTailscaleLocalAddress, setTempTailscaleLocalAddress] = useState('');
   const [tempIrcSearchTimeout, setTempIrcSearchTimeout] = useState(24);
+  const [activeSettingsTab, setActiveSettingsTab] = useState('general');
+  const [tempAllowTailscaleIp, setTempAllowTailscaleIp] = useState(false);
+  const [tempCustomLocalIp, setTempCustomLocalIp] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -382,6 +385,8 @@ function App() {
         setTempTailscaleBypassIrc(data.tailscaleBypassIrc !== false);
         setTempTailscaleLocalAddress(data.tailscaleLocalAddress || '');
         setTempIrcSearchTimeout(data.ircSearchTimeout || 24);
+        setTempAllowTailscaleIp(!!data.allowTailscaleIp);
+        setTempCustomLocalIp(data.customLocalIp || '');
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -2224,7 +2229,9 @@ function App() {
         newPin: newPinInput,
         tailscaleBypassIrc: tempTailscaleBypassIrc,
         tailscaleLocalAddress: tempTailscaleLocalAddress,
-        ircSearchTimeout: parseInt(tempIrcSearchTimeout, 10) || 24
+        ircSearchTimeout: parseInt(tempIrcSearchTimeout, 10) || 24,
+        allowTailscaleIp: tempAllowTailscaleIp,
+        customLocalIp: tempCustomLocalIp
       })
     })
       .then(async (res) => {
@@ -3386,6 +3393,9 @@ function App() {
               setTempTailscaleBypassIrc(settings.tailscaleBypassIrc !== false);
               setTempTailscaleLocalAddress(settings.tailscaleLocalAddress || '');
               setTempIrcSearchTimeout(settings.ircSearchTimeout || 24);
+              setTempAllowTailscaleIp(!!settings.allowTailscaleIp);
+              setTempCustomLocalIp(settings.customLocalIp || '');
+              setActiveSettingsTab('general');
               setShowSettings(true);
             }}>
               <SettingsIcon />
@@ -4286,278 +4296,426 @@ function App() {
         {/* Settings Modal */}
         {showSettings && (
           <div className="modal-overlay">
-            <div className="modal">
+            <div className="modal settings-modal">
               <div className="modal-header">
-                <span className="modal-title">Globale Einstellungen</span>
+                <span className="modal-title">Einstellungen</span>
                 <button className="modal-close" onClick={() => setShowSettings(false)}>
                   <CloseIcon />
                 </button>
               </div>
 
-              <div className="form-group">
-                <label>Download-Verzeichnis</label>
-                <input
-                  type="text"
-                  className="input-text"
-                  value={tempDownloadDir}
-                  onChange={(e) => setTempDownloadDir(e.target.value)}
-                  placeholder="/Pfad/zu/deinen/Downloads"
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Gibt das Zielverzeichnis an, in dem die XDCC-Dateien abgelegt werden.
-                </span>
-              </div>
-
-              <div className="toggle-group">
-                <div className="toggle-group-label">
-                  <span>SSL/TLS standardmäßig aktivieren</span>
-                  <span>Verbinde mit IRC-Servern standardmäßig über SSL (Port 6697)</span>
+              <div className="settings-container">
+                {/* Sidebar */}
+                <div className="settings-sidebar">
+                  <button 
+                    type="button" 
+                    className={`settings-tab-btn ${activeSettingsTab === 'general' ? 'active' : ''}`} 
+                    onClick={() => setActiveSettingsTab('general')}
+                  >
+                    ⚙️ Allgemein
+                  </button>
+                  <button 
+                    type="button" 
+                    className={`settings-tab-btn ${activeSettingsTab === 'network' ? 'active' : ''}`} 
+                    onClick={() => setActiveSettingsTab('network')}
+                  >
+                    🌐 Netzwerk & Tailscale
+                  </button>
+                  <button 
+                    type="button" 
+                    className={`settings-tab-btn ${activeSettingsTab === 'xtream' ? 'active' : ''}`} 
+                    onClick={() => setActiveSettingsTab('xtream')}
+                  >
+                    📺 Xtream IPTV
+                  </button>
+                  <button 
+                    type="button" 
+                    className={`settings-tab-btn ${activeSettingsTab === 'parental' ? 'active' : ''}`} 
+                    onClick={() => setActiveSettingsTab('parental')}
+                  >
+                    🤫 Jugendschutz
+                  </button>
+                  <button 
+                    type="button" 
+                    className={`settings-tab-btn ${activeSettingsTab === 'logs' ? 'active' : ''}`} 
+                    onClick={() => setActiveSettingsTab('logs')}
+                  >
+                    📋 System-Logs
+                  </button>
                 </div>
-                <label className="switch">
-                  <input
-                    type="checkbox"
-                    checked={tempUseSSL}
-                    onChange={(e) => setTempUseSSL(e.target.checked)}
-                  />
-                  <span className="slider"></span>
-                </label>
-              </div>
 
-              <div className="form-group" style={{ marginTop: '0.5rem' }}>
-                <label>Löschfrist für Mediathek (Tage)</label>
-                <input
-                  type="number"
-                  className="input-text"
-                  value={tempKeepDays}
-                  onChange={(e) => setTempKeepDays(Math.max(0, parseInt(e.target.value, 10) || 0))}
-                  min="0"
-                  placeholder="0 (deaktiviert)"
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Gibt an, wie viele Tage Dateien in der Mediathek behalten werden. 0 deaktiviert die automatische Löschung.
-                </span>
-              </div>
+                {/* Content Panel */}
+                <div className="settings-content">
+                  {activeSettingsTab === 'general' && (
+                    <div className="settings-pane">
+                      <h3>Allgemeine Einstellungen</h3>
+                      
+                      <div className="form-group">
+                        <label>Download-Verzeichnis</label>
+                        <input
+                          type="text"
+                          className="input-text"
+                          value={tempDownloadDir}
+                          onChange={(e) => setTempDownloadDir(e.target.value)}
+                          placeholder="/Pfad/zu/deinen/Downloads"
+                        />
+                        <span className="form-helper">
+                          Gibt das Zielverzeichnis an, in dem die XDCC-Dateien abgelegt werden.
+                        </span>
+                      </div>
 
-              <div className="form-group" style={{ marginTop: '0.5rem' }}>
-                <label>Abfrageintervall für neue Folgen (Stunden)</label>
-                <input
-                  type="number"
-                  className="input-text"
-                  value={tempCheckIntervalHours}
-                  onChange={(e) => setTempCheckIntervalHours(Math.max(1, parseInt(e.target.value, 10) || 1))}
-                  min="1"
-                  placeholder="3"
-                />
-                <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                  Gibt an, wie oft (in Stunden) automatisch nach neuen Folgen gesucht werden soll.
-                </span>
-              </div>
+                      <div className="toggle-group">
+                        <div className="toggle-group-label">
+                          <span>SSL/TLS standardmäßig aktivieren</span>
+                          <span>Verbinde mit IRC-Servern standardmäßig über SSL (Port 6697)</span>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={tempUseSSL}
+                            onChange={(e) => setTempUseSSL(e.target.checked)}
+                          />
+                          <span className="slider"></span>
+                        </label>
+                      </div>
 
-              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Xtream Codes (IPTV/VOD)</label>
-                <div className="toggle-group" style={{ padding: '0.25rem 0' }}>
-                  <div className="toggle-group-label">
-                    <span>Xtream Codes aktivieren</span>
-                    <span>Integiere IPTV/VOD-Streams in die Mediathek</span>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={tempXtreamEnabled}
-                      onChange={(e) => setTempXtreamEnabled(e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-                
-                {tempXtreamEnabled && (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', marginTop: '0.75rem' }}>
-                    <div className="form-group">
-                      <label style={{ fontSize: '0.8rem' }}>Server-URL</label>
-                      <input
-                        type="text"
-                        className="input-text"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                        value={tempXtreamHost}
-                        onChange={(e) => setTempXtreamHost(e.target.value)}
-                        placeholder="http://iptv-server.com:8080"
-                      />
+                      <div className="form-group">
+                        <label>Löschfrist für Mediathek (Tage)</label>
+                        <input
+                          type="number"
+                          className="input-text"
+                          value={tempKeepDays}
+                          onChange={(e) => setTempKeepDays(Math.max(0, parseInt(e.target.value, 10) || 0))}
+                          min="0"
+                          placeholder="0 (deaktiviert)"
+                        />
+                        <span className="form-helper">
+                          Gibt an, wie viele Tage Dateien in der Mediathek behalten werden. 0 deaktiviert die automatische Löschung.
+                        </span>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Abfrageintervall für neue Folgen (Stunden)</label>
+                        <input
+                          type="number"
+                          className="input-text"
+                          value={tempCheckIntervalHours}
+                          onChange={(e) => setTempCheckIntervalHours(Math.max(1, parseInt(e.target.value, 10) || 1))}
+                          min="1"
+                          placeholder="3"
+                        />
+                        <span className="form-helper">
+                          Gibt an, wie oft (in Stunden) automatisch nach neuen Folgen gesucht werden soll.
+                        </span>
+                      </div>
                     </div>
-                    <div className="form-group">
-                      <label style={{ fontSize: '0.8rem' }}>Benutzername</label>
-                      <input
-                        type="text"
-                        className="input-text"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                        value={tempXtreamUsername}
-                        onChange={(e) => setTempXtreamUsername(e.target.value)}
-                        placeholder="Benutzername"
-                      />
+                  )}
+
+                  {activeSettingsTab === 'network' && (
+                    <div className="settings-pane">
+                      <h3>Netzwerk & Tailscale</h3>
+
+                      <div className="toggle-group">
+                        <div className="toggle-group-label">
+                          <span>Tailscale IP-Adresse zulassen</span>
+                          <span>Erlaubt der IP-Erkennung, die Tailscale-IP (100.x.y.z) für Streaming/Chromecast zu verwenden</span>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={tempAllowTailscaleIp}
+                            onChange={(e) => setTempAllowTailscaleIp(e.target.checked)}
+                          />
+                          <span className="slider"></span>
+                        </label>
+                      </div>
+
+                      <div className="toggle-group">
+                        <div className="toggle-group-label">
+                          <span>IRC über lokales Interface zwingen</span>
+                          <span>Umgeht VPN/Tailscale für IRC/DCC-Verbindungen (empfohlen)</span>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={tempTailscaleBypassIrc}
+                            onChange={(e) => setTempTailscaleBypassIrc(e.target.checked)}
+                          />
+                          <span className="slider"></span>
+                        </label>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Lokale Bindungs-IP für IRC/DCC (Optional)</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <input
+                            type="text"
+                            className="input-text"
+                            value={tempTailscaleLocalAddress}
+                            onChange={(e) => setTempTailscaleLocalAddress(e.target.value)}
+                            placeholder="z. B. 192.168.178.50 (leer lassen für Auto-Erkennung)"
+                          />
+                          {tempTailscaleLocalAddress && (
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              onClick={() => setTempTailscaleLocalAddress('')} 
+                              style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+                            >
+                              Leeren
+                            </button>
+                          )}
+                        </div>
+                        <span className="form-helper">
+                          Falls aktiv, wird ausgehender IRC- und DCC-Verkehr an diese IP gebunden. Wenn leer, wird deine LAN-IP automatisch ermittelt.
+                        </span>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Benutzerdefinierte Streaming-IP (Optional)</label>
+                        <div style={{ display: 'flex', gap: '0.5rem' }}>
+                          <input
+                            type="text"
+                            className="input-text"
+                            value={tempCustomLocalIp}
+                            onChange={(e) => setTempCustomLocalIp(e.target.value)}
+                            placeholder="z. B. 192.168.178.100 (leer lassen für Auto-Erkennung)"
+                          />
+                          {tempCustomLocalIp && (
+                            <button 
+                              type="button" 
+                              className="btn btn-secondary" 
+                              onClick={() => setTempCustomLocalIp('')} 
+                              style={{ padding: '0.4rem 0.75rem', fontSize: '0.8rem' }}
+                            >
+                              Leeren
+                            </button>
+                          )}
+                        </div>
+                        <span className="form-helper">
+                          Manuelle IP-Adresse zum Erstellen von Stream-Links für Chromecast. Nützlich bei komplexen Netzwerk-Setups oder VPNs.
+                        </span>
+                      </div>
+
+                      <div className="form-group">
+                        <label>Such-Timeout für IRC/TopDL (Sekunden)</label>
+                        <input
+                          type="number"
+                          className="input-text"
+                          value={tempIrcSearchTimeout}
+                          onChange={(e) => setTempIrcSearchTimeout(Math.max(5, parseInt(e.target.value, 10) || 5))}
+                          min="5"
+                          placeholder="24"
+                        />
+                        <span className="form-helper">
+                          Gibt an, wie viele Sekunden absolut auf Suchergebnisse (z. B. TopDL) gewartet werden soll. Standard: 24 Sekunden.
+                        </span>
+                      </div>
+
+                      {settings.network && (
+                        <div className="network-info-box">
+                          <div className="network-info-header">
+                            🛰️ Erkannte Netzwerk-Schnittstellen
+                            {settings.network.tailscaleDetected && (
+                              <span className="ts-badge active">Tailscale aktiv</span>
+                            )}
+                          </div>
+                          <div className="network-interfaces-list">
+                            {settings.network.allIps && settings.network.allIps.length > 0 ? (
+                              settings.network.allIps.map((ip, idx) => (
+                                <div key={idx} className="network-interface-item">
+                                  <div className="interface-meta">
+                                    <span className="interface-name">{ip.interface}</span>
+                                    <span className="interface-ip">{ip.address}</span>
+                                    {ip.isTailscale && <span className="ts-badge inline">Tailscale</span>}
+                                  </div>
+                                  <div className="interface-actions">
+                                    <button 
+                                      type="button" 
+                                      className="btn btn-secondary btn-xs"
+                                      onClick={() => setTempTailscaleLocalAddress(ip.address)}
+                                      title="Für IRC-Bindung übernehmen"
+                                    >
+                                      Bind IP
+                                    </button>
+                                    <button 
+                                      type="button" 
+                                      className="btn btn-secondary btn-xs"
+                                      onClick={() => setTempCustomLocalIp(ip.address)}
+                                      title="Als Streaming-IP übernehmen"
+                                    >
+                                      Stream IP
+                                    </button>
+                                  </div>
+                                </div>
+                              ))
+                            ) : (
+                              <div className="no-interfaces">Keine externen Schnittstellen gefunden.</div>
+                            )}
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="form-group">
-                      <label style={{ fontSize: '0.8rem' }}>Passwort</label>
-                      <input
-                        type="password"
-                        className="input-text"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                        value={tempXtreamPassword}
-                        onChange={(e) => setTempXtreamPassword(e.target.value)}
-                        placeholder="Passwort"
-                      />
+                  )}
+
+                  {activeSettingsTab === 'xtream' && (
+                    <div className="settings-pane">
+                      <h3>Xtream Codes (IPTV/VOD)</h3>
+                      
+                      <div className="toggle-group">
+                        <div className="toggle-group-label">
+                          <span>Xtream Codes aktivieren</span>
+                          <span>Integiere IPTV/VOD-Streams in die Mediathek</span>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={tempXtreamEnabled}
+                            onChange={(e) => setTempXtreamEnabled(e.target.checked)}
+                          />
+                          <span className="slider"></span>
+                        </label>
+                      </div>
+
+                      {tempXtreamEnabled && (
+                        <div className="xtream-fields-container">
+                          <div className="form-group">
+                            <label>Server-URL</label>
+                            <input
+                              type="text"
+                              className="input-text"
+                              value={tempXtreamHost}
+                              onChange={(e) => setTempXtreamHost(e.target.value)}
+                              placeholder="http://iptv-server.com:8080"
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label>Benutzername</label>
+                            <input
+                              type="text"
+                              className="input-text"
+                              value={tempXtreamUsername}
+                              onChange={(e) => setTempXtreamUsername(e.target.value)}
+                              placeholder="Benutzername"
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label>Passwort</label>
+                            <input
+                              type="password"
+                              className="input-text"
+                              value={tempXtreamPassword}
+                              onChange={(e) => setTempXtreamPassword(e.target.value)}
+                              placeholder="Passwort"
+                            />
+                          </div>
+                          <div className="form-group">
+                            <label>Sync-Intervall (Stunden)</label>
+                            <input
+                              type="number"
+                              className="input-text"
+                              value={tempXtreamSyncIntervalHours}
+                              onChange={(e) => setTempXtreamSyncIntervalHours(e.target.value)}
+                              placeholder="1"
+                              min="1"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
-                    <div className="form-group">
-                      <label style={{ fontSize: '0.8rem' }}>Sync-Intervall (Stunden)</label>
-                      <input
-                        type="number"
-                        className="input-text"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                        value={tempXtreamSyncIntervalHours}
-                        onChange={(e) => setTempXtreamSyncIntervalHours(e.target.value)}
-                        placeholder="1"
-                        min="1"
-                      />
+                  )}
+
+                  {activeSettingsTab === 'parental' && (
+                    <div className="settings-pane">
+                      <h3>Jugendschutz (Adult-Inhalte)</h3>
+                      
+                      <div className="toggle-group">
+                        <div className="toggle-group-label">
+                          <span>XXX-Inhalte ausblenden</span>
+                          <span>Blendet Filme, Serien und Live-TV mit adult-Inhalten aus</span>
+                        </div>
+                        <label className="switch">
+                          <input
+                            type="checkbox"
+                            checked={tempXxxHideEnabled}
+                            onChange={(e) => setTempXxxHideEnabled(e.target.checked)}
+                          />
+                          <span className="slider"></span>
+                        </label>
+                      </div>
+
+                      {settings.xxxHideEnabled && !tempXxxHideEnabled && (
+                        <div className="form-group warning-border">
+                          <label style={{ color: 'var(--accent-red)' }}>Sperrcode zur Freigabe</label>
+                          <input
+                            type="password"
+                            className="input-text"
+                            value={verifyPin}
+                            onChange={(e) => setVerifyPin(e.target.value)}
+                            placeholder="Aktuellen Sperrcode eingeben"
+                          />
+                        </div>
+                      )}
+
+                      <div className="pin-change-box">
+                        <label className="box-title">Sperrcode ändern</label>
+                        <div className="pin-change-inputs">
+                          <div className="form-group flex-1">
+                            <label>Aktueller Sperrcode</label>
+                            <input
+                              type="password"
+                              className="input-text"
+                              value={currentPinInput}
+                              onChange={(e) => setCurrentPinInput(e.target.value)}
+                              placeholder="Code"
+                            />
+                          </div>
+                          <div className="form-group flex-1">
+                            <label>Neuer Sperrcode</label>
+                            <input
+                              type="password"
+                              className="input-text"
+                              value={newPinInput}
+                              onChange={(e) => setNewPinInput(e.target.value)}
+                              placeholder="Neuer Code"
+                            />
+                          </div>
+                        </div>
+                      </div>
                     </div>
-                  </div>
-                )}
+                  )}
+
+                  {activeSettingsTab === 'logs' && (
+                    <div className="settings-pane logs-pane">
+                      <h3>Systemdiagnose & Logs</h3>
+                      <p style={{ color: 'var(--text-secondary)', fontSize: '0.85rem', marginBottom: '1.25rem' }}>
+                        Sieh dir die System-Logs an, um eventuelle DCC-Fehler, Verbindungsprobleme oder IPTV Sync-Events zu analysieren.
+                      </p>
+                      
+                      <button 
+                        type="button"
+                        className="btn btn-secondary" 
+                        style={{ 
+                          display: 'flex', 
+                          alignItems: 'center', 
+                          gap: '0.5rem', 
+                          width: '100%', 
+                          justifyContent: 'center',
+                          background: 'rgba(255, 255, 255, 0.05)',
+                          borderColor: 'var(--border-color)',
+                          padding: '0.8rem'
+                        }}
+                        onClick={() => {
+                          fetchLogs();
+                          setShowLogs(true);
+                        }}
+                      >
+                        📋 System-Logs ansehen
+                      </button>
+                    </div>
+                  )}
+                </div>
               </div>
-
-              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Jugendschutz (XXX-Inhalte)</label>
-                
-                <div className="toggle-group" style={{ padding: '0.25rem 0' }}>
-                  <div className="toggle-group-label">
-                    <span>XXX-Inhalte ausblenden</span>
-                    <span>Blendet Filme, Serien und Live-TV mit adult-Inhalten aus</span>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={tempXxxHideEnabled}
-                      onChange={(e) => {
-                        setTempXxxHideEnabled(e.target.checked);
-                      }}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-
-                {settings.xxxHideEnabled && !tempXxxHideEnabled && (
-                  <div className="form-group" style={{ marginTop: '0.75rem' }}>
-                    <label style={{ fontSize: '0.8rem', color: 'rgba(255, 75, 75, 1)' }}>Sperrcode zur Freigabe</label>
-                    <input
-                      type="password"
-                      className="input-text"
-                      style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem', borderColor: 'rgba(255, 75, 75, 0.4)' }}
-                      value={verifyPin}
-                      onChange={(e) => setVerifyPin(e.target.value)}
-                      placeholder="Aktuellen Sperrcode eingeben"
-                    />
-                  </div>
-                )}
-
-                <div style={{ marginTop: '0.75rem', padding: '0.5rem', background: 'rgba(255,255,255,0.02)', borderRadius: '4px', border: '1px solid rgba(255,255,255,0.05)' }}>
-                  <label style={{ fontSize: '0.8rem', fontWeight: 'bold', display: 'block', marginBottom: '0.25rem' }}>Sperrcode ändern</label>
-                  <div style={{ display: 'flex', gap: '0.5rem' }}>
-                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
-                      <label style={{ fontSize: '0.7rem' }}>Aktueller Sperrcode</label>
-                      <input
-                        type="password"
-                        className="input-text"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                        value={currentPinInput}
-                        onChange={(e) => setCurrentPinInput(e.target.value)}
-                        placeholder="Aktueller Code"
-                      />
-                    </div>
-                    <div className="form-group" style={{ flex: 1, margin: 0 }}>
-                      <label style={{ fontSize: '0.7rem' }}>Neuer Sperrcode</label>
-                      <input
-                        type="password"
-                        className="input-text"
-                        style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                        value={newPinInput}
-                        onChange={(e) => setNewPinInput(e.target.value)}
-                        placeholder="Neuer Code"
-                      />
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Netzwerk & Tailscale</label>
-                
-                <div className="toggle-group" style={{ padding: '0.25rem 0' }}>
-                  <div className="toggle-group-label">
-                    <span>IRC über lokales Interface zwingen</span>
-                    <span>Umgeht VPN/Tailscale für IRC/DCC-Verbindungen (empfohlen)</span>
-                  </div>
-                  <label className="switch">
-                    <input
-                      type="checkbox"
-                      checked={tempTailscaleBypassIrc}
-                      onChange={(e) => setTempTailscaleBypassIrc(e.target.checked)}
-                    />
-                    <span className="slider"></span>
-                  </label>
-                </div>
-
-                <div className="form-group" style={{ marginTop: '0.75rem' }}>
-                  <label style={{ fontSize: '0.8rem' }}>Lokale Bindungs-IP (Optional)</label>
-                  <input
-                    type="text"
-                    className="input-text"
-                    style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                    value={tempTailscaleLocalAddress}
-                    onChange={(e) => setTempTailscaleLocalAddress(e.target.value)}
-                    placeholder="z. B. 192.168.178.50 (leer lassen für Auto-Erkennung)"
-                  />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Falls aktiv, wird ausgehender IRC- und DCC-Verkehr an diese IP gebunden. Wenn leer, wird deine LAN-IP automatisch ermittelt.
-                  </span>
-                </div>
-
-                <div className="form-group" style={{ marginTop: '0.75rem' }}>
-                  <label style={{ fontSize: '0.8rem' }}>Such-Timeout für IRC/TopDL (Sekunden)</label>
-                  <input
-                    type="number"
-                    className="input-text"
-                    style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
-                    value={tempIrcSearchTimeout}
-                    onChange={(e) => setTempIrcSearchTimeout(Math.max(5, parseInt(e.target.value, 10) || 5))}
-                    min="5"
-                    placeholder="24"
-                  />
-                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                    Gibt an, wie viele Sekunden absolut auf Suchergebnisse (z. B. TopDL) gewartet werden soll. Standard: 24 Sekunden.
-                  </span>
-                </div>
-              </div>
-
-              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
-                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>System-Logs</label>
-                <button 
-                  type="button"
-                  className="btn btn-secondary" 
-                  style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '0.5rem', 
-                    width: '100%', 
-                    justifyContent: 'center',
-                    background: 'rgba(255, 255, 255, 0.05)',
-                    borderColor: 'var(--border-color)'
-                  }}
-                  onClick={() => {
-                    fetchLogs();
-                    setShowLogs(true);
-                  }}
-                >
-                  📋 Logs ansehen
-                </button>
-              </div>
-
-
 
               <div className="settings-footer">
                 <button className="btn btn-secondary" onClick={() => setShowSettings(false)}>

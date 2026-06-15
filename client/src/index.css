@@ -1668,3 +1668,288 @@ input:checked + .slider:before {
 
 /* Responsive media-grid is handled automatically by CSS grid auto-fill rules. */
 
+
+/* Restructured Settings Modal Layout */
+.settings-modal {
+  width: 850px;
+  max-width: 95%;
+  max-height: 85vh;
+  padding: 0 !important;
+  overflow: hidden !important;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-modal .modal-header {
+  padding: 1.25rem 1.75rem;
+  margin: 0;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.settings-container {
+  display: flex;
+  flex-grow: 1;
+  overflow: hidden;
+  min-height: 480px;
+}
+
+/* Settings Sidebar */
+.settings-sidebar {
+  width: 240px;
+  background: rgba(255, 255, 255, 0.015);
+  border-right: 1px solid var(--border-color);
+  padding: 1.25rem 0.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  flex-shrink: 0;
+  overflow-y: auto;
+}
+
+.settings-tab-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  background: transparent;
+  border: 1px solid transparent;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.settings-tab-btn:hover {
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-primary);
+}
+
+.settings-tab-btn.active {
+  background: rgba(6, 182, 212, 0.08);
+  border-color: rgba(6, 182, 212, 0.25);
+  color: var(--accent-cyan);
+  font-weight: 600;
+  box-shadow: 0 2px 8px rgba(6, 182, 212, 0.05);
+}
+
+/* Settings Content Pane */
+.settings-content {
+  flex-grow: 1;
+  padding: 1.75rem 2rem;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+}
+
+.settings-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  animation: fadeIn 0.2s ease;
+}
+
+.settings-pane h3 {
+  font-size: 1.15rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.settings-pane .form-group {
+  margin: 0;
+}
+
+.form-helper {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin-top: 0.25rem;
+  display: block;
+  line-height: 1.4;
+}
+
+/* Network Interfaces List Box */
+.network-info-box {
+  margin-top: 1rem;
+  background: rgba(255, 255, 255, 0.02);
+  border: 1px solid var(--border-color);
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.network-info-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.03);
+  padding: 0.75rem 1rem;
+  font-size: 0.85rem;
+  font-weight: 600;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.network-interfaces-list {
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.network-interface-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid transparent;
+  transition: background 0.2s;
+}
+
+.network-interface-item:hover {
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.interface-meta {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.interface-name {
+  font-weight: 600;
+  color: var(--text-primary);
+  background: rgba(255, 255, 255, 0.05);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+  font-size: 0.75rem;
+  font-family: var(--font-sans);
+}
+
+.interface-ip {
+  color: var(--text-secondary);
+}
+
+.ts-badge {
+  font-size: 0.7rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: uppercase;
+}
+
+.ts-badge.inline {
+  background: rgba(6, 182, 212, 0.12);
+  color: var(--accent-cyan);
+  border: 1px solid rgba(6, 182, 212, 0.2);
+}
+
+.ts-badge.active {
+  background: rgba(16, 185, 129, 0.12);
+  color: var(--accent-green);
+  border: 1px solid rgba(16, 185, 129, 0.2);
+}
+
+.interface-actions {
+  display: flex;
+  gap: 0.4rem;
+}
+
+.btn-xs {
+  font-size: 0.75rem !important;
+  padding: 0.25rem 0.6rem !important;
+  border-radius: 6px !important;
+}
+
+.no-interfaces {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+/* Xtream / PIN Boxes styling */
+.xtream-fields-container, .pin-change-inputs {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  background: rgba(255, 255, 255, 0.01);
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  padding: 1rem;
+}
+
+.pin-change-box {
+  margin-top: 0.5rem;
+}
+
+.pin-change-box .box-title {
+  font-size: 0.85rem;
+  font-weight: 600;
+  display: block;
+  margin-bottom: 0.5rem;
+  color: var(--text-secondary);
+}
+
+.pin-change-inputs {
+  flex-direction: row;
+}
+
+.flex-1 {
+  flex: 1;
+}
+
+.warning-border {
+  border: 1px solid rgba(239, 68, 68, 0.2) !important;
+  border-radius: 10px;
+  padding: 1rem;
+  background: rgba(239, 68, 68, 0.02);
+}
+
+/* Footer override */
+.settings-modal .settings-footer {
+  margin: 0;
+  padding: 1.25rem 2rem;
+  border-top: 1px solid var(--border-color);
+  background: rgba(0, 0, 0, 0.15);
+}
+
+/* Responsive collapse for settings modal */
+@media (max-width: 680px) {
+  .settings-container {
+    flex-direction: column;
+    min-height: auto;
+    max-height: calc(85vh - 120px);
+  }
+  
+  .settings-sidebar {
+    width: 100%;
+    border-right: none;
+    border-bottom: 1px solid var(--border-color);
+    flex-direction: row;
+    padding: 0.75rem 1rem;
+    gap: 0.5rem;
+    overflow-x: auto;
+    white-space: nowrap;
+    -webkit-overflow-scrolling: touch;
+  }
+  
+  .settings-tab-btn {
+    padding: 0.5rem 0.8rem;
+    font-size: 0.85rem;
+  }
+  
+  .settings-content {
+    padding: 1.25rem;
+  }
+  
+  .pin-change-inputs {
+    flex-direction: column;
+  }
+}
+

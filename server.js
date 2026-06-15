@@ -119,7 +119,9 @@ let appConfig = {
   xxxPin: '0000',
   tailscaleBypassIrc: true,
   tailscaleLocalAddress: '',
-  ircSearchTimeout: 24
+  ircSearchTimeout: 24,
+  allowTailscaleIp: false,
+  customLocalIp: ''
 };
 
 // Chromecast discovery setup
@@ -1293,6 +1295,7 @@ app.get('/api/settings', (req, res) => {
   delete publicConfig.xxxPin;
   publicConfig.version = appVersion;
   publicConfig.startTime = serverStartTime;
+  publicConfig.network = getNetworkDetails();
   return res.json(publicConfig);
 });
 
@@ -1475,7 +1478,8 @@ app.post('/api/settings', (req, res) => {
     downloadDir, useSSLByDefault, keepDays, checkIntervalHours, 
     xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled, xtreamSyncIntervalHours,
     xxxHideEnabled, pin, newPin,
-    tailscaleBypassIrc, tailscaleLocalAddress, ircSearchTimeout
+    tailscaleBypassIrc, tailscaleLocalAddress, ircSearchTimeout,
+    allowTailscaleIp, customLocalIp
   } = req.body;
 
   // Verify PIN if we are disabling the lock (changing xxxHideEnabled from true to false)
@@ -1536,6 +1540,12 @@ app.post('/api/settings', (req, res) => {
   if (ircSearchTimeout !== undefined) {
     appConfig.ircSearchTimeout = Math.max(5, parseInt(ircSearchTimeout, 10) || 24);
   }
+  if (allowTailscaleIp !== undefined) {
+    appConfig.allowTailscaleIp = !!allowTailscaleIp;
+  }
+  if (customLocalIp !== undefined) {
+    appConfig.customLocalIp = String(customLocalIp).trim();
+  }
 
   saveConfig();
 
@@ -1550,6 +1560,7 @@ app.post('/api/settings', (req, res) => {
   delete publicConfig.xxxPin;
   publicConfig.version = appVersion;
   publicConfig.startTime = serverStartTime;
+  publicConfig.network = getNetworkDetails();
   return res.json(publicConfig);
 });
 
@@ -4192,14 +4203,54 @@ app.get('/api/chromecast/devices', (req, res) => {
   return res.json([...chromecasts, ...dlnas, ...airplays]);
 });
 
+// Helper to query network interface details, identifying Tailscale interfaces
+function getNetworkDetails() {
+  const interfaces = os.networkInterfaces();
+  const ips = [];
+  let tailscaleIp = null;
+  
+  for (const name of Object.keys(interfaces)) {
+    for (const iface of interfaces[name]) {
+      if (iface.family === 'IPv4' && !iface.internal) {
+        const isTS = iface.address.startsWith('100.');
+        ips.push({
+          interface: name,
+          address: iface.address,
+          isTailscale: isTS
+        });
+        if (isTS) {
+          tailscaleIp = iface.address;
+        }
+      }
+    }
+  }
+  
+  return {
+    localIp: getLocalIp(),
+    allIps: ips,
+    tailscaleDetected: !!tailscaleIp,
+    tailscaleIp: tailscaleIp
+  };
+}
+
 // Helper to get local network IP address (ipv4, non-loopback)
 function getLocalIp() {
+  if (appConfig.customLocalIp) {
+    return appConfig.customLocalIp;
+  }
   const interfaces = os.networkInterfaces();
   for (const name of Object.keys(interfaces)) {
     for (const iface of interfaces[name]) {
-      // Ignore loopback and Tailscale's 100.x.y.z subnet
-      if (iface.family === 'IPv4' && !iface.internal && !iface.address.startsWith('100.')) {
-        return iface.address;
+      // Ignore loopback
+      if (iface.family === 'IPv4' && !iface.internal) {
+        // Optionally ignore Tailscale's 100.x.y.z subnet unless explicitly allowed
+        if (iface.address.startsWith('100.')) {
+          if (appConfig.allowTailscaleIp) {
+            return iface.address;
+          }
+        } else {
+          return iface.address;
+        }
       }
     }
   }
