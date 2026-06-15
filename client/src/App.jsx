@@ -273,6 +273,7 @@ function App() {
   const [tempKeepDays, setTempKeepDays] = useState(0);
   const [tempTailscaleBypassIrc, setTempTailscaleBypassIrc] = useState(true);
   const [tempTailscaleLocalAddress, setTempTailscaleLocalAddress] = useState('');
+  const [tempIrcSearchTimeout, setTempIrcSearchTimeout] = useState(24);
   const [showSettings, setShowSettings] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -357,6 +358,7 @@ function App() {
         setTempXxxHideEnabled(!!data.xxxHideEnabled);
         setTempTailscaleBypassIrc(data.tailscaleBypassIrc !== false);
         setTempTailscaleLocalAddress(data.tailscaleLocalAddress || '');
+        setTempIrcSearchTimeout(data.ircSearchTimeout || 24);
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -1994,7 +1996,8 @@ function App() {
         pin: verifyPin || currentPinInput,
         newPin: newPinInput,
         tailscaleBypassIrc: tempTailscaleBypassIrc,
-        tailscaleLocalAddress: tempTailscaleLocalAddress
+        tailscaleLocalAddress: tempTailscaleLocalAddress,
+        ircSearchTimeout: parseInt(tempIrcSearchTimeout, 10) || 24
       })
     })
       .then(async (res) => {
@@ -3148,6 +3151,7 @@ function App() {
               setTempXtreamSyncIntervalHours(settings.xtreamSyncIntervalHours || 1);
               setTempTailscaleBypassIrc(settings.tailscaleBypassIrc !== false);
               setTempTailscaleLocalAddress(settings.tailscaleLocalAddress || '');
+              setTempIrcSearchTimeout(settings.ircSearchTimeout || 24);
               setShowSettings(true);
             }}>
               <SettingsIcon />
@@ -4276,6 +4280,22 @@ function App() {
                   />
                   <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
                     Falls aktiv, wird ausgehender IRC- und DCC-Verkehr an diese IP gebunden. Wenn leer, wird deine LAN-IP automatisch ermittelt.
+                  </span>
+                </div>
+
+                <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                  <label style={{ fontSize: '0.8rem' }}>Such-Timeout für IRC/TopDL (Sekunden)</label>
+                  <input
+                    type="number"
+                    className="input-text"
+                    style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                    value={tempIrcSearchTimeout}
+                    onChange={(e) => setTempIrcSearchTimeout(Math.max(5, parseInt(e.target.value, 10) || 5))}
+                    min="5"
+                    placeholder="24"
+                  />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Gibt an, wie viele Sekunden absolut auf Suchergebnisse (z. B. TopDL) gewartet werden soll. Standard: 24 Sekunden.
                   </span>
                 </div>
               </div>

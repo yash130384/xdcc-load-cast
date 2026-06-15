@@ -118,7 +118,8 @@ let appConfig = {
   xxxHideEnabled: false,
   xxxPin: '0000',
   tailscaleBypassIrc: true,
-  tailscaleLocalAddress: ''
+  tailscaleLocalAddress: '',
+  ircSearchTimeout: 24
 };
 
 // Chromecast discovery setup
@@ -509,9 +510,10 @@ function searchMoviegodsIRC(queryStr) {
       cmd = `.s ${cmd}`;
     }
 
+    const maxTimeout = (appConfig.ircSearchTimeout || 24) * 1000;
     let timeoutTimer = setTimeout(() => {
       cleanup('Timeout bei der IRC-Suche');
-    }, 12000); // 12 seconds absolute max timeout
+    }, maxTimeout);
 
     let inactivityTimer = null;
     let cmdSent = false;
@@ -983,7 +985,7 @@ app.post('/api/settings', (req, res) => {
     downloadDir, useSSLByDefault, keepDays, checkIntervalHours, 
     xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled, xtreamSyncIntervalHours,
     xxxHideEnabled, pin, newPin,
-    tailscaleBypassIrc, tailscaleLocalAddress
+    tailscaleBypassIrc, tailscaleLocalAddress, ircSearchTimeout
   } = req.body;
 
   // Verify PIN if we are disabling the lock (changing xxxHideEnabled from true to false)
@@ -1040,6 +1042,9 @@ app.post('/api/settings', (req, res) => {
   }
   if (tailscaleLocalAddress !== undefined) {
     appConfig.tailscaleLocalAddress = String(tailscaleLocalAddress).trim();
+  }
+  if (ircSearchTimeout !== undefined) {
+    appConfig.ircSearchTimeout = Math.max(5, parseInt(ircSearchTimeout, 10) || 24);
   }
 
   saveConfig();
