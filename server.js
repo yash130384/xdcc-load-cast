@@ -116,7 +116,9 @@ let appConfig = {
   xtreamEnabled: false,
   xtreamSyncIntervalHours: 1,
   xxxHideEnabled: false,
-  xxxPin: '0000'
+  xxxPin: '0000',
+  tailscaleBypassIrc: true,
+  tailscaleLocalAddress: ''
 };
 
 // Chromecast discovery setup
@@ -980,7 +982,8 @@ app.post('/api/settings', (req, res) => {
   const { 
     downloadDir, useSSLByDefault, keepDays, checkIntervalHours, 
     xtreamHost, xtreamUsername, xtreamPassword, xtreamEnabled, xtreamSyncIntervalHours,
-    xxxHideEnabled, pin, newPin
+    xxxHideEnabled, pin, newPin,
+    tailscaleBypassIrc, tailscaleLocalAddress
   } = req.body;
 
   // Verify PIN if we are disabling the lock (changing xxxHideEnabled from true to false)
@@ -1030,6 +1033,13 @@ app.post('/api/settings', (req, res) => {
   if (xtreamEnabled !== undefined) appConfig.xtreamEnabled = !!xtreamEnabled;
   if (typeof xtreamSyncIntervalHours === 'number' && xtreamSyncIntervalHours > 0) {
     appConfig.xtreamSyncIntervalHours = xtreamSyncIntervalHours;
+  }
+
+  if (tailscaleBypassIrc !== undefined) {
+    appConfig.tailscaleBypassIrc = !!tailscaleBypassIrc;
+  }
+  if (tailscaleLocalAddress !== undefined) {
+    appConfig.tailscaleLocalAddress = String(tailscaleLocalAddress).trim();
   }
 
   saveConfig();
@@ -1555,6 +1565,14 @@ app.post('/api/download', (req, res) => {
   const resolvedUseSSL = typeof useSSL === 'boolean' ? useSSL : appConfig.useSSLByDefault;
   const resolvedPort = port || (resolvedUseSSL ? appConfig.ircPortDefaultSSL : appConfig.ircPortDefaultNoSSL);
 
+  let resolvedLocalAddress = undefined;
+  if (appConfig.tailscaleBypassIrc) {
+    resolvedLocalAddress = appConfig.tailscaleLocalAddress || getLocalIp();
+    if (resolvedLocalAddress === '127.0.0.1') {
+      resolvedLocalAddress = undefined;
+    }
+  }
+
   const downloader = new IrcDccDownloader({
     id,
     server,
@@ -1566,7 +1584,8 @@ app.post('/api/download', (req, res) => {
     filename,
     expectedSize,
     downloadDir: appConfig.downloadDir,
-    useSsend: typeof useSsend === 'boolean' ? useSsend : false
+    useSsend: typeof useSsend === 'boolean' ? useSsend : false,
+    localAddress: resolvedLocalAddress
   });
 
   downloader.on('progress', (data) => {
@@ -2657,6 +2676,14 @@ async function checkSingleShow(sub, mediaFiles) {
       const resolvedUseSSL = appConfig.useSSLByDefault;
       const resolvedPort = resolvedUseSSL ? appConfig.ircPortDefaultSSL : appConfig.ircPortDefaultNoSSL;
       
+      let resolvedLocalAddress = undefined;
+      if (appConfig.tailscaleBypassIrc) {
+        resolvedLocalAddress = appConfig.tailscaleLocalAddress || getLocalIp();
+        if (resolvedLocalAddress === '127.0.0.1') {
+          resolvedLocalAddress = undefined;
+        }
+      }
+
       const downloader = new IrcDccDownloader({
         id: downloadId,
         server: match.server,
@@ -2668,7 +2695,8 @@ async function checkSingleShow(sub, mediaFiles) {
         filename: match.filename,
         expectedSize: match.sizeBytes,
         downloadDir: appConfig.downloadDir,
-        isAuto: true
+        isAuto: true,
+        localAddress: resolvedLocalAddress
       });
       
       downloader.on('progress', (data) => {

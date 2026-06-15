@@ -271,6 +271,8 @@ function App() {
   const [tempDownloadDir, setTempDownloadDir] = useState('');
   const [tempUseSSL, setTempUseSSL] = useState(true);
   const [tempKeepDays, setTempKeepDays] = useState(0);
+  const [tempTailscaleBypassIrc, setTempTailscaleBypassIrc] = useState(true);
+  const [tempTailscaleLocalAddress, setTempTailscaleLocalAddress] = useState('');
   const [showSettings, setShowSettings] = useState(false);
   const [wsConnected, setWsConnected] = useState(false);
 
@@ -353,6 +355,8 @@ function App() {
         setTempXtreamEnabled(!!data.xtreamEnabled);
         setTempXtreamSyncIntervalHours(data.xtreamSyncIntervalHours || 1);
         setTempXxxHideEnabled(!!data.xxxHideEnabled);
+        setTempTailscaleBypassIrc(data.tailscaleBypassIrc !== false);
+        setTempTailscaleLocalAddress(data.tailscaleLocalAddress || '');
       })
       .catch(err => console.error('Error fetching settings:', err));
 
@@ -1988,7 +1992,9 @@ function App() {
         xtreamSyncIntervalHours: parseInt(tempXtreamSyncIntervalHours, 10) || 1,
         xxxHideEnabled: tempXxxHideEnabled,
         pin: verifyPin || currentPinInput,
-        newPin: newPinInput
+        newPin: newPinInput,
+        tailscaleBypassIrc: tempTailscaleBypassIrc,
+        tailscaleLocalAddress: tempTailscaleLocalAddress
       })
     })
       .then(async (res) => {
@@ -3140,6 +3146,8 @@ function App() {
               setTempXtreamPassword(settings.xtreamPassword || '');
               setTempXtreamEnabled(!!settings.xtreamEnabled);
               setTempXtreamSyncIntervalHours(settings.xtreamSyncIntervalHours || 1);
+              setTempTailscaleBypassIrc(settings.tailscaleBypassIrc !== false);
+              setTempTailscaleLocalAddress(settings.tailscaleLocalAddress || '');
               setShowSettings(true);
             }}>
               <SettingsIcon />
@@ -4235,6 +4243,40 @@ function App() {
                       />
                     </div>
                   </div>
+                </div>
+              </div>
+
+              <div style={{ marginTop: '1.5rem', borderTop: '1px solid var(--border-color)', paddingTop: '1rem' }}>
+                <label style={{ display: 'block', marginBottom: '0.5rem', fontWeight: 'bold' }}>Netzwerk & Tailscale</label>
+                
+                <div className="toggle-group" style={{ padding: '0.25rem 0' }}>
+                  <div className="toggle-group-label">
+                    <span>IRC über lokales Interface zwingen</span>
+                    <span>Umgeht VPN/Tailscale für IRC/DCC-Verbindungen (empfohlen)</span>
+                  </div>
+                  <label className="switch">
+                    <input
+                      type="checkbox"
+                      checked={tempTailscaleBypassIrc}
+                      onChange={(e) => setTempTailscaleBypassIrc(e.target.checked)}
+                    />
+                    <span className="slider"></span>
+                  </label>
+                </div>
+
+                <div className="form-group" style={{ marginTop: '0.75rem' }}>
+                  <label style={{ fontSize: '0.8rem' }}>Lokale Bindungs-IP (Optional)</label>
+                  <input
+                    type="text"
+                    className="input-text"
+                    style={{ padding: '0.4rem 0.75rem', fontSize: '0.85rem' }}
+                    value={tempTailscaleLocalAddress}
+                    onChange={(e) => setTempTailscaleLocalAddress(e.target.value)}
+                    placeholder="z. B. 192.168.178.50 (leer lassen für Auto-Erkennung)"
+                  />
+                  <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
+                    Falls aktiv, wird ausgehender IRC- und DCC-Verkehr an diese IP gebunden. Wenn leer, wird deine LAN-IP automatisch ermittelt.
+                  </span>
                 </div>
               </div>
 

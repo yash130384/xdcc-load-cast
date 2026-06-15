@@ -53,6 +53,7 @@ export class IrcDccDownloader extends EventEmitter {
     this.useSsend = options.useSsend || false;
     this.isSecureDcc = false;
     this.isReconnecting = false;
+    this.localAddress = options.localAddress;
   }
 
   log(msg) {
@@ -126,6 +127,9 @@ export class IrcDccDownloader extends EventEmitter {
       port: this.port,
       rejectUnauthorized: false
     };
+    if (this.localAddress) {
+      connectionOptions.localAddress = this.localAddress;
+    }
 
     try {
       if (this.useSSL) {
@@ -505,17 +509,19 @@ export class IrcDccDownloader extends EventEmitter {
 
     const connectionOptions = {
       host: ip,
-      port: port,
-      rejectUnauthorized: false
+      port: port
     };
+    if (this.localAddress) {
+      connectionOptions.localAddress = this.localAddress;
+    }
 
     if (this.isSecureDcc) {
-      this.dccSocket = tls.connect(connectionOptions, () => {
+      this.dccSocket = tls.connect({ ...connectionOptions, rejectUnauthorized: false }, () => {
         this.log(`Secure DCC Connected (SSL/TLS). Starting file write...`);
         this.startSpeedCalculator();
       });
     } else {
-      this.dccSocket = net.createConnection({ host: ip, port: port }, () => {
+      this.dccSocket = net.createConnection(connectionOptions, () => {
         this.log(`DCC Connected. Starting file write...`);
         this.startSpeedCalculator();
       });
