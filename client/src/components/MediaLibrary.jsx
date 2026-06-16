@@ -5,12 +5,16 @@ import { SearchIcon, CloseIcon, HeartIcon, CastIcon, PlayIcon, PauseIcon, Downlo
 import { getPosterSrc, formatDuration, formatBytes } from './utils.js';
 
 const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loadingLibrary, totalPages, totalItems, currentPage,
-  categoryCounts, serverSubcategories, activeSeries, activeSeriesId, librarySearchQuery, debouncedSearchQuery,
+  counts, serverSubcategories, activeSeries, activeSeriesId, librarySearchQuery, debouncedSearchQuery,
   favoritesFilter, activeCasts, pendingCasts, wsConnected, xtreamEpisodes, loadingXtreamEpisodes,
-  settings, filteredLibrary, groupedLibrary, availableSubcategories,
   onSelectCategory, onSelectSubcategory, onSearchChange, onPageChange, onToggleFavorite,
   onDelete, onDeleteFile, onPlay, onCast, onCastControl, onStopCast, onScroll, onSeriesClick, onCheckNow,
-  onToggleAutoDownload, onRefresh, onClearFilters, onXtreamDownload, autoDownloads, checkingShowId, renderFavoritesOverview }) => {
+  onToggleAutoDownload, onRefresh, onClearFilters, onXtreamDownload, autoDownloads, checkingShowId, renderFavoritesOverview,
+  settings }) => {
+
+  const filteredLibrary = mediaLibrary?.items || mediaLibrary || [];
+  const groupedLibrary = filteredLibrary;
+  const availableSubcategories = mediaLibrary?.availableSubcategories || ['all'];
 
   const getObsoleteFiles = () => {
     if (!settings?.keepDays) return [];
@@ -423,7 +427,7 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                 className={`category-tab-btn ${selectedCategory === 'all' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('all')}
               >
-                📁 Alle ({categoryCounts.all || 0})
+                📁 Alle ({counts.all || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Favoriten' ? 'active' : ''}`}
@@ -433,56 +437,56 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                   boxShadow: selectedCategory === 'Favoriten' ? '0 0 8px rgba(255, 51, 102, 0.2)' : 'none'
                 }}
               >
-                ❤️ Favoriten ({categoryCounts.Favoriten || 0})
+                ❤️ Favoriten ({counts.Favoriten || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Neu' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Neu')}
               >
-                🆕 Neu ({categoryCounts.Neu || 0})
+                🆕 Neu ({counts.Neu || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Lokal')}
               >
-                💾 Lokal ({categoryCounts.Lokal || 0})
+                💾 Lokal ({counts.Lokal || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Filme')}
               >
-                🎬 Filme ({categoryCounts.Filme || 0})
+                🎬 Filme ({counts.Filme || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Serien')}
               >
-                📺 Serien ({categoryCounts.Serien || 0})
+                📺 Serien ({counts.Serien || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Videos')}
               >
-                📹 Videos ({categoryCounts.Videos || 0})
+                📹 Videos ({counts.Videos || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Musik' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Musik')}
               >
-                🎵 Musik ({categoryCounts.Musik || 0})
+                🎵 Musik ({counts.Musik || 0})
               </button>
               <button
                 className={`category-tab-btn ${selectedCategory === 'Hörbücher' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Hörbücher')}
               >
-                🎧 Hörbücher ({categoryCounts.Hörbücher || 0})
+                🎧 Hörbücher ({counts.Hörbücher || 0})
               </button>
               {settings?.xtreamEnabled && (
                 <button
                   className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
                   onClick={() => onSelectCategory('Live TV')}
                 >
-                  📡 Live TV ({categoryCounts['Live TV'] || 0})
+                  📡 Live TV ({counts['Live TV'] || 0})
                 </button>
               )}
             </div>

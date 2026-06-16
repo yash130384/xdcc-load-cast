@@ -2493,6 +2493,7 @@ function App() {
               onDownload={triggerDownload}
               fetchTopDl={fetchTopDl}
               highlightMatch={highlightMatch}
+              onClearHistory={() => setSearchHistory([])}
               renderStatusText={renderStatusText}
               getDownloadState={getDownloadState}
               getStatusClass={getStatusClass}
@@ -2506,6 +2507,7 @@ function App() {
                 downloadLogs={downloadLogs}
                 expandedLogs={expandedLogs}
                 activeCasts={activeCasts}
+                pendingCasts={pendingCasts}
                 autoDownloads={autoDownloads}
                 checkingShowId={checkingShowId}
                 onPause={handlePause}
@@ -2529,7 +2531,7 @@ function App() {
                 totalPages={totalPages}
                 totalItems={totalItems}
                 currentPage={currentPage}
-                categoryCounts={categoryCounts}
+                counts={categoryCounts}
                 serverSubcategories={serverSubcategories}
                 activeSeriesId={activeSeriesId}
                 activeSeries={activeSeries}
@@ -2537,28 +2539,32 @@ function App() {
                 debouncedSearchQuery={debouncedSearchQuery}
                 favoritesFilter={favoritesFilter}
                 activeCasts={activeCasts}
+                pendingCasts={pendingCasts}
                 wsConnected={wsConnected}
                 xtreamEpisodes={xtreamEpisodes}
                 loadingXtreamEpisodes={loadingXtreamEpisodes}
+                settings={settings}
                 onSelectCategory={handleSelectCategory}
                 onSelectSubcategory={handleSelectSubcategory}
                 onSearchChange={setLibrarySearchQuery}
                 onPageChange={setCurrentPage}
                 onToggleFavorite={toggleFavorite}
                 onDelete={handleDeleteMediaFile}
+                onDeleteFile={handleDeleteMediaFile}
                 onPlay={playLocalLibrary}
                 onCast={startCastLibrary}
+                onCastControl={handleCastControl}
+                onStopCast={stopCast}
                 onScroll={handleScroll}
                 onSeriesClick={setActiveSeriesId}
-                onBack={() => setActiveSeriesId(null)}
-                getPosterSrc={getPosterSrc}
-                formatDuration={formatDuration}
+                onRefresh={(force) => fetchMediaLibrary(force)}
+                onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
+                onXtreamDownload={(item, series) => { /* download xtream item */ }}
                 renderFavoritesOverview={renderFavoritesOverview}
                 autoDownloads={autoDownloads}
                 checkingShowId={checkingShowId}
                 onCheckNow={handleCheckNow}
                 onToggleAutoDownload={handleToggleAutoDownload}
-                onScheduleEpgRecording={handleScheduleEpgRecording}
               />
             ) : (
               <FileExplorer
