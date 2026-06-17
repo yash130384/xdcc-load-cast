@@ -98,6 +98,16 @@ wss.on('connection', (ws) => {
 
 // Start server
 const PORT = process.env.PORT || 3000;
+
+server.on('error', (err) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[Startup-Error] Port ${PORT} ist bereits belegt. Bitte beende den anderen Prozess oder starte PulseCast mit einem anderen Port (z.B. PORT=3001 npm start).`);
+  } else {
+    console.error('[Startup-Error] Fehler beim Starten des Servers:', err.message);
+  }
+  process.exit(1);
+});
+
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server started at http://localhost:${PORT}`);
   setTimeout(runStartupTests, 3000);
