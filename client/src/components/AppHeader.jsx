@@ -1,7 +1,7 @@
 import React from 'react';
 import { PulseCastLogo, DownloadIcon, MediaIcon, FolderIcon, SettingsIcon } from './icons.jsx';
 
-const AppHeader = ({ currentView, settings, onViewChange, onOpenSettings, onOpenVcr }) => {
+const AppHeader = ({ currentView, settings, onDownloadsClick, onLibraryClick, onExplorerClick, onOpenSettings, onOpenVcr }) => {
   return (
     <header className="app-header">
       <div className="brand">
@@ -25,21 +25,21 @@ const AppHeader = ({ currentView, settings, onViewChange, onOpenSettings, onOpen
       <div className="header-nav">
         <button
           className={`nav-btn ${currentView === 'downloads' ? 'active' : ''}`}
-          onClick={() => onViewChange('downloads')}
+          onClick={onDownloadsClick}
         >
           <DownloadIcon />
           Downloads
         </button>
         <button
           className={`nav-btn ${currentView === 'library' ? 'active' : ''}`}
-          onClick={() => onViewChange('library')}
+          onClick={onLibraryClick}
         >
           <MediaIcon />
           Mediathek
         </button>
         <button
           className={`nav-btn ${currentView === 'explorer' ? 'active' : ''}`}
-          onClick={() => onViewChange('explorer')}
+          onClick={onExplorerClick}
         >
           <FolderIcon />
           Dateiexplorer
