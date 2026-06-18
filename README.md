@@ -71,3 +71,4 @@ Im Webinterface kannst du über das Zahnrad-Symbol folgendes einstellen:
 
 ## 🤫 Rechtlicher Disclaimer
 Dieses Tool ist nur ein Client. Was du damit suchst und lädst, liegt in deiner eigenen Verantwortung. Sei kein Flegel. 😉
+# Hermes und AI bearbeitet
