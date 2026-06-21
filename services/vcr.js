@@ -1,7 +1,7 @@
 import path from 'path';
 import os from 'os';
 import fs from 'fs';
-import axios from 'axios';
+import { Readable } from 'stream';
 import { appState, broadcastToClients } from '../state.js';
 import { updateLocalMappedList } from './media-library.js';
 
@@ -97,15 +97,21 @@ export async function startVcrRecording(rec) {
   appState.activeVcrJobs.set(rec.id, job);
 
   try {
-    const response = await axios({
-      method: 'get',
-      url: rec.streamUrl,
-      responseType: 'stream',
-      signal: abortController.signal,
-      timeout: 30000
+    const timeoutId = setTimeout(() => {
+      abortController.abort();
+    }, 30000);
+
+    const response = await fetch(rec.streamUrl, {
+      signal: abortController.signal
     });
 
-    const responseStream = response.data;
+    clearTimeout(timeoutId);
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const responseStream = Readable.fromWeb(response.body);
 
     responseStream.on('data', (chunk) => {
       job.bytesReceived += chunk.length;
@@ -125,7 +131,7 @@ export async function startVcrRecording(rec) {
     });
 
   } catch (err) {
-    if (axios.isCancel(err) || err.name === 'CanceledError') {
+    if (err.name === 'AbortError') {
       console.log(`[VCR] Recording canceled for ${rec.title}`);
     } else {
       console.error(`[VCR] Connection failed for ${rec.title}:`, err.message);

@@ -1,6 +1,5 @@
 import fs from 'fs';
 import path from 'path';
-import axios from 'axios';
 import { IrcDccDownloader } from '../irc-dcc-client.js';
 import { appState, broadcastToClients } from '../state.js';
 import { searchMoviegodsIRC, searchXdccEu } from './search-service.js';
@@ -141,24 +140,31 @@ async function getTvmazeEpisodeCount(imdbId, seasonNumber) {
 
   try {
     console.log(`[TVmaze] Fetching episodes for IMDb ID ${imdbId}, Season ${seasonNumber}...`);
-    const lookupUrl = `https://api.tvmaze.com/lookup/shows?imdb=${imdbId}`;
-    const res = await axios.get(lookupUrl, {
+    const res = await fetch(lookupUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
       },
-      timeout: 5000
+      signal: AbortSignal.timeout(5000)
     });
 
-    if (res.status === 200 && res.data && res.data.id) {
-      const showId = res.data.id;
-      const episodesUrl = `https://api.tvmaze.com/shows/${showId}/episodes`;
-      const epRes = await axios.get(episodesUrl, { timeout: 5000 });
-      if (epRes.status === 200 && Array.isArray(epRes.data)) {
-        const seasonEpisodes = epRes.data.filter(ep => ep.season === seasonNumber);
-        const count = seasonEpisodes.length;
-        console.log(`[TVmaze] Found ${count} episodes for IMDb ID ${imdbId}, Season ${seasonNumber}`);
-        tvmazeCache[cacheKey] = count;
-        return count;
+    if (res.status === 200) {
+      const data = await res.json();
+      if (data && data.id) {
+        const showId = data.id;
+        const episodesUrl = `https://api.tvmaze.com/shows/${showId}/episodes`;
+        const epRes = await fetch(episodesUrl, {
+          signal: AbortSignal.timeout(5000)
+        });
+        if (epRes.status === 200) {
+          const epData = await epRes.json();
+          if (Array.isArray(epData)) {
+            const seasonEpisodes = epData.filter(ep => ep.season === seasonNumber);
+            const count = seasonEpisodes.length;
+            console.log(`[TVmaze] Found ${count} episodes for IMDb ID ${imdbId}, Season ${seasonNumber}`);
+            tvmazeCache[cacheKey] = count;
+            return count;
+          }
+        }
       }
     }
   } catch (err) {

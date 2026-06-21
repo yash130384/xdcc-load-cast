@@ -4,28 +4,7 @@ import fs from 'fs';
 import { appState, broadcastToClients } from '../state.js';
 import { parseTimeStringToSeconds } from './file-utils.js';
 import { getLocalIp } from './network.js';
-
-function checkAudioTranscodeNeeded(filePath) {
-  return new Promise((resolve) => {
-    execFile('ffprobe', [
-      '-v', 'error',
-      '-select_streams', 'a:0',
-      '-show_entries', 'stream=codec_name',
-      '-of', 'default=noprint_wrappers=1:nokey=1',
-      filePath
-    ], (err, stdout) => {
-      if (err) {
-        console.error('[probe] ffprobe failed:', err.message);
-        resolve(false);
-        return;
-      }
-      const codec = stdout.trim().toLowerCase();
-      console.log(`[probe] Detected audio codec for ${path.basename(filePath)}: ${codec}`);
-      const needsTranscode = ['dts', 'ac3', 'eac3', 'truehd', 'dca'].includes(codec);
-      resolve(needsTranscode);
-    });
-  });
-}
+import { checkAudioTranscodeNeeded } from './media-library.js';
 
 export function attachDeviceStatusListeners(device, deviceName) {
   device.removeAllListeners('status');

@@ -4,7 +4,7 @@ import { searchMoviegodsIRC, searchXdccEu, runStartupTests } from '../services/s
 import { fetchXtreamData, updateMappedXtreamData, recreateXtreamSyncInterval, loadXtreamCache } from '../services/xtream-client.js';
 import { getDownloadDetails, broadcastStatus, broadcastDeletion, handleDownloadPostProcessing } from '../services/download-manager.js';
 import { decodeBase64Safe, loadRecordings, saveRecordings, startVcrRecording, stopVcrRecordingJob, checkVcrRecordings, broadcastVcrStatus } from '../services/vcr.js';
-import { getLocalFiles, updateLocalMappedList, getSafeFilePath, scanDownloadDir, getOrFetchMetadata, loadFavorites, saveFavorites, isItemFavorite, deleteMediaFileAndCleanDirs, loadMetadataCache, saveMetadataCache, checkAudioTranscodeNeeded, loadPlayProgress, savePlayProgress, organizeAllFiles, fetchImdbMetadata, parseFilename, findBestMatch, isImageFile, getImageCachePath, MEDIA_EXTENSIONS, MUSIC_EXTENSIONS } from '../services/media-library.js';
+import { getLocalFiles, updateLocalMappedList, getSafeFilePath, scanDownloadDir, getOrFetchMetadata, saveFavorites, isItemFavorite, deleteMediaFileAndCleanDirs, loadMetadataCache, checkAudioTranscodeNeeded, savePlayProgress, organizeAllFiles, fetchImdbMetadata, parseFilename, findBestMatch, isImageFile, getImageCachePath, MEDIA_EXTENSIONS, MUSIC_EXTENSIONS } from '../services/media-library.js';
 import { loadAutoDownloads, saveAutoDownloads, broadcastAutoDownloads, checkAllAutoDownloads, checkDownloadsTimeout, recreateCheckInterval, checkSingleShow } from '../services/auto-download.js';
 import { updateAllDiscovery } from '../services/discovery.js';
 import { saveConfig } from '../services/config.js';
@@ -16,46 +16,13 @@ import { attachDeviceStatusListeners, attachDlnaDeviceStatusListeners, attachAir
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
-import axios from 'axios';
 import crypto from 'crypto';
 import { execFile, spawn } from 'child_process';
 
 const LOG_FILE = path.join(os.homedir(), '.xdcc_downloader_logs.txt');
-const PLAY_PROGRESS_FILE = path.join(os.homedir(), '.xdcc_play_progress.json');
-const FAVORITES_FILE = path.join(os.homedir(), '.xdcc_favorites.json');
 const PORT = process.env.PORT || 3000;
 
-function getMetadataCachePath() {
-  return path.join(appState.appConfig.downloadDir, '.metadata_cache.json');
-}
 
-function saveLocalPlayProgress() {
-  try {
-    fs.writeFileSync(PLAY_PROGRESS_FILE, JSON.stringify(appState.playProgress, null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to save play progress:', err.message);
-  }
-}
-
-function saveLocalFavorites() {
-  try {
-    fs.writeFileSync(FAVORITES_FILE, JSON.stringify(Array.from(appState.favorites), null, 2), 'utf8');
-  } catch (err) {
-    console.error('Failed to save favorites:', err.message);
-  }
-}
-
-function saveLocalMetadataCache() {
-  const cachePath = getMetadataCachePath();
-  try {
-    if (!fs.existsSync(appState.appConfig.downloadDir)) {
-      fs.mkdirSync(appState.appConfig.downloadDir, { recursive: true });
-    }
-    fs.writeFileSync(cachePath, JSON.stringify(appState.metadataCache, null, 2), 'utf8');
-  } catch (e) {
-    console.error('Error saving metadata cache:', e);
-  }
-}
 
 export function registerAllRoutes(app) {
   if (!appState.playProgress) appState.playProgress = {};
@@ -70,18 +37,22 @@ export function registerAllRoutes(app) {
     }
     const { streamId } = req.params;
     const host = appState.appConfig.xtreamHost.replace(/\/$/, '');
+    const urlParams = new URLSearchParams({
+      username: appState.appConfig.xtreamUsername,
+      password: appState.appConfig.xtreamPassword,
+      action: 'get_short_epg',
+      stream_id: streamId
+    });
     try {
-      const response = await axios.get(`${host}/player_api.php`, {
-        params: {
-          username: appState.appConfig.xtreamUsername,
-          password: appState.appConfig.xtreamPassword,
-          action: 'get_short_epg',
-          stream_id: streamId
-        },
-        timeout: 10000
+      const response = await fetch(`${host}/player_api.php?${urlParams}`, {
+        signal: AbortSignal.timeout(10000)
       });
-      if (response.data && response.data.epg_listings) {
-        const listings = response.data.epg_listings.map(item => {
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+      const data = await response.json();
+      if (data && data.epg_listings) {
+        const listings = data.epg_listings.map(item => {
           const title = decodeBase64Safe(item.title);
           const description = decodeBase64Safe(item.description);
           return { ...item, title, description };
@@ -995,7 +966,7 @@ export function registerAllRoutes(app) {
       position: parseFloat(position) || 0,
       updatedAt: Date.now()
     };
-    saveLocalPlayProgress();
+    savePlayProgress();
     return res.json({ success: true, progress: appState.playProgress[filename] });
   });
 
@@ -1009,7 +980,7 @@ export function registerAllRoutes(app) {
     } else {
       appState.favorites.delete(String(id));
     }
-    saveLocalFavorites();
+    saveFavorites();
     return res.json({ success: true, isFavorite: appState.favorites.has(String(id)) });
   });
 

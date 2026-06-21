@@ -1,19 +1,27 @@
-import axios from 'axios';
 import * as cheerio from 'cheerio';
 import tls from 'tls';
 import { appState } from '../state.js';
 import { parseSizeToBytes } from './file-utils.js';
 
+const IRC_SERVER = 'irc.abjects.net';
+const IRC_PORT = 6697;
+const IRC_CHANNEL1 = '#moviegods';
+const IRC_CHANNEL2 = '#mg-chat';
+
+function generateIrcNick() {
+  const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
+  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
+  const suffix = Math.floor(100 + Math.random() * 900);
+  return `${prefix}_${suffix}`;
+}
+
 export function searchMoviegodsIRC(queryStr) {
   return new Promise((resolve, reject) => {
-    const server = 'irc.abjects.net';
-    const port = 6697;
-    const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
-    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-    const suffix = Math.floor(100 + Math.random() * 900);
-    const nick = `${prefix}_${suffix}`;
-    const channel1 = '#moviegods';
-    const channel2 = '#mg-chat';
+    const server = IRC_SERVER;
+    const port = IRC_PORT;
+    const nick = generateIrcNick();
+    const channel1 = IRC_CHANNEL1;
+    const channel2 = IRC_CHANNEL2;
     
     let socket;
     let buffer = '';
@@ -221,11 +229,11 @@ export function searchMoviegodsIRC(queryStr) {
 export async function testXdccEuReachability() {
   try {
     const start = Date.now();
-    await axios.get('https://www.xdcc.eu/search.php?searchkey=test', {
+    await fetch('https://www.xdcc.eu/search.php?searchkey=test', {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      timeout: 8000
+      signal: AbortSignal.timeout(8000)
     });
     const duration = Date.now() - start;
     return { success: true, duration };
@@ -236,14 +244,11 @@ export async function testXdccEuReachability() {
 
 export function testMoviegodsIRCReachability() {
   return new Promise((resolve) => {
-    const server = 'irc.abjects.net';
-    const port = 6697;
-    const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
-    const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-    const suffix = Math.floor(100 + Math.random() * 900);
-    const nick = `${prefix}_${suffix}`;
-    const channel1 = '#moviegods';
-    const channel2 = '#mg-chat';
+    const server = IRC_SERVER;
+    const port = IRC_PORT;
+    const nick = generateIrcNick();
+    const channel1 = IRC_CHANNEL1;
+    const channel2 = IRC_CHANNEL2;
     
     let socket;
     let buffer = '';
@@ -359,15 +364,20 @@ export async function runStartupTests() {
 export async function searchXdccEu(queryStr) {
   try {
     console.log(`Searching xdcc.eu for: ${queryStr}`);
-    const response = await axios.get(`https://www.xdcc.eu/search.php`, {
-      params: { searchkey: queryStr },
+    const urlParams = new URLSearchParams({ searchkey: queryStr });
+    const response = await fetch(`https://www.xdcc.eu/search.php?${urlParams}`, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
       },
-      timeout: 10000
+      signal: AbortSignal.timeout(10000)
     });
 
-    const $ = cheerio.load(response.data);
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`);
+    }
+
+    const html = await response.text();
+    const $ = cheerio.load(html);
     const results = [];
 
     $('tr').each((idx, el) => {

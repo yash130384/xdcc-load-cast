@@ -1,5 +1,4 @@
 import { appState, broadcastToClients } from '../state.js';
-import axios from 'axios';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -70,6 +69,21 @@ export function recreateXtreamSyncInterval() {
   }, hours * 60 * 60 * 1000);
 }
 
+async function fetchFromXtream(host, action, timeoutMs = 10000) {
+  const urlParams = new URLSearchParams({
+    username: appState.appConfig.xtreamUsername,
+    password: appState.appConfig.xtreamPassword,
+    action: action
+  });
+  const res = await fetch(`${host}/player_api.php?${urlParams}`, {
+    signal: AbortSignal.timeout(timeoutMs)
+  });
+  if (!res.ok) {
+    throw new Error(`HTTP error! status: ${res.status}`);
+  }
+  return res.json();
+}
+
 export async function fetchXtreamData(force = false) {
   if (!appState.appConfig.xtreamEnabled || !appState.appConfig.xtreamHost || !appState.appConfig.xtreamUsername || !appState.appConfig.xtreamPassword) {
     return;
@@ -85,16 +99,9 @@ export async function fetchXtreamData(force = false) {
 
     console.log(`[Xtream] Fetching movies categories from ${host}...`);
     try {
-      const moviesCatRes = await axios.get(`${host}/player_api.php`, {
-        params: {
-          username: appState.appConfig.xtreamUsername,
-          password: appState.appConfig.xtreamPassword,
-          action: 'get_vod_categories'
-        },
-        timeout: 10000
-      });
-      if (Array.isArray(moviesCatRes.data)) {
-        appState.xtreamVodCategories = moviesCatRes.data;
+      const data = await fetchFromXtream(host, 'get_vod_categories', 10000);
+      if (Array.isArray(data)) {
+        appState.xtreamVodCategories = data;
       }
     } catch (err) {
       console.error('[Xtream] Error fetching VOD categories:', err.message);
@@ -102,16 +109,9 @@ export async function fetchXtreamData(force = false) {
 
     console.log(`[Xtream] Fetching series categories from ${host}...`);
     try {
-      const seriesCatRes = await axios.get(`${host}/player_api.php`, {
-        params: {
-          username: appState.appConfig.xtreamUsername,
-          password: appState.appConfig.xtreamPassword,
-          action: 'get_series_categories'
-        },
-        timeout: 10000
-      });
-      if (Array.isArray(seriesCatRes.data)) {
-        appState.xtreamSeriesCategories = seriesCatRes.data;
+      const data = await fetchFromXtream(host, 'get_series_categories', 10000);
+      if (Array.isArray(data)) {
+        appState.xtreamSeriesCategories = data;
       }
     } catch (err) {
       console.error('[Xtream] Error fetching series categories:', err.message);
@@ -119,61 +119,30 @@ export async function fetchXtreamData(force = false) {
 
     console.log(`[Xtream] Fetching live categories from ${host}...`);
     try {
-      const liveCatRes = await axios.get(`${host}/player_api.php`, {
-        params: {
-          username: appState.appConfig.xtreamUsername,
-          password: appState.appConfig.xtreamPassword,
-          action: 'get_live_categories'
-        },
-        timeout: 10000
-      });
-      if (Array.isArray(liveCatRes.data)) {
-        appState.xtreamLiveCategories = liveCatRes.data;
+      const data = await fetchFromXtream(host, 'get_live_categories', 10000);
+      if (Array.isArray(data)) {
+        appState.xtreamLiveCategories = data;
       }
     } catch (err) {
       console.error('[Xtream] Error fetching live categories:', err.message);
     }
 
     console.log(`[Xtream] Fetching movies list from ${host}...`);
-    const moviesRes = await axios.get(`${host}/player_api.php`, {
-      params: {
-        username: appState.appConfig.xtreamUsername,
-        password: appState.appConfig.xtreamPassword,
-        action: 'get_vod_streams'
-      },
-      timeout: 15000
-    });
-
-    if (Array.isArray(moviesRes.data)) {
-      appState.xtreamMovies = moviesRes.data;
+    const moviesData = await fetchFromXtream(host, 'get_vod_streams', 15000);
+    if (Array.isArray(moviesData)) {
+      appState.xtreamMovies = moviesData;
     }
 
     console.log(`[Xtream] Fetching series list from ${host}...`);
-    const seriesRes = await axios.get(`${host}/player_api.php`, {
-      params: {
-        username: appState.appConfig.xtreamUsername,
-        password: appState.appConfig.xtreamPassword,
-        action: 'get_series'
-      },
-      timeout: 15000
-    });
-
-    if (Array.isArray(seriesRes.data)) {
-      appState.xtreamSeries = seriesRes.data;
+    const seriesData = await fetchFromXtream(host, 'get_series', 15000);
+    if (Array.isArray(seriesData)) {
+      appState.xtreamSeries = seriesData;
     }
 
     console.log(`[Xtream] Fetching live channels list from ${host}...`);
-    const liveRes = await axios.get(`${host}/player_api.php`, {
-      params: {
-        username: appState.appConfig.xtreamUsername,
-        password: appState.appConfig.xtreamPassword,
-        action: 'get_live_streams'
-      },
-      timeout: 25000
-    });
-
-    if (Array.isArray(liveRes.data)) {
-      appState.xtreamLive = liveRes.data;
+    const liveData = await fetchFromXtream(host, 'get_live_streams', 25000);
+    if (Array.isArray(liveData)) {
+      appState.xtreamLive = liveData;
     }
 
     appState.lastXtreamFetch = Date.now();

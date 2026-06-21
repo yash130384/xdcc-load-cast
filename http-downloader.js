@@ -1,7 +1,7 @@
 import fs from 'fs';
 import path from 'path';
 import EventEmitter from 'events';
-import axios from 'axios';
+import { Readable } from 'stream';
 
 export class HttpDownloader extends EventEmitter {
   constructor(options) {
@@ -104,14 +104,20 @@ export class HttpDownloader extends EventEmitter {
         headers['Range'] = `bytes=${this.localSize}-`;
       }
 
-      const response = await axios({
-        method: 'get',
-        url: this.url,
-        responseType: 'stream',
+      const timeoutId = setTimeout(() => {
+        this.abortController.abort();
+      }, 30000);
+
+      const response = await fetch(this.url, {
         headers,
-        signal: this.abortController.signal,
-        timeout: 30000
+        signal: this.abortController.signal
       });
+
+      clearTimeout(timeoutId);
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
 
       const isRangeResponse = response.status === 206;
       let writeFlags = 'w';
@@ -130,8 +136,9 @@ export class HttpDownloader extends EventEmitter {
       }
 
       // Get expected size
-      if (response.headers['content-length']) {
-        const length = parseInt(response.headers['content-length'], 10);
+      const contentLength = response.headers.get('content-length');
+      if (contentLength) {
+        const length = parseInt(contentLength, 10);
         this.expectedSize = isRangeResponse ? length + this.localSize : length;
       }
 
@@ -142,7 +149,7 @@ export class HttpDownloader extends EventEmitter {
       }
 
       this.fileStream = fs.createWriteStream(this.filePath, { flags: writeFlags });
-      const stream = response.data;
+      const stream = Readable.fromWeb(response.body);
 
       this.updateStatus('dcc_downloading');
       this.startSpeedCalculator();
@@ -167,7 +174,7 @@ export class HttpDownloader extends EventEmitter {
       });
 
     } catch (err) {
-      if (axios.isCancel(err) || err.name === 'CanceledError') {
+      if (err.name === 'AbortError') {
         this.log('Download canceled.');
       } else {
         this.handleError(`HTTP request failed: ${err.message}`);

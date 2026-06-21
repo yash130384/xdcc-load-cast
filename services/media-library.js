@@ -2,7 +2,6 @@ import path from 'path';
 import fs from 'fs';
 import os from 'os';
 import crypto from 'crypto';
-import axios from 'axios';
 import { execFile } from 'child_process';
 import { parseFile } from 'music-metadata';
 import { appState, broadcastToClients } from '../state.js';
@@ -16,11 +15,8 @@ const MUSIC_EXTENSIONS = new Set(['.mp3', '.wav', '.m4a', '.flac', '.ogg', '.m4b
 const LOCAL_CACHE_TTL = 30000;
 const PLAY_PROGRESS_FILE = path.join(os.homedir(), '.xdcc_play_progress.json');
 const FAVORITES_FILE = path.join(os.homedir(), '.xdcc_favorites.json');
-const LASTMODIFIED_CACHE_FILE = path.join(os.homedir(), '.xdcc_lastmodified.json');
 
 let lastLocalScanTime = 0;
-let playProgress = {};
-let favorites = new Set();
 let saveMetadataTimeout = null;
 let isOrganizing = false;
 
@@ -126,18 +122,18 @@ function loadPlayProgress() {
   try {
     if (fs.existsSync(PLAY_PROGRESS_FILE)) {
       const data = fs.readFileSync(PLAY_PROGRESS_FILE, 'utf8');
-      playProgress = JSON.parse(data);
-      console.log(`[Progress] Loaded playback progress for ${Object.keys(playProgress).length} items`);
+      appState.playProgress = JSON.parse(data);
+      console.log(`[Progress] Loaded playback progress for ${Object.keys(appState.playProgress).length} items`);
     }
   } catch (err) {
     console.error('Failed to load play progress:', err.message);
-    playProgress = {};
+    appState.playProgress = {};
   }
 }
 
 function savePlayProgress() {
   try {
-    fs.writeFileSync(PLAY_PROGRESS_FILE, JSON.stringify(playProgress, null, 2), 'utf8');
+    fs.writeFileSync(PLAY_PROGRESS_FILE, JSON.stringify(appState.playProgress, null, 2), 'utf8');
   } catch (err) {
     console.error('Failed to save play progress:', err.message);
   }
@@ -147,18 +143,18 @@ function loadFavorites() {
   try {
     if (fs.existsSync(FAVORITES_FILE)) {
       const data = fs.readFileSync(FAVORITES_FILE, 'utf8');
-      favorites = new Set(JSON.parse(data));
-      console.log(`[Favorites] Loaded ${favorites.size} favorites`);
+      appState.favorites = new Set(JSON.parse(data));
+      console.log(`[Favorites] Loaded ${appState.favorites.size} favorites`);
     }
   } catch (err) {
     console.error('Failed to load favorites:', err.message);
-    favorites = new Set();
+    appState.favorites = new Set();
   }
 }
 
 function saveFavorites() {
   try {
-    fs.writeFileSync(FAVORITES_FILE, JSON.stringify(Array.from(favorites), null, 2), 'utf8');
+    fs.writeFileSync(FAVORITES_FILE, JSON.stringify(Array.from(appState.favorites), null, 2), 'utf8');
   } catch (err) {
     console.error('Failed to save favorites:', err.message);
   }
@@ -168,7 +164,7 @@ function isItemFavorite(item) {
   const favKey = item.isGroup
     ? (item.xtreamSeriesId || item.imdbId || item.title || item.metadata?.imdbId || item.metadata?.title)
     : item.filename;
-  return favorites.has(String(favKey));
+  return appState.favorites instanceof Set ? appState.favorites.has(String(favKey)) : false;
 }
 
 function rebuildCachedRawItems() {
@@ -407,9 +403,9 @@ async function organizeAllFiles() {
         }
       }
 
-      if (playProgress[relPath]) {
-        playProgress[newRelPath] = playProgress[relPath];
-        delete playProgress[relPath];
+      if (appState.playProgress[relPath]) {
+        appState.playProgress[newRelPath] = appState.playProgress[relPath];
+        delete appState.playProgress[relPath];
       }
 
       updateDownloaderFilePath(sourcePath, targetPath);
@@ -525,14 +521,16 @@ async function fetchImdbMetadata(parsedInfo) {
     if (!query) return null;
     const firstChar = query[0];
     const url = `https://v3.sg.media-imdb.com/suggestion/${firstChar}/${encodeURIComponent(query)}.json`;
-    const res = await axios.get(url, {
+    const res = await fetch(url, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/115.0.0.0 Safari/537.36'
       },
-      timeout: 5000
+      signal: AbortSignal.timeout(5000)
     });
 
-    const suggestions = res.data?.d;
+    if (!res.ok) return null;
+    const data = await res.json();
+    const suggestions = data?.d;
     if (!suggestions || suggestions.length === 0) return null;
 
     const best = findBestMatch(suggestions, parsedInfo);
@@ -607,28 +605,31 @@ async function getOrFetchMetadata(filename, ext) {
       try {
         const queryTerm = `${artist} ${album !== 'Unbekanntes Album' ? album : title}`;
         console.log(`[Music Web Fetch] Querying iTunes API for: "${queryTerm}"`);
-        const itunesRes = await axios.get('https://itunes.apple.com/search', {
-          params: {
-            term: queryTerm,
-            entity: ext === '.m4b' ? 'audiobook' : 'song',
-            limit: 1
-          },
-          timeout: 5000
+        const urlParams = new URLSearchParams({
+          term: queryTerm,
+          entity: ext === '.m4b' ? 'audiobook' : 'song',
+          limit: '1'
+        });
+        const itunesRes = await fetch(`https://itunes.apple.com/search?${urlParams}`, {
+          signal: AbortSignal.timeout(5000)
         });
 
-        if (itunesRes.data && itunesRes.data.results && itunesRes.data.results.length > 0) {
-          const result = itunesRes.data.results[0];
-          if (result.artworkUrl100) {
-            posterUrl = result.artworkUrl100.replace('100x100bb', '600x600bb');
-          }
-          if (genre === (ext === '.m4b' ? 'Hörbuch' : 'Musik') && result.primaryGenreName) {
-            genre = result.primaryGenreName;
-          }
-          if (album === 'Unbekanntes Album' && result.collectionName) {
-            album = result.collectionName;
-          }
-          if (!year && result.releaseDate) {
-            year = new Date(result.releaseDate).getFullYear();
+        if (itunesRes.ok) {
+          const itunesData = await itunesRes.json();
+          if (itunesData && itunesData.results && itunesData.results.length > 0) {
+            const result = itunesData.results[0];
+            if (result.artworkUrl100) {
+              posterUrl = result.artworkUrl100.replace('100x100bb', '600x600bb');
+            }
+            if (genre === (ext === '.m4b' ? 'Hörbuch' : 'Musik') && result.primaryGenreName) {
+              genre = result.primaryGenreName;
+            }
+            if (album === 'Unbekanntes Album' && result.collectionName) {
+              album = result.collectionName;
+            }
+            if (!year && result.releaseDate) {
+              year = new Date(result.releaseDate).getFullYear();
+            }
           }
         }
       } catch (err) {
