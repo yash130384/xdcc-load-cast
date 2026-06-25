@@ -18,6 +18,7 @@ import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
 import { execFile, spawn } from 'child_process';
+import { Readable } from 'stream';
 
 const LOG_FILE = path.join(os.homedir(), '.xdcc_downloader_logs.txt');
 const PORT = process.env.PORT || 3000;
@@ -885,16 +886,19 @@ export function registerAllRoutes(app) {
     }
     try {
       const host = appState.appConfig.xtreamHost.replace(/\/$/, '');
-      const resEpisodes = await axios.get(`${host}/player_api.php`, {
-        params: {
-          username: appState.appConfig.xtreamUsername,
-          password: appState.appConfig.xtreamPassword,
-          action: 'get_series_info',
-          series_id: seriesId
-        },
-        timeout: 10000
+      const urlParams = new URLSearchParams({
+        username: appState.appConfig.xtreamUsername,
+        password: appState.appConfig.xtreamPassword,
+        action: 'get_series_info',
+        series_id: seriesId
       });
-      const data = resEpisodes.data;
+      const resEpisodes = await fetch(`${host}/player_api.php?${urlParams}`, {
+        signal: AbortSignal.timeout(10000)
+      });
+      if (!resEpisodes.ok) {
+        throw new Error(`HTTP error! status: ${resEpisodes.status}`);
+      }
+      const data = await resEpisodes.json();
       if (!data || !data.episodes) {
         return res.json([]);
       }
@@ -1518,17 +1522,18 @@ export function registerAllRoutes(app) {
       }
       try {
         console.log(`[Image Cache] Cache miss, downloading image: ${filePath}`);
-        const response = await axios({
-          method: 'get',
-          url: filePath,
-          responseType: 'arraybuffer',
-          timeout: 15000
+        const response = await fetch(filePath, {
+          signal: AbortSignal.timeout(15500)
         });
-        const buffer = Buffer.from(response.data);
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        const arrayBuf = await response.arrayBuffer();
+        const buffer = Buffer.from(arrayBuf);
         fs.promises.writeFile(cachePath, buffer).catch(err => {
           console.error(`[Image Cache] Failed to write cache file: ${cachePath}`, err.message);
         });
-        const contentType = response.headers['content-type'] || 'image/jpeg';
+        const contentType = response.headers.get('content-type') || 'image/jpeg';
         res.setHeader('Content-Type', contentType);
         res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
         res.send(buffer);
@@ -1630,20 +1635,19 @@ export function registerAllRoutes(app) {
       if (req.headers.range) headers['Range'] = req.headers.range;
       if (req.headers['user-agent']) headers['User-Agent'] = req.headers['user-agent'];
       try {
-        const response = await axios({
-          method: 'get',
-          url: filePath,
+        const response = await fetch(filePath, {
           headers: headers,
-          responseType: 'stream',
-          timeout: 30000
+          signal: AbortSignal.timeout(30000)
         });
         res.status(response.status);
         const headersToForward = ['content-type', 'content-length', 'content-range', 'accept-ranges'];
         for (const h of headersToForward) {
-          if (response.headers[h]) res.setHeader(h, response.headers[h]);
+          const val = response.headers.get(h);
+          if (val) res.setHeader(h, val);
         }
-        response.data.pipe(res);
-        req.on('close', () => { response.data.destroy(); });
+        const responseStream = Readable.fromWeb(response.body);
+        responseStream.pipe(res);
+        req.on('close', () => { responseStream.destroy(); });
         return;
       } catch (err) {
         console.error('[Media Proxy] Fehler beim Proxying der URL:', filePath, err.message);
