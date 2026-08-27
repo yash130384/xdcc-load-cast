@@ -34,7 +34,7 @@ export class HttpDownloader extends EventEmitter {
     this.bytesReceived = 0;
     this.speed = 0;
     this.eta = 0;
-    this.status = 'connecting'; // connecting, dcc_downloading, completed, error, cancelled, paused
+    this.status = options.initialStatus || 'connecting'; // connecting, dcc_downloading, completed, error, cancelled, paused, queued
     this.errorMessage = '';
     this.speedHistory = [];
     this.elapsedTime = 0;
@@ -46,6 +46,11 @@ export class HttpDownloader extends EventEmitter {
     this.filePath = path.join(this.downloadDir, this.filename);
     
     this.abortController = null;
+  }
+
+  setQueued() {
+    this.status = 'queued';
+    this.updateStatus('queued');
   }
 
   log(msg) {

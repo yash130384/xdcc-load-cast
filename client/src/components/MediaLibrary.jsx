@@ -1,6 +1,7 @@
-import React from 'react';
+import React, { useState } from 'react';
 import MediaCard from './MediaCard.jsx';
 import MusicItem from './MusicItem.jsx';
+import SeasonDownloadModal from './SeasonDownloadModal.jsx';
 import { SearchIcon, CloseIcon, HeartIcon, CastIcon, PlayIcon, PauseIcon, DownloadIcon, TrashIcon, CalendarIcon } from './icons.jsx';
 import { getPosterSrc, formatDuration, formatBytes } from './utils.js';
 
@@ -9,8 +10,10 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
   favoritesFilter, activeCasts, pendingCasts, wsConnected, xtreamEpisodes, loadingXtreamEpisodes,
   onSelectCategory, onSelectSubcategory, onSearchChange, onPageChange, onToggleFavorite,
   onDelete, onDeleteFile, onPlay, onCast, onCastControl, onStopCast, onScroll, onSeriesClick, onCheckNow,
-  onToggleAutoDownload, onRefresh, onClearFilters, onXtreamDownload, autoDownloads, checkingShowId, renderFavoritesOverview,
+  onToggleAutoDownload, onRefresh, onClearFilters, onXtreamDownload, onXtreamBatchDownload, autoDownloads, checkingShowId, renderFavoritesOverview,
   settings }) => {
+
+  const [seasonModalData, setSeasonModalData] = useState(null);
 
   const filteredLibrary = mediaLibrary?.items || mediaLibrary || [];
   const groupedLibrary = filteredLibrary;
@@ -185,9 +188,44 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
 
             <div className="series-episodes-container" style={{ flex: '2 1 450px' }}>
               {(() => {
+                const parseEpisodeInfo = (item) => {
+                  if (item.season && typeof item.season === 'number') {
+                    return { season: item.season, episode: item.episodeNum || 1 };
+                  }
+                  const sEp = item.metadata?.seasonEpisode || item.filename || '';
+                  const match = sEp.match(/S(\d+)E(\d+)/i) || sEp.match(/(\d+)x(\d+)/i);
+                  if (match) {
+                    return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10) };
+                  }
+                  const sOnly = sEp.match(/Staffel\s*(\d+)/i) || sEp.match(/Season\s*(\d+)/i) || sEp.match(/S(\d+)/i);
+                  if (sOnly) {
+                    return { season: parseInt(sOnly[1], 10), episode: 1 };
+                  }
+                  return { season: 1, episode: 1 };
+                };
+
                 const activeSeriesFiles = activeSeries.isXtream
                   ? (xtreamEpisodes[activeSeries.xtreamSeriesId] || [])
                   : activeSeries.files;
+
+                const seasonMap = new Map();
+                activeSeriesFiles.forEach((file) => {
+                  const { season } = parseEpisodeInfo(file);
+                  const seasonKey = season || 1;
+                  if (!seasonMap.has(seasonKey)) {
+                    seasonMap.set(seasonKey, []);
+                  }
+                  seasonMap.get(seasonKey).push(file);
+                });
+
+                const sortedSeasons = Array.from(seasonMap.entries()).sort((a, b) => a[0] - b[0]);
+                sortedSeasons.forEach(([_, eps]) => {
+                  eps.sort((a, b) => {
+                    const epA = parseEpisodeInfo(a).episode;
+                    const epB = parseEpisodeInfo(b).episode;
+                    return epA - epB;
+                  });
+                });
 
                 return (
                   <>
@@ -201,164 +239,233 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                         <p>Lade Episoden vom Xtream Server...</p>
                       </div>
                     ) : (
-                      <div className="episodes-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', maxHeight: '750px', overflowY: 'auto' }}>
-                        {activeSeriesFiles.map((item, idx) => {
-                          const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
-                          const isPending = !!pendingCasts[item.filename];
-
-                          return (
-                            <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                              <div className="music-item" style={{ background: 'rgba(255, 255, 255, 0.015)' }}>
-                                <div className="music-info">
-                                  <div className="music-icon" style={{ background: 'rgba(255, 0, 127, 0.08)', color: 'var(--accent-pink)' }}>
-                                    {item.metadata?.seasonEpisode ? '🎬' : '📹'}
-                                  </div>
-                                  <div className="music-details">
-                                    <div className="music-title" title={item.filename} style={{ fontWeight: '500' }}>
-                                      {item.metadata?.seasonEpisode ? <strong style={{ color: 'var(--accent-pink)', marginRight: '0.4rem' }}>{item.metadata.seasonEpisode}</strong> : null}
-                                      {item.isXtream ? (item.metadata?.title || item.filename) : item.filename}
-                                    </div>
-                                    <div className="music-meta">
-                                      {item.sizeBytes > 0 && (
-                                        <>
-                                          <span className="music-size">{formatBytes(item.sizeBytes)}</span>
-                                          <span>•</span>
-                                        </>
-                                      )}
-                                      <span>{item.isXtream ? 'Xtream Codes Stream' : new Date(item.mtime).toLocaleDateString()}</span>
-                                    </div>
-                                  </div>
-                                </div>
-
-                                <div className="music-actions">
-                                  {item.isXtream && (
-                                    <button
-                                      className="btn btn-secondary btn-icon-only"
-                                      style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
-                                      title="Folge herunterladen"
-                                      onClick={() => onXtreamDownload(item, activeSeries)}
-                                    >
-                                      <DownloadIcon />
-                                    </button>
-                                  )}
-                                  {!item.isXtream && (
-                                    <button
-                                      className="btn btn-danger btn-icon-only"
-                                      title="Datei von Festplatte löschen"
-                                      onClick={() => onDeleteFile(item.filename)}
-                                    >
-                                      <TrashIcon />
-                                    </button>
-                                  )}
-                                  <button
-                                    className="btn btn-primary btn-icon-only"
-                                    style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                    title="Lokal abspielen"
-                                    onClick={() => onPlay(item.filename, item)}
-                                  >
-                                    <PlayIcon />
-                                  </button>
-                                  <button
-                                    className="btn btn-secondary btn-icon-only"
-                                    style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                    title="Auf TV streamen (Cast)"
-                                    disabled={isPending}
-                                    onClick={() => onCast(item)}
-                                  >
-                                    {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                                  </button>
-                                </div>
+                      <div className="seasons-container" style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem', maxHeight: '750px', overflowY: 'auto' }}>
+                        {sortedSeasons.map(([seasonNum, seasonEpisodes]) => (
+                          <div
+                            key={seasonNum}
+                            className="season-section"
+                            style={{
+                              background: 'rgba(255, 255, 255, 0.02)',
+                              border: '1px solid var(--border-color)',
+                              borderRadius: '12px',
+                              padding: '1rem',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '0.75rem'
+                            }}
+                          >
+                            <div
+                              className="season-header"
+                              style={{
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'space-between',
+                                flexWrap: 'wrap',
+                                gap: '0.75rem',
+                                borderBottom: '1px solid rgba(255, 255, 255, 0.06)',
+                                paddingBottom: '0.6rem'
+                              }}
+                            >
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                                <span style={{ fontSize: '1.05rem', fontWeight: 'bold', color: 'var(--text-primary)' }}>
+                                  🎬 Staffel {seasonNum}
+                                </span>
+                                <span style={{
+                                  fontSize: '0.75rem',
+                                  color: 'var(--text-muted)',
+                                  background: 'rgba(255, 255, 255, 0.06)',
+                                  padding: '0.15rem 0.5rem',
+                                  borderRadius: '12px'
+                                }}>
+                                  {seasonEpisodes.length} {seasonEpisodes.length === 1 ? 'Folge' : 'Folgen'}
+                                </span>
                               </div>
 
-                              {activeCastForFile && (
-                                <div style={{
-                                  background: 'rgba(0, 242, 254, 0.08)',
-                                  border: '1px solid rgba(0, 242, 254, 0.25)',
-                                  borderRadius: '10px',
-                                  padding: '0.75rem 1rem',
-                                  display: 'flex',
-                                  flexDirection: 'column',
-                                  gap: '0.5rem',
-                                  color: 'var(--text-primary)'
-                                }}>
-                                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                    <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                                      📺 Streamt auf {activeCastForFile.device}
-                                    </span>
-                                    <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                      {activeCastForFile.playerState || 'Verbinden'}
-                                    </span>
-                                  </div>
-
-                                  {activeCastForFile.duration > 0 && (
-                                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                      <input
-                                        type="range"
-                                        min={0}
-                                        max={activeCastForFile.duration}
-                                        value={activeCastForFile.currentTime || 0}
-                                        onChange={(e) => onCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                                        style={{
-                                          width: '100%',
-                                          accentColor: 'var(--accent-cyan)',
-                                          cursor: 'pointer',
-                                          height: '4px'
-                                        }}
-                                      />
-                                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                        <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                                        <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-                                      </div>
-                                    </div>
-                                  )}
-
-                                  <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-                                    {activeCastForFile.playerState === 'PAUSED' ? (
-                                      <button
-                                        className="btn btn-secondary btn-icon-only"
-                                        style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                        onClick={() => onCastControl(activeCastForFile.device, 'resume')}
-                                      >
-                                        <PlayIcon />
-                                      </button>
-                                    ) : (
-                                      <button
-                                        className="btn btn-secondary btn-icon-only"
-                                        style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                        onClick={() => onCastControl(activeCastForFile.device, 'pause')}
-                                      >
-                                        <PauseIcon />
-                                      </button>
-                                    )}
-                                    <button
-                                      className="btn btn-danger"
-                                      style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-                                      onClick={() => onStopCast(activeCastForFile.device)}
-                                    >
-                                      Stoppen
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-
-                              {isPending && !activeCastForFile && (
-                                <div style={{
-                                  background: 'rgba(0, 242, 254, 0.05)',
-                                  border: '1px solid rgba(0, 242, 254, 0.2)',
-                                  borderRadius: '8px',
-                                  padding: '0.5rem 0.75rem',
-                                  fontSize: '0.8rem',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  color: 'var(--text-secondary)'
-                                }}>
-                                  <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
-                                </div>
+                              {activeSeries.isXtream && (
+                                <button
+                                  className="btn btn-secondary"
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.4rem',
+                                    padding: '0.35rem 0.85rem',
+                                    fontSize: '0.8rem',
+                                    color: 'var(--accent-pink)',
+                                    borderColor: 'rgba(255, 0, 127, 0.35)',
+                                    background: 'rgba(255, 0, 127, 0.08)',
+                                    borderRadius: '20px',
+                                    cursor: 'pointer'
+                                  }}
+                                  title={`Alle Folgen von Staffel ${seasonNum} zur Auswahl und zum Download öffnen`}
+                                  onClick={() => setSeasonModalData({ seasonName: `Staffel ${seasonNum}`, episodes: seasonEpisodes })}
+                                >
+                                  <DownloadIcon />
+                                  <span>Staffel herunterladen</span>
+                                </button>
                               )}
                             </div>
-                          );
-                        })}
+
+                            <div className="episodes-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+                              {seasonEpisodes.map((item, idx) => {
+                                const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
+                                const isPending = !!pendingCasts[item.filename];
+
+                                return (
+                                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                    <div className="music-item" style={{ background: 'rgba(255, 255, 255, 0.015)' }}>
+                                      <div className="music-info">
+                                        <div className="music-icon" style={{ background: 'rgba(255, 0, 127, 0.08)', color: 'var(--accent-pink)' }}>
+                                          {item.metadata?.seasonEpisode ? '🎬' : '📹'}
+                                        </div>
+                                        <div className="music-details">
+                                          <div className="music-title" title={item.filename} style={{ fontWeight: '500' }}>
+                                            {item.metadata?.seasonEpisode ? <strong style={{ color: 'var(--accent-pink)', marginRight: '0.4rem' }}>{item.metadata.seasonEpisode}</strong> : null}
+                                            {item.isXtream ? (item.metadata?.title || item.filename) : item.filename}
+                                          </div>
+                                          <div className="music-meta">
+                                            {item.sizeBytes > 0 && (
+                                              <>
+                                                <span className="music-size">{formatBytes(item.sizeBytes)}</span>
+                                                <span>•</span>
+                                              </>
+                                            )}
+                                            <span>{item.isXtream ? 'Xtream Codes Stream' : new Date(item.mtime).toLocaleDateString()}</span>
+                                          </div>
+                                        </div>
+                                      </div>
+
+                                      <div className="music-actions">
+                                        {item.isXtream && (
+                                          <button
+                                            className="btn btn-secondary btn-icon-only"
+                                            style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
+                                            title="Folge herunterladen"
+                                            onClick={() => onXtreamDownload(item, activeSeries)}
+                                          >
+                                            <DownloadIcon />
+                                          </button>
+                                        )}
+                                        {!item.isXtream && (
+                                          <button
+                                            className="btn btn-danger btn-icon-only"
+                                            title="Datei von Festplatte löschen"
+                                            onClick={() => onDeleteFile(item.filename)}
+                                          >
+                                            <TrashIcon />
+                                          </button>
+                                        )}
+                                        <button
+                                          className="btn btn-primary btn-icon-only"
+                                          style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                                          title="Lokal abspielen"
+                                          onClick={() => onPlay(item.filename, item)}
+                                        >
+                                          <PlayIcon />
+                                        </button>
+                                        <button
+                                          className="btn btn-secondary btn-icon-only"
+                                          style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
+                                          title="Auf TV streamen (Cast)"
+                                          disabled={isPending}
+                                          onClick={() => onCast(item)}
+                                        >
+                                          {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+                                        </button>
+                                      </div>
+                                    </div>
+
+                                    {activeCastForFile && (
+                                      <div style={{
+                                        background: 'rgba(0, 242, 254, 0.08)',
+                                        border: '1px solid rgba(0, 242, 254, 0.25)',
+                                        borderRadius: '10px',
+                                        padding: '0.75rem 1rem',
+                                        display: 'flex',
+                                        flexDirection: 'column',
+                                        gap: '0.5rem',
+                                        color: 'var(--text-primary)'
+                                      }}>
+                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                                          <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
+                                            📺 Streamt auf {activeCastForFile.device}
+                                          </span>
+                                          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
+                                            {activeCastForFile.playerState || 'Verbinden'}
+                                          </span>
+                                        </div>
+
+                                        {activeCastForFile.duration > 0 && (
+                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
+                                            <input
+                                              type="range"
+                                              min={0}
+                                              max={activeCastForFile.duration}
+                                              value={activeCastForFile.currentTime || 0}
+                                              onChange={(e) => onCastControl(activeCastForFile.device, 'seek', e.target.value)}
+                                              style={{
+                                                width: '100%',
+                                                accentColor: 'var(--accent-cyan)',
+                                                cursor: 'pointer',
+                                                height: '4px'
+                                              }}
+                                            />
+                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                                              <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
+                                              <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
+                                            </div>
+                                          </div>
+                                        )}
+
+                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
+                                          {activeCastForFile.playerState === 'PAUSED' ? (
+                                            <button
+                                              className="btn btn-secondary btn-icon-only"
+                                              style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                              onClick={() => onCastControl(activeCastForFile.device, 'resume')}
+                                            >
+                                              <PlayIcon />
+                                            </button>
+                                          ) : (
+                                            <button
+                                              className="btn btn-secondary btn-icon-only"
+                                              style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                              onClick={() => onCastControl(activeCastForFile.device, 'pause')}
+                                            >
+                                              <PauseIcon />
+                                            </button>
+                                          )}
+                                          <button
+                                            className="btn btn-danger btn-icon-only"
+                                            style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
+                                            onClick={() => onStopCast(activeCastForFile.device)}
+                                          >
+                                            🛑
+                                          </button>
+                                        </div>
+                                      </div>
+                                    )}
+
+                                    {isPending && !activeCastForFile && (
+                                      <div style={{
+                                        background: 'rgba(0, 242, 254, 0.05)',
+                                        border: '1px solid rgba(0, 242, 254, 0.2)',
+                                        borderRadius: '8px',
+                                        padding: '0.5rem 0.75rem',
+                                        fontSize: '0.8rem',
+                                        display: 'flex',
+                                        alignItems: 'center',
+                                        justifyContent: 'space-between',
+                                        color: 'var(--text-secondary)'
+                                      }}>
+                                        <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        ))}
                       </div>
                     )}
                   </>
@@ -593,6 +700,19 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
           )}
         </>
       )}
+
+      <SeasonDownloadModal
+        isOpen={!!seasonModalData}
+        onClose={() => setSeasonModalData(null)}
+        seriesTitle={activeSeries?.title || ''}
+        seasonName={seasonModalData?.seasonName || ''}
+        episodes={seasonModalData?.episodes || []}
+        onStartDownload={(selectedEpisodes) => {
+          if (onXtreamBatchDownload) {
+            onXtreamBatchDownload(selectedEpisodes, activeSeries);
+          }
+        }}
+      />
     </div>
   );
 };

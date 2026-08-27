@@ -469,11 +469,29 @@ export function registerAllRoutes(app) {
     return res.json({ success: true, message: 'Suche gestartet' });
   });
 
-  app.post('/api/xtream/download', (req, res) => {
-    const { url, title, seriesTitle } = req.body;
-    if (!url || !title) {
-      return res.status(400).json({ error: 'Fehlende Parameter url oder title' });
+  function isHttpDownloadActive() {
+    for (const item of appState.downloadQueue.values()) {
+      if (item.downloader && item.downloader.isHttp) {
+        if (['connecting', 'dcc_downloading'].includes(item.downloader.status)) {
+          return true;
+        }
+      }
     }
+    return false;
+  }
+
+  function processNextHttpDownload() {
+    if (isHttpDownloadActive()) return;
+    for (const item of appState.downloadQueue.values()) {
+      if (item.downloader && item.downloader.isHttp && item.downloader.status === 'queued') {
+        console.log(`[Xtream Queue] Starting next queued download: ${item.downloader.filename}`);
+        item.downloader.start();
+        break;
+      }
+    }
+  }
+
+  function createHttpDownload({ url, title, seriesTitle }) {
     const id = `http_${crypto.createHash('md5').update(url).digest('hex')}`;
     if (appState.downloadQueue.has(id)) {
       const item = appState.downloadQueue.get(id);
@@ -481,7 +499,7 @@ export function registerAllRoutes(app) {
         item.downloader.cleanup();
         appState.downloadQueue.delete(id);
       } else {
-        return res.status(400).json({ error: 'Download läuft bereits oder ist bereits in der Warteschlange.' });
+        return { exists: true, id, status: item.downloader.status, filename: item.downloader.filename };
       }
     }
     let extension = '.mp4';
@@ -499,25 +517,72 @@ export function registerAllRoutes(app) {
       filename = `${title}${extension}`;
     }
     filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+
+    const shouldQueue = isHttpDownloadActive();
     const downloader = new HttpDownloader({
       id,
       url,
       filename,
-      downloadDir: appState.appConfig.downloadDir
+      downloadDir: appState.appConfig.downloadDir,
+      initialStatus: shouldQueue ? 'queued' : 'connecting'
     });
+
     downloader.on('progress', (data) => {
       if (data.status === 'completed') {
         appState.cachedLocalFiles = null;
         organizeAllFiles().catch(err => console.error('[Xtream Download] Organize error:', err));
+        processNextHttpDownload();
+      } else if (data.status === 'error' || data.status === 'cancelled') {
+        processNextHttpDownload();
       }
       broadcastStatus(id);
     });
+
     downloader.on('message', (data) => {
       broadcastToClients(JSON.stringify({ type: 'message', data: { id, text: data.text } }));
     });
+
     appState.downloadQueue.set(id, { downloader });
-    downloader.start();
-    return res.json({ success: true, id, status: downloader.status });
+
+    if (shouldQueue) {
+      downloader.setQueued();
+      broadcastStatus(id);
+    } else {
+      downloader.start();
+    }
+
+    return { success: true, id, status: downloader.status, filename };
+  }
+
+  app.post('/api/xtream/download', (req, res) => {
+    const { url, title, seriesTitle } = req.body;
+    if (!url || !title) {
+      return res.status(400).json({ error: 'Fehlende Parameter url oder title' });
+    }
+    const result = createHttpDownload({ url, title, seriesTitle });
+    if (result.exists) {
+      return res.status(400).json({ error: 'Download läuft bereits oder ist bereits in der Warteschlange.' });
+    }
+    return res.json(result);
+  });
+
+  app.post('/api/xtream/download-batch', (req, res) => {
+    const { items } = req.body;
+    if (!Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({ error: 'Parameter items muss ein nicht-leeres Array sein' });
+    }
+    const results = [];
+    for (const item of items) {
+      if (item.url && item.title) {
+        const result = createHttpDownload({
+          url: item.url,
+          title: item.title,
+          seriesTitle: item.seriesTitle
+        });
+        results.push(result);
+      }
+    }
+    return res.json({ success: true, count: results.length, items: results });
   });
 
   app.post('/api/download', (req, res) => {
@@ -579,6 +644,9 @@ export function registerAllRoutes(app) {
     const item = appState.downloadQueue.get(id);
     if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
     item.downloader.pause();
+    if (item.downloader.isHttp) {
+      setTimeout(() => processNextHttpDownload(), 50);
+    }
     return res.json({ success: true });
   });
 
@@ -586,7 +654,12 @@ export function registerAllRoutes(app) {
     const { id } = req.params;
     const item = appState.downloadQueue.get(id);
     if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
-    item.downloader.start();
+    if (item.downloader.isHttp && isHttpDownloadActive()) {
+      item.downloader.setQueued();
+      broadcastStatus(id);
+    } else {
+      item.downloader.start();
+    }
     return res.json({ success: true });
   });
 
@@ -602,9 +675,13 @@ export function registerAllRoutes(app) {
     const { id } = req.params;
     const item = appState.downloadQueue.get(id);
     if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
+    const isHttp = !!item.downloader.isHttp;
     item.downloader.cancel();
     appState.downloadQueue.delete(id);
     broadcastDeletion(id);
+    if (isHttp) {
+      setTimeout(() => processNextHttpDownload(), 50);
+    }
     return res.json({ success: true });
   });
 
@@ -614,6 +691,7 @@ export function registerAllRoutes(app) {
     const item = appState.downloadQueue.get(id);
     if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
     if (item.downloader.status !== 'dcc_downloading') {
+      const isHttp = !!item.downloader.isHttp;
       if (deleteFile && item.downloader.filePath) {
         try {
           if (fs.existsSync(item.downloader.filePath)) {
@@ -629,6 +707,9 @@ export function registerAllRoutes(app) {
       item.downloader.cleanup();
       appState.downloadQueue.delete(id);
       broadcastDeletion(id);
+      if (isHttp) {
+        setTimeout(() => processNextHttpDownload(), 50);
+      }
       return res.json({ success: true });
     } else {
       return res.status(400).json({ error: 'Laufende Downloads können nicht gelöscht werden, brich sie zuerst ab.' });

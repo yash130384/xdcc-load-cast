@@ -582,6 +582,48 @@ function App() {
     }
   };
 
+  const triggerXtreamBatchDownload = async (episodes, activeSeries = null) => {
+    if (!Array.isArray(episodes) || episodes.length === 0) return;
+    try {
+      const items = episodes.map(item => {
+        const title = item.metadata?.title || item.filename;
+        const seasonEpisode = item.metadata?.seasonEpisode || '';
+        return {
+          url: item.filename,
+          title: seasonEpisode ? `${seasonEpisode} - ${title}` : title,
+          seriesTitle: activeSeries && activeSeries.title ? activeSeries.title : undefined
+        };
+      });
+
+      const res = await fetch('/api/xtream/download-batch', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ items })
+      });
+
+      if (!res.ok) {
+        const errData = await res.json();
+        alert(`Downloads konnten nicht gestartet werden: ${errData.error}`);
+      } else {
+        const data = await res.json();
+        if (data.items && data.items.length > 0) {
+          setDownloadLogs(prev => {
+            const next = { ...prev };
+            data.items.forEach(d => {
+              next[d.id] = [`[${new Date().toLocaleTimeString()}] Download eingereiht...`];
+            });
+            return next;
+          });
+        }
+        setCurrentView('downloads');
+      }
+    } catch (err) {
+      alert(`Fehler beim Starten der Downloads: ${err.message}`);
+    }
+  };
+
   const handlePause = (id) => {
     fetch(`/api/download/${encodeURIComponent(id)}/pause`, { method: 'POST' })
       .catch(err => console.error('Error pausing:', err));
@@ -2559,7 +2601,8 @@ function App() {
                 onSeriesClick={setActiveSeriesId}
                 onRefresh={(force) => fetchMediaLibrary(force)}
                 onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
-                onXtreamDownload={(item, series) => { /* download xtream item */ }}
+                onXtreamDownload={triggerXtreamDownload}
+                onXtreamBatchDownload={triggerXtreamBatchDownload}
                 renderFavoritesOverview={renderFavoritesOverview}
                 autoDownloads={autoDownloads}
                 checkingShowId={checkingShowId}
