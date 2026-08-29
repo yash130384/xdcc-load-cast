@@ -181,16 +181,32 @@ async function updateLocalMappedList(force = false) {
   const list = await getLocalFiles(force);
   appState.cachedMappedList = list.map(item => {
     const ext = path.extname(item.filename).toLowerCase();
-    const cloned = { ...item };
+    const cloned = { ...item, isXtream: false };
+    
+    let localType = 'Videos';
+    if (ext === '.m4b' || cloned.metadata?.category === 'Hörbücher') {
+      localType = 'Hörbücher';
+    } else if (MUSIC_EXTENSIONS.has(ext) || cloned.metadata?.category === 'Musik') {
+      localType = 'Musik';
+    } else if (cloned.metadata?.type === 'series' || cloned.metadata?.isSeries || cloned.metadata?.seasonEpisode) {
+      localType = 'Serien';
+    } else if (cloned.metadata?.type === 'movie' || cloned.metadata?.category === 'Filme') {
+      localType = 'Filme';
+    }
+
     if (cloned.metadata) {
       cloned.metadata = { ...cloned.metadata };
-      cloned.metadata.originalCategory = cloned.metadata.category || (ext === '.m4b' ? 'Hörbücher' : (MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos'));
+      cloned.metadata.originalCategory = localType;
       cloned.metadata.category = 'Lokal';
+      if (!cloned.metadata.subcategory) {
+        cloned.metadata.subcategory = localType;
+      }
     } else {
       cloned.metadata = {
         title: path.parse(cloned.filename).name,
         category: 'Lokal',
-        originalCategory: ext === '.m4b' ? 'Hörbücher' : (MUSIC_EXTENSIONS.has(ext) ? 'Musik' : 'Videos')
+        originalCategory: localType,
+        subcategory: localType
       };
     }
     return cloned;

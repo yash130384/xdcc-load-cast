@@ -558,24 +558,36 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
               >
                 💾 Lokal ({counts.Lokal || 0})
               </button>
-              <button
-                className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
-                onClick={() => onSelectCategory('Filme')}
-              >
-                🎬 Filme ({counts.Filme || 0})
-              </button>
-              <button
-                className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
-                onClick={() => onSelectCategory('Serien')}
-              >
-                📺 Serien ({counts.Serien || 0})
-              </button>
-              <button
-                className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}
-                onClick={() => onSelectCategory('Videos')}
-              >
-                📹 Videos ({counts.Videos || 0})
-              </button>
+              {settings?.xtreamEnabled && (
+                <>
+                  <button
+                    className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
+                    onClick={() => onSelectCategory('Filme')}
+                  >
+                    🎬 Filme ({counts.Filme || 0})
+                  </button>
+                  <button
+                    className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
+                    onClick={() => onSelectCategory('Serien')}
+                  >
+                    📺 Serien ({counts.Serien || 0})
+                  </button>
+                  <button
+                    className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
+                    onClick={() => onSelectCategory('Live TV')}
+                  >
+                    📡 Live TV ({counts['Live TV'] || 0})
+                  </button>
+                </>
+              )}
+              {!settings?.xtreamEnabled && (
+                <button
+                  className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}
+                  onClick={() => onSelectCategory('Videos')}
+                >
+                  📹 Videos ({counts.Videos || 0})
+                </button>
+              )}
               <button
                 className={`category-tab-btn ${selectedCategory === 'Musik' ? 'active' : ''}`}
                 onClick={() => onSelectCategory('Musik')}
@@ -588,14 +600,6 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
               >
                 🎧 Hörbücher ({counts.Hörbücher || 0})
               </button>
-              {settings?.xtreamEnabled && (
-                <button
-                  className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
-                  onClick={() => onSelectCategory('Live TV')}
-                >
-                  📡 Live TV ({counts['Live TV'] || 0})
-                </button>
-              )}
             </div>
 
             {availableSubcategories && availableSubcategories.length > 1 && (

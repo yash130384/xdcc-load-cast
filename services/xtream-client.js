@@ -183,6 +183,7 @@ export function updateMappedXtreamData() {
     const subcat = vodCatMap.get(String(movie.category_id)) || 'Sonstige';
     return {
       filename: movie.stream_id + '_' + (movie.title ? movie.title.replace(/[^a-zA-Z0-9]/g, '_') : 'movie') + '.mp4',
+      isXtream: true, isGroup: false,
       source: 'xtream', type: 'movie', xtreamStreamId: movie.stream_id,
       streamUrl, xtreamTitle: movie.title || 'Unbekannter Film',
       title: movie.title || 'Unbekannter Film', year: movie.release_date || '',
@@ -196,6 +197,7 @@ export function updateMappedXtreamData() {
     const subcat = seriesCatMap.get(String(series.category_id)) || 'Sonstige';
     return {
       filename: series.series_id + '_' + (series.name ? series.name.replace(/[^a-zA-Z0-9]/g, '_') : 'series') + '.mp4',
+      isXtream: true, isGroup: true, files: [],
       source: 'xtream', type: 'series', xtreamSeriesId: series.series_id,
       title: series.name || 'Unbekannte Serie', year: series.year || '',
       category: 'Serien', subcategory: subcat,
@@ -211,6 +213,7 @@ export function updateMappedXtreamData() {
     const subcat = liveCatMap.get(String(chan.category_id)) || 'Sonstige';
     return {
       filename: chan.stream_id + '_' + (chan.name ? chan.name.replace(/[^a-zA-Z0-9]/g, '_') : 'live') + '.ts',
+      isXtream: true, isLive: true, isGroup: false,
       source: 'xtream', type: 'live', xtreamStreamId: chan.stream_id,
       streamUrl, title: chan.name || 'Unbekannter Kanal',
       category: 'Live TV', subcategory: subcat,

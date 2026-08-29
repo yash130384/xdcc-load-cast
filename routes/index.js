@@ -750,47 +750,13 @@ export function registerAllRoutes(app) {
     const counts = {
       all: filteredRaw.length,
       Lokal: filteredRaw.filter(item => !item.isXtream).length,
-      Filme: filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === 'Filme' || origCat === 'Filme';
-      }).length,
-      Serien: filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === 'Serien' || origCat === 'Serien';
-      }).length,
-      Videos: filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === 'Videos' || origCat === 'Videos';
-      }).length,
-      Musik: filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === 'Musik' || origCat === 'Musik';
-      }).length,
-      'Live TV': filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === 'Live TV' || origCat === 'Live TV';
-      }).length,
-      'Hörbücher': filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === 'Hörbücher' || origCat === 'Hörbücher';
-      }).length,
-      Favoriten: filteredRaw.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        const isSeries = cat === 'Serien' || origCat === 'Serien';
-        const favKey = isSeries
-          ? (item.metadata?.imdbId || item.metadata?.title || item.xtreamSeriesId || item.imdbId || item.title)
-          : item.filename;
-        const isFav = appState.favorites.has(String(favKey));
-        const hasProgress = !item.isGroup && appState.playProgress[item.filename];
-        return isFav || hasProgress;
-      }).length,
+      Filme: filteredRaw.filter(item => item.isXtream && (item.category === 'Filme' || item.type === 'movie')).length,
+      Serien: filteredRaw.filter(item => item.isXtream && (item.category === 'Serien' || item.type === 'series')).length,
+      'Live TV': filteredRaw.filter(item => item.isXtream && (item.category === 'Live TV' || item.type === 'live')).length,
+      Videos: filteredRaw.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Videos' || item.metadata?.category === 'Videos')).length,
+      Musik: filteredRaw.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Musik' || item.metadata?.category === 'Musik')).length,
+      'Hörbücher': filteredRaw.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Hörbücher' || item.metadata?.category === 'Hörbücher')).length,
+      Favoriten: 0,
       Neu: 0
     };
 
@@ -798,35 +764,53 @@ export function registerAllRoutes(app) {
     const otherItems = [];
 
     filteredRaw.forEach(item => {
-      const cat = item.metadata?.category || 'Videos';
-      const originalCategory = item.metadata?.originalCategory || cat;
-      if (cat === 'Serien' || originalCategory === 'Serien') {
-        if (item.isGroup) {
+      if (item.isXtream) {
+        if (item.category === 'Serien' || item.type === 'series') {
           const key = item.xtreamSeriesId || item.title;
           seriesGroups[key] = {
             ...item,
+            isGroup: true,
+            isXtream: true,
             files: item.files || [],
             mtime: item.mtime || 0
           };
-          return;
+        } else {
+          otherItems.push(item);
         }
-        const seriesKey = item.metadata?.imdbId || item.metadata?.title || 'Unknown Series';
-        if (!seriesGroups[seriesKey]) {
-          seriesGroups[seriesKey] = {
-            isGroup: true,
-            title: item.metadata?.title || 'Unbekannte Serie',
-            posterUrl: item.metadata?.posterUrl,
-            year: item.metadata?.year,
-            cast: item.metadata?.cast,
-            imdbId: item.metadata?.imdbId,
-            category: cat,
-            files: [],
-            mtime: item.mtime || 0
-          };
-        }
-        seriesGroups[seriesKey].files.push(item);
       } else {
-        otherItems.push(item);
+        const cat = item.metadata?.category || 'Lokal';
+        const originalCategory = item.metadata?.originalCategory || cat;
+        if (originalCategory === 'Serien' || item.metadata?.type === 'series' || item.metadata?.isSeries) {
+          const seriesKey = 'local_' + (item.metadata?.imdbId || item.metadata?.title || 'Unknown Series');
+          if (!seriesGroups[seriesKey]) {
+            seriesGroups[seriesKey] = {
+              isGroup: true,
+              isXtream: false,
+              title: item.metadata?.title || 'Unbekannte Serie',
+              posterUrl: item.metadata?.posterUrl,
+              year: item.metadata?.year,
+              cast: item.metadata?.cast,
+              imdbId: item.metadata?.imdbId,
+              category: 'Lokal',
+              subcategory: 'Serien',
+              metadata: {
+                title: item.metadata?.title || 'Unbekannte Serie',
+                posterUrl: item.metadata?.posterUrl,
+                year: item.metadata?.year,
+                cast: item.metadata?.cast,
+                imdbId: item.metadata?.imdbId,
+                category: 'Lokal',
+                originalCategory: 'Serien',
+                subcategory: 'Serien'
+              },
+              files: [],
+              mtime: item.mtime || 0
+            };
+          }
+          seriesGroups[seriesKey].files.push(item);
+        } else {
+          otherItems.push(item);
+        }
       }
     });
 
@@ -841,7 +825,7 @@ export function registerAllRoutes(app) {
           if (epA && epB) {
             return epA.localeCompare(epB, undefined, { numeric: true, sensitivity: 'base' });
           }
-          return a.filename.localeCompare(b.filename);
+          return (a.filename || '').localeCompare(b.filename || '');
         });
       }
       group.mtime = groupMtime || Date.now();
@@ -849,6 +833,14 @@ export function registerAllRoutes(app) {
 
     const sortedSeries = Object.values(seriesGroups);
     const groupedItems = [...sortedSeries, ...otherItems];
+
+    counts.Favoriten = groupedItems.filter(item => {
+      const isFav = appState.favorites.has(String(item.isGroup
+        ? (item.xtreamSeriesId || item.imdbId || item.title || item.metadata?.imdbId || item.metadata?.title)
+        : item.filename));
+      const isWatchingSeries = item.isGroup && Array.isArray(item.files) && item.files.some(ep => appState.playProgress[ep.filename]);
+      return isFav || isWatchingSeries;
+    }).length;
 
     const fiveDaysAgo = Date.now() - 5 * 24 * 60 * 60 * 1000;
     const nonLiveItems = groupedItems.filter(item => {
@@ -867,15 +859,23 @@ export function registerAllRoutes(app) {
         const isFav = appState.favorites.has(String(item.isGroup
           ? (item.xtreamSeriesId || item.imdbId || item.title || item.metadata?.imdbId || item.metadata?.title)
           : item.filename));
-        const isWatchingSeries = item.isGroup && item.files.some(ep => appState.playProgress[ep.filename]);
+        const isWatchingSeries = item.isGroup && Array.isArray(item.files) && item.files.some(ep => appState.playProgress[ep.filename]);
         return isFav || isWatchingSeries;
       });
-    } else if (category !== 'all') {
-      filteredGrouped = groupedItems.filter(item => {
-        const cat = item.metadata?.category || item.category || 'Videos';
-        const origCat = item.metadata?.originalCategory || cat;
-        return cat === category || origCat === category;
-      });
+    } else if (category === 'Lokal') {
+      filteredGrouped = groupedItems.filter(item => !item.isXtream);
+    } else if (category === 'Filme') {
+      filteredGrouped = groupedItems.filter(item => item.isXtream && (item.category === 'Filme' || item.type === 'movie'));
+    } else if (category === 'Serien') {
+      filteredGrouped = groupedItems.filter(item => item.isXtream && (item.category === 'Serien' || item.type === 'series'));
+    } else if (category === 'Live TV') {
+      filteredGrouped = groupedItems.filter(item => item.isXtream && (item.category === 'Live TV' || item.type === 'live'));
+    } else if (category === 'Musik') {
+      filteredGrouped = groupedItems.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Musik' || item.metadata?.category === 'Musik'));
+    } else if (category === 'Hörbücher') {
+      filteredGrouped = groupedItems.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Hörbücher' || item.metadata?.category === 'Hörbücher'));
+    } else if (category === 'Videos') {
+      filteredGrouped = groupedItems.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Videos' || item.metadata?.category === 'Videos'));
     }
 
     if (category === 'Live TV') {
@@ -910,17 +910,40 @@ export function registerAllRoutes(app) {
     }
 
     const subcats = new Set();
-    filteredGrouped.forEach(item => {
-      const sub = item.metadata?.subcategory || item.subcategory;
-      if (sub) subcats.add(sub);
-    });
+    if (category === 'Lokal') {
+      groupedItems.filter(item => !item.isXtream).forEach(item => {
+        if (item.isGroup && !item.isXtream) {
+          subcats.add('Serien');
+        } else {
+          const orig = item.metadata?.originalCategory || (item.metadata?.type === 'movie' ? 'Filme' : 'Videos');
+          if (orig) subcats.add(orig);
+        }
+      });
+    } else {
+      filteredGrouped.forEach(item => {
+        const sub = item.metadata?.subcategory || item.subcategory;
+        if (sub) subcats.add(sub);
+      });
+    }
     const availableSubcategories = ['all', ...Array.from(subcats).sort()];
 
     if (subcategory !== 'all') {
-      filteredGrouped = filteredGrouped.filter(item => {
-        const subcat = item.metadata?.subcategory || item.subcategory || '';
-        return subcat === subcategory;
-      });
+      if (category === 'Lokal') {
+        filteredGrouped = filteredGrouped.filter(item => {
+          if (subcategory === 'Serien') {
+            return (item.isGroup && !item.isXtream) || item.metadata?.originalCategory === 'Serien';
+          }
+          if (subcategory === 'Filme') {
+            return !item.isGroup && (item.metadata?.originalCategory === 'Filme' || item.metadata?.type === 'movie');
+          }
+          return item.metadata?.originalCategory === subcategory || item.metadata?.subcategory === subcategory;
+        });
+      } else {
+        filteredGrouped = filteredGrouped.filter(item => {
+          const subcat = item.metadata?.subcategory || item.subcategory || '';
+          return subcat === subcategory;
+        });
+      }
     }
 
     const totalItems = filteredGrouped.length;
