@@ -25,7 +25,9 @@ export function getDefaultConfig() {
     tailscaleLocalAddress: '',
     ircSearchTimeout: 24,
     allowTailscaleIp: false,
-    customLocalIp: ''
+    customLocalIp: '',
+    moviegodsNick: 'PulseCast_Bot_99',
+    moviegodsNickPass: 'PulseCast!99Secret'
   };
 }
 

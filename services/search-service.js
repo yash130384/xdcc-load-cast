@@ -8,18 +8,15 @@ const IRC_PORT = 6697;
 const IRC_CHANNEL1 = '#moviegods';
 const IRC_CHANNEL2 = '#mg-chat';
 
-function generateIrcNick() {
-  const prefixes = ['Alex', 'Chris', 'David', 'Emma', 'John', 'Lisa', 'Mark', 'Paul', 'Sarah', 'Tom', 'Yash', 'User', 'Client'];
-  const prefix = prefixes[Math.floor(Math.random() * prefixes.length)];
-  const suffix = Math.floor(100 + Math.random() * 900);
-  return `${prefix}_${suffix}`;
-}
+const DEFAULT_MOVIEGODS_NICK = 'PulseCast_Bot_99';
+const DEFAULT_MOVIEGODS_PASS = 'PulseCast!99Secret';
 
 export function searchMoviegodsIRC(queryStr) {
   return new Promise((resolve, reject) => {
     const server = IRC_SERVER;
     const port = IRC_PORT;
-    const nick = generateIrcNick();
+    const nick = appState.appConfig?.moviegodsNick || DEFAULT_MOVIEGODS_NICK;
+    const pass = appState.appConfig?.moviegodsNickPass || DEFAULT_MOVIEGODS_PASS;
     const channel1 = IRC_CHANNEL1;
     const channel2 = IRC_CHANNEL2;
     
@@ -36,7 +33,7 @@ export function searchMoviegodsIRC(queryStr) {
       cmd = `.s ${cmd}`;
     }
 
-    const maxTimeout = (appState.appConfig.ircSearchTimeout || 24) * 1000;
+    const maxTimeout = (appState.appConfig?.ircSearchTimeout || 24) * 1000;
     let timeoutTimer = setTimeout(() => {
       cleanup('Timeout bei der IRC-Suche');
     }, maxTimeout);
@@ -45,7 +42,7 @@ export function searchMoviegodsIRC(queryStr) {
     let cmdSent = false;
     let fallbackSendTimer = null;
     
-    function resetInactivityTimer(ms = 1500) {
+    function resetInactivityTimer(ms = 2500) {
       if (inactivityTimer) clearTimeout(inactivityTimer);
       inactivityTimer = setTimeout(() => {
         console.log('Inactivity timeout reached, finishing search.');
@@ -91,12 +88,19 @@ export function searchMoviegodsIRC(queryStr) {
         .replace(/[\x02\x0F\x16\x1D\x1F]/g, '');
     }
 
+    function sendSearchCommand() {
+      if (cmdSent || !socket || !socket.writable) return;
+      cmdSent = true;
+      console.log(`Sending Moviegods search command to ${channel2}: ${cmd}`);
+      socket.write(`PRIVMSG ${channel2} :${cmd}\r\n`);
+      resetInactivityTimer(6000); // 6s wait for bot to start replying
+    }
+
     try {
-      console.log(`Connecting to ${server}:${port} for Moviegods search...`);
+      console.log(`Connecting to ${server}:${port} for Moviegods search as ${nick}...`);
       socket = tls.connect({ host: server, port: port, rejectUnauthorized: false }, () => {
-        console.log(`Connected to ${server}. Registering nick ${nick}...`);
         socket.write(`NICK ${nick}\r\n`);
-        socket.write(`USER ${nick} 0 * :Search Client\r\n`);
+        socket.write(`USER ${nick} 0 * :PulseCast Search Client\r\n`);
       });
 
       socket.on('data', (data) => {
@@ -114,45 +118,38 @@ export function searchMoviegodsIRC(queryStr) {
             continue;
           }
 
-          // Registration success
+          // Registration / MOTD success
           if (line.includes(' 376 ') || line.includes(' 422 ')) {
-            console.log(`Registered. Joining ${channel1} and ${channel2}...`);
+            console.log(`Registered on server. Identifying with NickServ and joining ${channel1}, ${channel2}...`);
+            if (socket && socket.writable) {
+              socket.write(`PRIVMSG NickServ :IDENTIFY ${pass}\r\n`);
+              socket.write(`JOIN ${channel1},${channel2}\r\n`);
+            }
+            // Fallback safety timeout: send command after 6s if 366 didn't trigger
+            fallbackSendTimer = setTimeout(() => {
+              sendSearchCommand();
+            }, 6000);
+            continue;
+          }
+
+          // NickServ identified or user mode +r confirmed
+          if (line.includes(' 900 ') || (line.includes('MODE') && line.includes('+r'))) {
             if (socket && socket.writable) {
               socket.write(`JOIN ${channel1},${channel2}\r\n`);
             }
-            // Fallback safety timeout: send command after 5s if 366 didn't trigger
-            fallbackSendTimer = setTimeout(() => {
-              if (socket && socket.writable && !cmdSent) {
-                cmdSent = true;
-                console.log(`Fallback: Sending Moviegods search command: ${cmd}`);
-                socket.write(`PRIVMSG ${channel2} :${cmd}\r\n`);
-                resetInactivityTimer(3500);
-              }
-            }, 5000);
             continue;
           }
 
           // Fully joined #mg-chat
           if (line.includes(' 366 ') && line.includes(channel2)) {
-            if (fallbackSendTimer) {
-              clearTimeout(fallbackSendTimer);
-              fallbackSendTimer = null;
-            }
-            if (!cmdSent) {
-              cmdSent = true;
-              console.log(`Fully joined ${channel2}. Sending Moviegods search command: ${cmd}`);
-              if (socket && socket.writable) {
-                socket.write(`PRIVMSG ${channel2} :${cmd}\r\n`);
-                resetInactivityTimer(3500);
-              }
-            }
+            console.log(`Fully joined ${channel2}.`);
+            sendSearchCommand();
             continue;
           }
 
           // Listen for PRIVMSG/NOTICE search responses
           const privmsgMatch = line.match(/^:([^\s!]+)![^\s]+ (PRIVMSG|NOTICE) [^\s]+ :(.*)$/);
           if (privmsgMatch) {
-            const senderNick = privmsgMatch[1];
             const rawMsg = privmsgMatch[3];
             const cleanMsg = stripIrcColors(rawMsg).trim();
 
@@ -165,7 +162,7 @@ export function searchMoviegodsIRC(queryStr) {
                   filename: topDlMatch[2],
                   sizeStr: topDlMatch[3]
                 });
-                resetInactivityTimer(1500);
+                resetInactivityTimer(2000);
               }
             } else {
               // Parse normal search result line
@@ -197,7 +194,7 @@ export function searchMoviegodsIRC(queryStr) {
                       sizeBytes: parseSizeToBytes(sizeStr),
                       filename: filename
                     });
-                    resetInactivityTimer(1500);
+                    resetInactivityTimer(2000);
                   }
                 }
               }
@@ -246,7 +243,8 @@ export function testMoviegodsIRCReachability() {
   return new Promise((resolve) => {
     const server = IRC_SERVER;
     const port = IRC_PORT;
-    const nick = generateIrcNick();
+    const nick = appState.appConfig?.moviegodsNick || DEFAULT_MOVIEGODS_NICK;
+    const pass = appState.appConfig?.moviegodsNickPass || DEFAULT_MOVIEGODS_PASS;
     const channel1 = IRC_CHANNEL1;
     const channel2 = IRC_CHANNEL2;
     
@@ -304,12 +302,20 @@ export function testMoviegodsIRCReachability() {
           
           if (line.includes(' 376 ') || line.includes(' 422 ')) {
             if (socket && socket.writable) {
+              socket.write(`PRIVMSG NickServ :IDENTIFY ${pass}\r\n`);
+              socket.write(`JOIN ${channel1},${channel2}\r\n`);
+            }
+            continue;
+          }
+
+          if (line.includes(' 900 ') || (line.includes('MODE') && line.includes('+r'))) {
+            if (socket && socket.writable) {
               socket.write(`JOIN ${channel1},${channel2}\r\n`);
             }
             continue;
           }
           
-          if (line.includes(' 366 ') && line.includes(channel2)) {
+          if (line.includes(' 366 ') && (line.includes(channel1) || line.includes(channel2))) {
             finish(true);
             return;
           }
