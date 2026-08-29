@@ -48,8 +48,9 @@ export default function AudiobookPlayer({
             onEnded={onEnded}
           />
 
-          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
+          <div className="audiobook-header-info" style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
             <div 
+              className="audiobook-cover-wrap"
               style={{ 
                 width: '140px', 
                 height: '140px', 
@@ -70,7 +71,7 @@ export default function AudiobookPlayer({
               )}
             </div>
 
-            <div style={{ flex: 1, minWidth: '200px' }}>
+            <div className="audiobook-title-meta" style={{ flex: 1, minWidth: '200px' }}>
               <h3 style={{ margin: '0 0 0.5rem 0', color: 'var(--text-primary)', fontSize: '1.25rem', fontWeight: 600 }}>{title}</h3>
               <p style={{ margin: '0 0 0.25rem 0', color: 'var(--text-secondary)' }}><strong>Autor:</strong> {artist}</p>
               <p style={{ margin: '0 0 0.5rem 0', color: 'var(--text-muted)', fontSize: '0.9rem' }}><strong>Album:</strong> {album}</p>
@@ -104,7 +105,7 @@ export default function AudiobookPlayer({
             </div>
           </div>
 
-          <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1.5rem' }}>
+          <div className="audiobook-main-controls" style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1.5rem' }}>
             <button 
               className="btn btn-secondary btn-icon-only" 
               style={{ width: '48px', height: '48px', borderRadius: '50%' }}
@@ -144,7 +145,7 @@ export default function AudiobookPlayer({
             </button>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
+          <div className="audiobook-secondary-grid" style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.5rem' }}>
             
             <div style={{ background: 'rgba(255, 255, 255, 0.02)', border: '1px solid var(--border-color)', borderRadius: '8px', padding: '0.75rem' }}>
               <strong style={{ display: 'block', marginBottom: '0.5rem', fontSize: '0.9rem' }}>⏱️ Schlaf-Timer</strong>

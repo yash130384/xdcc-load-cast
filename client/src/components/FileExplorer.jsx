@@ -89,8 +89,8 @@ export default function FileExplorer({
             <p>Dieser Ordner ist leer.</p>
           </div>
         ) : (
-          <div className="table-wrapper" style={{ margin: 0, border: 'none', background: 'transparent' }}>
-            <table className="results-table" style={{ borderCollapse: 'collapse', width: '100%' }}>
+          <div className="table-wrapper explorer-table-wrapper" style={{ margin: 0, border: 'none', background: 'transparent' }}>
+            <table className="explorer-table" style={{ borderCollapse: 'collapse', width: '100%' }}>
               <thead>
                 <tr style={{ borderBottom: '1px solid var(--border-color)' }}>
                   <th style={{ textAlign: 'left', padding: '0.75rem' }}>Name</th>
@@ -113,14 +113,16 @@ export default function FileExplorer({
                   return (
                     <tr 
                       key={idx}
+                      className="explorer-row"
                       style={{ 
                         borderBottom: '1px solid rgba(255, 255, 255, 0.03)',
                         background: isDir ? 'rgba(0, 242, 254, 0.01)' : 'transparent',
                         transition: 'background 0.2s'
                       }}
                     >
-                      <td style={{ padding: '0.65rem 0.75rem' }}>
+                      <td className="explorer-cell-name" style={{ padding: '0.65rem 0.75rem' }}>
                         <div 
+                          className="explorer-item-clickable"
                           style={{ 
                             display: 'flex', 
                             alignItems: 'center', 
@@ -133,8 +135,8 @@ export default function FileExplorer({
                             }
                           }}
                         >
-                          <span style={{ fontSize: '1.2rem' }}>{icon}</span>
-                          <span style={{ 
+                          <span className="explorer-item-icon" style={{ fontSize: '1.2rem' }}>{icon}</span>
+                          <span className="explorer-item-name" style={{ 
                             color: isDir ? 'var(--accent-cyan)' : 'var(--text-primary)',
                             fontWeight: isDir ? '600' : 'normal',
                             overflow: 'hidden',
@@ -146,15 +148,15 @@ export default function FileExplorer({
                           </span>
                         </div>
                       </td>
-                      <td style={{ padding: '0.65rem 0.75rem', verticalAlign: 'middle' }}>
+                      <td className="explorer-cell-size" style={{ padding: '0.65rem 0.75rem', verticalAlign: 'middle' }}>
                         {!isDir && (
                           <span className="size-badge" style={{ fontFamily: 'var(--font-mono)' }}>
                             {formatBytes(file.size)}
                           </span>
                         )}
                       </td>
-                      <td style={{ padding: '0.65rem 0.75rem', textAlign: 'right', verticalAlign: 'middle' }}>
-                        <div style={{ display: 'inline-flex', gap: '0.4rem' }}>
+                      <td className="explorer-cell-actions" style={{ padding: '0.65rem 0.75rem', textAlign: 'right', verticalAlign: 'middle' }}>
+                        <div className="explorer-actions" style={{ display: 'inline-flex', gap: '0.4rem' }}>
                           <button 
                             type="button"
                             className="btn btn-secondary btn-icon-only"

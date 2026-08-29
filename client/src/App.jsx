@@ -234,6 +234,7 @@ function App() {
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue');
   const [currentView, setCurrentView] = useState('downloads');
+  const [mobileDownloadsTab, setMobileDownloadsTab] = useState('search');
   const [activeSeriesId, setActiveSeriesId] = useState(null);
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
   
@@ -538,6 +539,7 @@ function App() {
           ...prev,
           [id]: [`[${new Date().toLocaleTimeString()}] Download in Warteschlange gestellt...`]
         }));
+        setMobileDownloadsTab('queue');
       }
     } catch (err) {
       alert(`Fehler beim Starten des Downloads: ${err.message}`);
@@ -576,6 +578,7 @@ function App() {
           [data.id]: [`[${new Date().toLocaleTimeString()}] HTTP-Download gestartet...`]
         }));
         setCurrentView('downloads');
+        setMobileDownloadsTab('queue');
       }
     } catch (err) {
       alert(`Fehler beim Starten des Downloads: ${err.message}`);
@@ -2516,33 +2519,59 @@ function App() {
           onOpenSettings={handleOpenSettings}
         />
 
+        {currentView === 'downloads' && (
+          <div className="mobile-downloads-toggle">
+            <button
+              type="button"
+              className={`mobile-tab-btn ${mobileDownloadsTab === 'search' ? 'active' : ''}`}
+              onClick={() => setMobileDownloadsTab('search')}
+            >
+              <SearchIcon />
+              <span>Suche</span>
+            </button>
+            <button
+              type="button"
+              className={`mobile-tab-btn ${mobileDownloadsTab === 'queue' ? 'active' : ''}`}
+              onClick={() => setMobileDownloadsTab('queue')}
+            >
+              <DownloadIcon />
+              <span>Warteschlange</span>
+              {downloads.length > 0 && (
+                <span className="mobile-tab-badge">{downloads.length}</span>
+              )}
+            </button>
+          </div>
+        )}
+
         <div className={currentView === 'downloads' ? "dashboard-grid" : "library-view-container"}>
           
           {currentView === 'downloads' && (
-            <SearchPanel
-              query={query}
-              results={results}
-              loading={loading}
-              error={error}
-              searchSource={searchSource}
-              searchHistory={searchHistory}
-              topDlResults={topDlResults}
-              topDlLoading={topDlLoading}
-              topDlError={topDlError}
-              onQueryChange={setQuery}
-              onSearch={handleSearch}
-              onSearchSourceChange={setSearchSource}
-              onDownload={triggerDownload}
-              fetchTopDl={fetchTopDl}
-              highlightMatch={highlightMatch}
-              onClearHistory={() => setSearchHistory([])}
-              renderStatusText={renderStatusText}
-              getDownloadState={getDownloadState}
-              getStatusClass={getStatusClass}
-            />
+            <div className={`search-panel-col ${mobileDownloadsTab !== 'search' ? 'mobile-hidden' : ''}`}>
+              <SearchPanel
+                query={query}
+                results={results}
+                loading={loading}
+                error={error}
+                searchSource={searchSource}
+                searchHistory={searchHistory}
+                topDlResults={topDlResults}
+                topDlLoading={topDlLoading}
+                topDlError={topDlError}
+                onQueryChange={setQuery}
+                onSearch={handleSearch}
+                onSearchSourceChange={setSearchSource}
+                onDownload={triggerDownload}
+                fetchTopDl={fetchTopDl}
+                highlightMatch={highlightMatch}
+                onClearHistory={() => setSearchHistory([])}
+                renderStatusText={renderStatusText}
+                getDownloadState={getDownloadState}
+                getStatusClass={getStatusClass}
+              />
+            </div>
           )}
 
-          <div className="card" style={currentView !== 'downloads' ? { width: '100%' } : {}}>
+          <div className={`card queue-panel-col ${currentView === 'downloads' && mobileDownloadsTab !== 'queue' ? 'mobile-hidden' : ''}`} style={currentView !== 'downloads' ? { width: '100%' } : {}}>
             {currentView === 'downloads' ? (
               <DownloadsQueue
                 downloads={downloads}
