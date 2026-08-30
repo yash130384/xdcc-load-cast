@@ -83,7 +83,14 @@ class DetailsFragment : DetailsSupportFragment() {
         }
         detailsOverview.actionsAdapter = actionAdapter
 
-        val helper = FullWidthDetailsOverviewRowPresenter(FullWidthDetailsOverviewSharedElementHelper())
+        val helper = FullWidthDetailsOverviewRowPresenter(object : AbstractDetailsDescriptionPresenter() {
+            override fun onBindDescription(viewHolder: ViewHolder, item: Any) {
+                val media = item as? MediaItem ?: return
+                viewHolder.title.text = media.displayTitle
+                viewHolder.subtitle.text = media.displaySubtitle
+                viewHolder.body.text = media.cast ?: ""
+            }
+        })
         helper.backgroundColor = ContextCompat.getColor(requireContext(), R.color.card_background)
         helper.setOnActionClickedListener { action ->
             when (action.id) {

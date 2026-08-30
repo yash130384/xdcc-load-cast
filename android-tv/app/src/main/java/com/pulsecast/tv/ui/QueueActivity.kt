@@ -84,6 +84,7 @@ class QueueFragment : VerticalGridSupportFragment() {
                                 0 -> ApiClient.api.pauseDownload(item.id)
                                 1 -> ApiClient.api.resumeDownload(item.id)
                                 2 -> ApiClient.api.cancelDownload(item.id)
+                                else -> {}
                             }
                         }
                     } catch (e: Exception) {

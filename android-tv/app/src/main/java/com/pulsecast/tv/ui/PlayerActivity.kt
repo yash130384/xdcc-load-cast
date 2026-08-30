@@ -102,29 +102,30 @@ class PlayerActivity : AppCompatActivity() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent?): Boolean {
         player?.let { p ->
-            when (keyCode) {
+            return when (keyCode) {
                 KeyEvent.KEYCODE_DPAD_LEFT -> {
                     p.seekTo(maxOf(0, p.currentPosition - 10000))
                     playerView.showController()
-                    return true
+                    true
                 }
                 KeyEvent.KEYCODE_DPAD_RIGHT -> {
                     p.seekTo(minOf(p.duration, p.currentPosition + 30000))
                     playerView.showController()
-                    return true
+                    true
                 }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE, KeyEvent.KEYCODE_DPAD_CENTER -> {
                     if (p.isPlaying) p.pause() else p.play()
-                    return true
+                    true
                 }
                 KeyEvent.KEYCODE_MEDIA_FAST_FORWARD -> {
                     p.seekTo(minOf(p.duration, p.currentPosition + 30000))
-                    return true
+                    true
                 }
                 KeyEvent.KEYCODE_MEDIA_REWIND -> {
                     p.seekTo(maxOf(0, p.currentPosition - 10000))
-                    return true
+                    true
                 }
+                else -> super.onKeyDown(keyCode, event)
             }
         }
         return super.onKeyDown(keyCode, event)
