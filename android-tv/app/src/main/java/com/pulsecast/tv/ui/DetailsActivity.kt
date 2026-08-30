@@ -48,6 +48,8 @@ class DetailsFragment : DetailsSupportFragment() {
 
     private var mediaItem: MediaItem? = null
     private lateinit var rowsAdapter: ArrayObjectAdapter
+    private lateinit var detailsOverview: DetailsOverviewRow
+    private val actionAdapter = ArrayObjectAdapter()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -56,12 +58,16 @@ class DetailsFragment : DetailsSupportFragment() {
         mediaItem = arguments?.getSerializable(DetailsActivity.EXTRA_MEDIA_ITEM) as? MediaItem
 
         setupDetailsOverview()
+        
+        if (mediaItem?.isGroup == true) {
+            loadSeriesEpisodes()
+        }
     }
 
     private fun setupDetailsOverview() {
         val item = mediaItem ?: return
 
-        val detailsOverview = DetailsOverviewRow(item)
+        detailsOverview = DetailsOverviewRow(item)
         val posterUrl = ApiClient.getPosterUrl(item.displayPoster)
         if (!posterUrl.isNullOrEmpty()) {
             Glide.with(this)
@@ -76,20 +82,20 @@ class DetailsFragment : DetailsSupportFragment() {
                 })
         }
 
-        val actionAdapter = ArrayObjectAdapter()
         if (!item.isGroup) {
             actionAdapter.add(Action(ACTION_PLAY, getString(R.string.action_play)))
             if (item.isXtream && !item.isLive) {
                 actionAdapter.add(Action(ACTION_DOWNLOAD, getString(R.string.action_download)))
             }
         } else {
-            // Series actions
-            if (item.files.isNotEmpty()) {
-                val firstEp = item.files.first()
-                actionAdapter.add(Action(ACTION_PLAY, "▶ Erste Folge starten"))
-                if (item.isXtream) {
-                    actionAdapter.add(Action(ACTION_BATCH_DOWNLOAD, "📥 Ganze Staffel laden (${item.files.size} Folgen)"))
-                }
+            // Series actions - initially basic, updated after load
+            actionAdapter.add(Action(ACTION_PLAY, "▶ Serie abspielen"))
+            
+            // "Downloadbutton" for Series: Batch Download or Auto Download
+            if (item.isXtream) {
+                actionAdapter.add(Action(ACTION_BATCH_DOWNLOAD, "📥 Ganze Staffel laden"))
+            } else {
+                actionAdapter.add(Action(ACTION_BATCH_DOWNLOAD, "📥 Auto-Download / Suche starten"))
             }
         }
         detailsOverview.actionsAdapter = actionAdapter
@@ -116,7 +122,12 @@ class DetailsFragment : DetailsSupportFragment() {
                     triggerDownload(item)
                 }
                 ACTION_BATCH_DOWNLOAD -> {
-                    triggerBatchDownload(item)
+                    if (item.isXtream) {
+                        triggerBatchDownload(item)
+                    } else {
+                        // Trigger local check
+                        triggerLocalSearch(item)
+                    }
                 }
             }
         }
@@ -129,14 +140,6 @@ class DetailsFragment : DetailsSupportFragment() {
         rowsAdapter = ArrayObjectAdapter(ps)
         rowsAdapter.add(detailsOverview)
 
-        // If it's a series, add row with episodes!
-        if (item.isGroup && item.files.isNotEmpty()) {
-            val episodesAdapter = ArrayObjectAdapter(CardPresenter())
-            item.files.forEach { episodesAdapter.add(it) }
-            val header = HeaderItem(1, "Episoden (${item.files.size})")
-            rowsAdapter.add(ListRow(header, episodesAdapter))
-        }
-
         onItemViewClickedListener = OnItemViewClickedListener { _, clickedItem, _, _ ->
             if (clickedItem is MediaItem) {
                 val intent = Intent(requireContext(), PlayerActivity::class.java).apply {
@@ -147,6 +150,66 @@ class DetailsFragment : DetailsSupportFragment() {
         }
 
         adapter = rowsAdapter
+    }
+
+    private fun loadSeriesEpisodes() {
+        val item = mediaItem ?: return
+        
+        lifecycleScope.launch {
+            try {
+                var files = item.files
+                
+                // Fetch Xtream episodes if necessary
+                if (item.isXtream && item.xtreamSeriesId != null) {
+                    val res = withContext(Dispatchers.IO) {
+                        try { ApiClient.api.getXtreamSeriesEpisodes(item.xtreamSeriesId) } catch (e: Exception) { null }
+                    }
+                    if (res != null && res.isSuccessful) {
+                        files = res.body()?.episodes ?: emptyList()
+                        // Update mediaItem files so Batch Download works
+                        mediaItem = item.copy(files = files)
+                    }
+                }
+
+                if (files.isEmpty()) return@launch
+                
+                // Parse seasons
+                val seasonMap = mutableMapOf<Int, MutableList<MediaItem>>()
+                files.forEach { file ->
+                    val season = file.season ?: extractSeason(file)
+                    if (!seasonMap.containsKey(season)) seasonMap[season] = mutableListOf()
+                    seasonMap[season]!!.add(file)
+                }
+
+                val sortedSeasons = seasonMap.keys.sorted()
+                var headerId = 1L
+                sortedSeasons.forEach { s ->
+                    val eps = seasonMap[s]!!.sortedBy { it.episodeNum ?: 1 }
+                    val epAdapter = ArrayObjectAdapter(CardPresenter())
+                    eps.forEach { epAdapter.add(it) }
+                    
+                    val title = "Staffel " + s + " (" + eps.size + " Folgen)"
+                    rowsAdapter.add(ListRow(HeaderItem(headerId++, title), epAdapter))
+                }
+
+            } catch (e: Exception) {
+                // Ignore load error
+            }
+        }
+    }
+
+    private fun extractSeason(item: MediaItem): Int {
+        val sEp = item.metadata?.seasonEpisode ?: item.filename ?: ""
+        val m1 = Regex("(?i)S(\\d+)E\\d+").find(sEp)
+        if (m1 != null) return m1.groupValues[1].toInt()
+        
+        val m2 = Regex("(?i)(\\d+)x\\d+").find(sEp)
+        if (m2 != null) return m2.groupValues[1].toInt()
+        
+        val m3 = Regex("(?i)Staffel\\s*(\\d+)").find(sEp)
+        if (m3 != null) return m3.groupValues[1].toInt()
+        
+        return 1
     }
 
     private fun triggerDownload(item: MediaItem) {
@@ -165,10 +228,10 @@ class DetailsFragment : DetailsSupportFragment() {
                 if (res.isSuccessful && res.body()?.success == true) {
                     Toast.makeText(requireContext(), "Download gestartet! 📥", Toast.LENGTH_SHORT).show()
                 } else {
-                    Toast.makeText(requireContext(), "Fehler: ${res.body()?.error}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(requireContext(), "Fehler: " + res.body()?.error, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(requireContext(), "Fehler: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(requireContext(), "Fehler: " + e.message, Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -180,7 +243,7 @@ class DetailsFragment : DetailsSupportFragment() {
         }
 
         if (batchItems.isEmpty()) {
-            Toast.makeText(requireContext(), "Keine herunterladbaren Folgen gefunden", Toast.LENGTH_SHORT).show()
+            Toast.makeText(requireContext(), "Keine herunterladbaren Folgen gefunden. (Wird geladen?)", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -197,14 +260,33 @@ class DetailsFragment : DetailsSupportFragment() {
                 if (res.isSuccessful && res.body()?.success == true) {
                     Toast.makeText(
                         requireContext(),
-                        "📥 Staffel-Download gestartet! (${batchItems.size} Folgen in Warteschlange)",
+                        "📥 Staffel-Download gestartet! (" + batchItems.size + " Folgen in Warteschlange)",
                         Toast.LENGTH_LONG
                     ).show()
                 } else {
-                    Toast.makeText(requireContext(), "Fehler: ${res.body()?.error}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(requireContext(), "Fehler: " + res.body()?.error, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(requireContext(), "Fehler: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(requireContext(), "Fehler: " + e.message, Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+    
+    private fun triggerLocalSearch(series: MediaItem) {
+        lifecycleScope.launch {
+            try {
+                // Call /api/auto-downloads/check
+                val res = withContext(Dispatchers.IO) {
+                    ApiClient.api.checkAutoDownload(mapOf("showId" to (series.imdbId ?: "")))
+                }
+                if (res.isSuccessful && res.body()?.success == true) {
+                    val count = res.body()?.startedCount ?: 0
+                    Toast.makeText(requireContext(), "Suche abgeschlossen! " + count + " neue Folge(n) gefunden.", Toast.LENGTH_LONG).show()
+                } else {
+                    Toast.makeText(requireContext(), "Suche fehlgeschlagen", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Netzwerkfehler bei Suche", Toast.LENGTH_SHORT).show()
             }
         }
     }

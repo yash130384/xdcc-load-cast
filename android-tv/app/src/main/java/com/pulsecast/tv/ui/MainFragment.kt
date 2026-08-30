@@ -22,21 +22,17 @@ import kotlinx.coroutines.withContext
 class MainFragment : BrowseSupportFragment() {
 
     private lateinit var rowsAdapter: ArrayObjectAdapter
+    private val cardPresenter = CardPresenter()
 
     override fun onViewCreated(view: View, savedInstanceState: Bundle?) {
         super.onViewCreated(view, savedInstanceState)
-
         setupUIElements()
         setupEventListeners()
 
-        // Start Auto-Discovery and load media
         ServerDiscovery.startDiscovery(requireContext()) { _ ->
             loadMediaLibrary()
         }
-
         loadMediaLibrary()
-
-        // Check for App Updates in background
         com.pulsecast.tv.updater.UpdateManager.checkForUpdate(requireActivity(), manualCheck = false)
     }
 
@@ -84,8 +80,6 @@ class MainFragment : BrowseSupportFragment() {
                 }
                 is ActionItem -> {
                     when (item.id) {
-                        ACTION_SEARCH -> startActivity(Intent(requireContext(), SearchActivity::class.java))
-                        ACTION_QUEUE -> startActivity(Intent(requireContext(), QueueActivity::class.java))
                         ACTION_SETTINGS -> startActivity(Intent(requireContext(), SettingsActivity::class.java))
                     }
                 }
@@ -96,98 +90,84 @@ class MainFragment : BrowseSupportFragment() {
     private fun loadMediaLibrary() {
         lifecycleScope.launch {
             try {
-                // 1. Fetch Multi-Device Continue Watching (Weiterschauen)
+                // Fetch Weiterschauen
                 val continueRes = withContext(Dispatchers.IO) {
                     try { ApiClient.api.getContinueWatching() } catch (e: Exception) { null }
                 }
 
-                // 2. Fetch Media Categories (50 newest each)
-                val localMoviesRes = withContext(Dispatchers.IO) {
-                    try { ApiClient.api.getMediaLibrary(category = "Lokal_Filme", limit = 50) } catch (e: Exception) { null }
-                }
-                val localSeriesRes = withContext(Dispatchers.IO) {
-                    try { ApiClient.api.getMediaLibrary(category = "Lokal_Serien", limit = 50) } catch (e: Exception) { null }
-                }
-                val streamMoviesRes = withContext(Dispatchers.IO) {
-                    try { ApiClient.api.getMediaLibrary(category = "Filme", limit = 50) } catch (e: Exception) { null }
-                }
-                val streamSeriesRes = withContext(Dispatchers.IO) {
-                    try { ApiClient.api.getMediaLibrary(category = "Serien", limit = 50) } catch (e: Exception) { null }
-                }
-                val liveRes = withContext(Dispatchers.IO) {
-                    try { ApiClient.api.getMediaLibrary(category = "Live TV", limit = 50) } catch (e: Exception) { null }
-                }
+                // Fetch full libraries
+                val limit = 2000
+                val localMoviesRes = withContext(Dispatchers.IO) { try { ApiClient.api.getMediaLibrary(category = "Lokal_Filme", limit = limit) } catch (e: Exception) { null } }
+                val localSeriesRes = withContext(Dispatchers.IO) { try { ApiClient.api.getMediaLibrary(category = "Lokal_Serien", limit = limit) } catch (e: Exception) { null } }
+                val streamMoviesRes = withContext(Dispatchers.IO) { try { ApiClient.api.getMediaLibrary(category = "Filme", limit = limit) } catch (e: Exception) { null } }
+                val streamSeriesRes = withContext(Dispatchers.IO) { try { ApiClient.api.getMediaLibrary(category = "Serien", limit = limit) } catch (e: Exception) { null } }
+                val liveRes = withContext(Dispatchers.IO) { try { ApiClient.api.getMediaLibrary(category = "Live TV", limit = limit) } catch (e: Exception) { null } }
 
                 rowsAdapter.clear()
-                val cardPresenter = CardPresenter()
                 var rowIndex = 0L
 
-                // Row 0: ▶ Weiterschauen (falls angefangene Medien vorhanden)
+                // 1. Weiterschauen
                 val continueItems = continueRes?.body()?.items ?: emptyList()
                 if (continueItems.isNotEmpty()) {
                     val continueAdapter = ArrayObjectAdapter(cardPresenter)
                     continueItems.forEach { continueAdapter.add(it) }
-                    val header = HeaderItem(rowIndex++, "▶ Weiterschauen (${continueItems.size})")
-                    rowsAdapter.add(ListRow(header, continueAdapter))
+                    rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "▶ Weiterschauen"), continueAdapter))
                 }
 
-                // Row 1: 💾 Lokale Filme (Neueste 50)
+                // 2. Lokal Section
                 val localMovies = localMoviesRes?.body()?.items ?: emptyList()
-                if (localMovies.isNotEmpty()) {
-                    val localMoviesAdapter = ArrayObjectAdapter(cardPresenter)
-                    localMovies.forEach { localMoviesAdapter.add(it) }
-                    val header = HeaderItem(rowIndex++, "💾 Lokale Filme (${localMovies.size})")
-                    rowsAdapter.add(ListRow(header, localMoviesAdapter))
-                }
-
-                // Row 2: 💾 Lokale Serien (Neueste 50)
                 val localSeries = localSeriesRes?.body()?.items ?: emptyList()
-                if (localSeries.isNotEmpty()) {
-                    val localSeriesAdapter = ArrayObjectAdapter(cardPresenter)
-                    localSeries.forEach { localSeriesAdapter.add(it) }
-                    val header = HeaderItem(rowIndex++, "💾 Lokale Serien (${localSeries.size})")
-                    rowsAdapter.add(ListRow(header, localSeriesAdapter))
+                if (localMovies.isNotEmpty() || localSeries.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "💾 LOKAL")))
+                    
+                    if (localMovies.isNotEmpty()) {
+                        buildSubcategoryRows("Filme", localMovies, rowIndex).forEach { 
+                            rowsAdapter.add(it)
+                            rowIndex++
+                        }
+                    }
+                    if (localSeries.isNotEmpty()) {
+                        buildSubcategoryRows("Serien", localSeries, rowIndex).forEach { 
+                            rowsAdapter.add(it)
+                            rowIndex++
+                        }
+                    }
                 }
 
-                // Row 3: 🍿 Stream Filme (Neueste 50)
+                // 3. Stream Section
                 val streamMovies = streamMoviesRes?.body()?.items ?: emptyList()
-                if (streamMovies.isNotEmpty()) {
-                    val streamMoviesAdapter = ArrayObjectAdapter(cardPresenter)
-                    streamMovies.forEach { streamMoviesAdapter.add(it) }
-                    val header = HeaderItem(rowIndex++, "🍿 Stream Filme (${streamMovies.size})")
-                    rowsAdapter.add(ListRow(header, streamMoviesAdapter))
-                }
-
-                // Row 4: 📺 Stream Serien (Neueste 50)
                 val streamSeries = streamSeriesRes?.body()?.items ?: emptyList()
-                if (streamSeries.isNotEmpty()) {
-                    val streamSeriesAdapter = ArrayObjectAdapter(cardPresenter)
-                    streamSeries.forEach { streamSeriesAdapter.add(it) }
-                    val header = HeaderItem(rowIndex++, "📺 Stream Serien (${streamSeries.size})")
-                    rowsAdapter.add(ListRow(header, streamSeriesAdapter))
+                if (streamMovies.isNotEmpty() || streamSeries.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "🍿 STREAM")))
+                    
+                    if (streamMovies.isNotEmpty()) {
+                        buildSubcategoryRows("Filme", streamMovies, rowIndex).forEach { 
+                            rowsAdapter.add(it)
+                            rowIndex++
+                        }
+                    }
+                    if (streamSeries.isNotEmpty()) {
+                        buildSubcategoryRows("Serien", streamSeries, rowIndex).forEach { 
+                            rowsAdapter.add(it)
+                            rowIndex++
+                        }
+                    }
                 }
 
-                // Row 5: 📡 Live TV Sender
+                // 4. IPTV Section
                 val liveItems = liveRes?.body()?.items ?: emptyList()
                 if (liveItems.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "📡 IPTV")))
                     val liveAdapter = ArrayObjectAdapter(cardPresenter)
                     liveItems.forEach { liveAdapter.add(it) }
-                    val header = HeaderItem(rowIndex++, "📡 Live TV Sender (${liveItems.size})")
-                    rowsAdapter.add(ListRow(header, liveAdapter))
+                    rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "Live TV Sender"), liveAdapter))
                 }
 
-                // Row 6: ⚡ Erweiterter Modus (XDCC Suche, Warteschlange)
-                val advancedAdapter = ArrayObjectAdapter(ActionCardPresenter())
-                advancedAdapter.add(ActionItem(ACTION_SEARCH, "🔍 XDCC & Bot Suche", "Moviegods Releases finden"))
-                advancedAdapter.add(ActionItem(ACTION_QUEUE, getString(R.string.action_queue), "Laufende Server-Downloads"))
-                val advHeader = HeaderItem(rowIndex++, "⚡ Erweiterter Modus & XDCC")
-                rowsAdapter.add(ListRow(advHeader, advancedAdapter))
-
-                // Row 7: ⚙️ Einstellungen & System-Info (Zahnrad)
+                // 5. Settings / Zahnradbereich
+                rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "⚙️ SYSTEM")))
                 val settingsAdapter = ArrayObjectAdapter(ActionCardPresenter())
-                settingsAdapter.add(ActionItem(ACTION_SETTINGS, "⚙️ Einstellungen & System-Info", "Server-IP, Tailscale, Diagnosen & Updates"))
-                val setHeader = HeaderItem(rowIndex++, "⚙️ Einstellungen")
-                rowsAdapter.add(ListRow(setHeader, settingsAdapter))
+                settingsAdapter.add(ActionItem(ACTION_SETTINGS, "⚙️ Einstellungen & Dashboard", "System, Suche, Downloads & Warteschlange öffnen"))
+                rowsAdapter.add(ListRow(HeaderItem(rowIndex++, "Erweitert"), settingsAdapter))
 
             } catch (e: Exception) {
                 Toast.makeText(requireContext(), "Ladefehler: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -195,9 +175,38 @@ class MainFragment : BrowseSupportFragment() {
         }
     }
 
+    private fun buildSubcategoryRows(prefix: String, items: List<MediaItem>, startingId: Long): List<ListRow> {
+        val grouped = mutableMapOf<String, MutableList<MediaItem>>()
+        for (item in items) {
+            val sub = item.metadata?.subcategory ?: item.subcategory ?: "Weitere"
+            if (!grouped.containsKey(sub)) {
+                grouped[sub] = mutableListOf()
+            }
+            grouped[sub]!!.add(item)
+        }
+
+        var currentId = startingId
+        val rows = mutableListOf<ListRow>()
+        
+        // Sort keys but put "Weitere" at the end
+        val sortedKeys = grouped.keys.sortedWith(Comparator { a, b ->
+            if (a == "Weitere") 1
+            else if (b == "Weitere") -1
+            else a.compareTo(b)
+        })
+
+        for (key in sortedKeys) {
+            val catItems = grouped[key]!!.sortedByDescending { it.mtime ?: 0 }
+            val adapter = ArrayObjectAdapter(cardPresenter)
+            catItems.forEach { adapter.add(it) }
+            val headerTitle = if (key == "Weitere") "$prefix ($key)" else "$prefix - $key"
+            rows.add(ListRow(HeaderItem(currentId++, headerTitle), adapter))
+        }
+        
+        return rows
+    }
+
     companion object {
-        const val ACTION_SEARCH = 1
-        const val ACTION_QUEUE = 2
         const val ACTION_SETTINGS = 3
     }
 
@@ -218,13 +227,7 @@ class MainFragment : BrowseSupportFragment() {
             val cardView = viewHolder.view as ImageCardView
             cardView.titleText = action.title
             cardView.contentText = action.description
-            val drawableRes = when (action.id) {
-                ACTION_SEARCH -> R.drawable.ic_search
-                ACTION_QUEUE -> R.drawable.ic_download
-                ACTION_SETTINGS -> R.drawable.tv_banner
-                else -> R.drawable.tv_banner
-            }
-            cardView.mainImage = ContextCompat.getDrawable(viewHolder.view.context, drawableRes)
+            cardView.mainImage = ContextCompat.getDrawable(viewHolder.view.context, R.drawable.tv_banner)
         }
 
         override fun onUnbindViewHolder(viewHolder: ViewHolder) {

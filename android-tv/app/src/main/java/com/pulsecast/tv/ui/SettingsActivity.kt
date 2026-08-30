@@ -1,5 +1,6 @@
 package com.pulsecast.tv.ui
 
+import android.content.Intent
 import android.os.Bundle
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
@@ -34,6 +35,8 @@ class SettingsFragment : GuidedStepSupportFragment() {
         private const val ACTION_TAILSCALE_STATUS = 101L
         private const val ACTION_XTREAM_STATUS = 102L
         private const val ACTION_XDCC_STATUS = 103L
+        private const val ACTION_QUEUE = 200L
+        private const val ACTION_SEARCH = 201L
         private const val ACTION_SERVER_URL = 1L
         private const val ACTION_TEST_CONNECT = 2L
         private const val ACTION_CHECK_UPDATE = 3L
@@ -55,6 +58,23 @@ class SettingsFragment : GuidedStepSupportFragment() {
             ApiClient.baseUrl
         ) ?: ApiClient.baseUrl
 
+        
+        actions.add(
+            GuidedAction.Builder(requireContext())
+                .id(ACTION_QUEUE)
+                .title("📥 Downloads & Warteschlange")
+                .description("Aktive Downloads ansehen und verwalten")
+                .build()
+        )
+
+        actions.add(
+            GuidedAction.Builder(requireContext())
+                .id(ACTION_SEARCH)
+                .title("🔍 Suche (Moviegods & XDCC)")
+                .description("Nach Filmen und Serien suchen (TOPDL verfügbar)")
+                .build()
+        )
+
         // Server URL input
         actions.add(
             GuidedAction.Builder(requireContext())
@@ -65,6 +85,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
                 .editable(true)
                 .build()
         )
+
 
         actions.add(
             GuidedAction.Builder(requireContext())
@@ -179,8 +200,16 @@ class SettingsFragment : GuidedStepSupportFragment() {
             rawInput = "$rawInput:3000"
         }
 
+        
         when (action.id) {
+            ACTION_QUEUE -> {
+                startActivity(Intent(requireContext(), QueueActivity::class.java))
+            }
+            ACTION_SEARCH -> {
+                startActivity(Intent(requireContext(), SearchActivity::class.java))
+            }
             ACTION_TEST_CONNECT -> {
+
                 lifecycleScope.launch {
                     try {
                         ApiClient.updateBaseUrl(rawInput)
