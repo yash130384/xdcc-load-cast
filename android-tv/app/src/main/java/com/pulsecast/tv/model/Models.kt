@@ -102,6 +102,34 @@ data class XtreamDownloadRequest(
     @SerializedName("seriesTitle") val seriesTitle: String? = null
 )
 
+data class StreamDownloadRequest(
+    @SerializedName("streamUrl") val streamUrl: String,
+    @SerializedName("title") val title: String,
+    @SerializedName("seriesTitle") val seriesTitle: String? = null,
+    @SerializedName("filename") val filename: String? = null
+)
+
+data class BatchEpisodeItem(
+    @SerializedName("url") val url: String,
+    @SerializedName("title") val title: String
+) : Serializable
+
+data class BatchDownloadRequest(
+    @SerializedName("seriesTitle") val seriesTitle: String,
+    @SerializedName("items") val items: List<BatchEpisodeItem>
+)
+
+data class ProgressUpdateRequest(
+    @SerializedName("filename") val filename: String,
+    @SerializedName("position") val position: Double,
+    @SerializedName("currentTime") val currentTime: Double,
+    @SerializedName("duration") val duration: Double,
+    @SerializedName("seriesTitle") val seriesTitle: String? = null,
+    @SerializedName("episodeTitle") val episodeTitle: String? = null,
+    @SerializedName("percentage") val percentage: Double,
+    @SerializedName("isWatched") val isWatched: Boolean? = null
+)
+
 data class DownloadResponse(
     @SerializedName("success") val success: Boolean = false,
     @SerializedName("id") val id: String? = null,

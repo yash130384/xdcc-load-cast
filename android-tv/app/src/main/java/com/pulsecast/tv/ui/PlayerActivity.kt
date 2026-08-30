@@ -3,7 +3,6 @@ package com.pulsecast.tv.ui
 import android.os.Bundle
 import android.util.Log
 import android.view.KeyEvent
-import android.view.View
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 import androidx.lifecycle.lifecycleScope
@@ -15,15 +14,18 @@ import androidx.media3.ui.PlayerView
 import com.pulsecast.tv.R
 import com.pulsecast.tv.api.ApiClient
 import com.pulsecast.tv.model.MediaItem
-import com.pulsecast.tv.model.PlayProgress
+import com.pulsecast.tv.model.ProgressUpdateRequest
+import com.pulsecast.tv.model.StreamDownloadRequest
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class PlayerActivity : AppCompatActivity() {
 
     private var player: ExoPlayer? = null
     private lateinit var playerView: PlayerView
     private var mediaItem: MediaItem? = null
+    private var isDownloading = false
 
     companion object {
         const val EXTRA_MEDIA_ITEM = "extra_media_item"
@@ -56,7 +58,7 @@ class PlayerActivity : AppCompatActivity() {
             setMediaItem(exoItem)
 
             // Resume progress if present
-            val progressSeconds = mediaItem?.progress?.currentTime ?: 0.0
+            val progressSeconds = mediaItem?.progress?.currentTime ?: mediaItem?.progress?.duration ?: 0.0
             if (progressSeconds > 10.0) {
                 seekTo((progressSeconds * 1000).toLong())
             }
@@ -69,7 +71,7 @@ class PlayerActivity : AppCompatActivity() {
 
                 override fun onPlaybackStateChanged(playbackState: Int) {
                     if (playbackState == Player.STATE_ENDED) {
-                        saveProgress(0.0) // Reset progress when finished
+                        saveProgress(player?.duration?.toDouble() ?: 0.0, isWatched = true)
                         finish()
                     }
                 }
@@ -83,19 +85,65 @@ class PlayerActivity : AppCompatActivity() {
         playerView.keepScreenOn = true
     }
 
-    private fun saveProgress(currentSeconds: Double) {
-        val filename = mediaItem?.filename ?: return
+    private fun saveProgress(currentSeconds: Double, isWatched: Boolean? = null) {
+        val item = mediaItem ?: return
+        val filename = item.filename.ifEmpty { item.streamUrl ?: "" }
         val durationSeconds = (player?.duration ?: 0L) / 1000.0
+        val percentage = if (durationSeconds > 0) (currentSeconds / durationSeconds) * 100 else 0.0
+
         lifecycleScope.launch(Dispatchers.IO) {
             try {
-                val progress = PlayProgress(
+                val req = ProgressUpdateRequest(
+                    filename = filename,
+                    position = currentSeconds,
                     currentTime = currentSeconds,
                     duration = durationSeconds,
-                    updatedAt = System.currentTimeMillis()
+                    seriesTitle = item.metadata?.originalCategory ?: item.metadata?.title,
+                    episodeTitle = item.displayTitle,
+                    percentage = percentage,
+                    isWatched = isWatched ?: (percentage >= 90.0)
                 )
-                ApiClient.api.saveProgress(mapOf(filename to progress))
+                ApiClient.api.saveMediaProgress(req)
             } catch (e: Exception) {
                 Log.e(TAG, "Failed to save playback progress", e)
+            }
+        }
+    }
+
+    private fun triggerPufferFixDownload() {
+        val item = mediaItem ?: return
+        if (isDownloading) return
+        isDownloading = true
+
+        val streamUrl = item.streamUrl ?: ApiClient.getStreamUrl(item.filename)
+        val title = item.displayTitle
+        val seriesTitle = item.metadata?.originalCategory ?: item.metadata?.title
+
+        lifecycleScope.launch {
+            try {
+                val res = withContext(Dispatchers.IO) {
+                    ApiClient.api.downloadStream(
+                        StreamDownloadRequest(
+                            streamUrl = streamUrl,
+                            title = title,
+                            seriesTitle = seriesTitle,
+                            filename = item.filename
+                        )
+                    )
+                }
+                if (res.isSuccessful && res.body()?.success == true) {
+                    Toast.makeText(
+                        this@PlayerActivity,
+                        "📥 Puffer-Fix: Download für \"$title\" auf Server gestartet!",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    Toast.makeText(this@PlayerActivity, "Download-Fehler: ${res.body()?.error}", Toast.LENGTH_SHORT).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(this@PlayerActivity, "Fehler: ${e.message}", Toast.LENGTH_SHORT).show()
+            } finally {
+                isDownloading = false
             }
         }
     }
@@ -123,6 +171,11 @@ class PlayerActivity : AppCompatActivity() {
                 }
                 KeyEvent.KEYCODE_MEDIA_REWIND -> {
                     p.seekTo(maxOf(0, p.currentPosition - 10000))
+                    true
+                }
+                KeyEvent.KEYCODE_MENU, KeyEvent.KEYCODE_INFO, KeyEvent.KEYCODE_D -> {
+                    // Quick Puffer-Fix Download action
+                    triggerPufferFixDownload()
                     true
                 }
                 else -> super.onKeyDown(keyCode, event)

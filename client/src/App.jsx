@@ -12,6 +12,7 @@ import CastModal from './components/CastModal';
 import ObsoleteFilesModal from './components/ObsoleteFilesModal';
 import AudiobookPlayer from './components/AudiobookPlayer';
 import FileExplorer from './components/FileExplorer';
+import VideoPlayerModal from './components/VideoPlayerModal';
 import { formatBytes, formatDuration, highlightMatch, getPosterSrc, formatTime } from './components/utils';
 
 const PulseCastLogo = () => (
@@ -233,7 +234,10 @@ function App() {
   });
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue');
-  const [currentView, setCurrentView] = useState('downloads');
+  const [appMode, setAppMode] = useState('media'); // 'media' (Netflix default) or 'advanced' (profi)
+  const [currentView, setCurrentView] = useState('library');
+  const [continueWatchingItems, setContinueWatchingItems] = useState([]);
+  const [activeVideoItem, setActiveVideoItem] = useState(null);
   const [mobileDownloadsTab, setMobileDownloadsTab] = useState('search');
   const [activeSeriesId, setActiveSeriesId] = useState(null);
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
@@ -2055,13 +2059,39 @@ function App() {
     setShowAudiobookPlayer(true);
   };
 
+  const fetchContinueWatching = () => {
+    fetch('/api/media/continue-watching')
+      .then(res => res.json())
+      .then(data => {
+        if (data && Array.isArray(data.items)) {
+          setContinueWatchingItems(data.items);
+        }
+      })
+      .catch(err => console.error('Failed to fetch continue watching:', err));
+  };
+
+  const toggleWatched = (filename, isWatched) => {
+    fetch('/api/media/toggle-watched', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ filename, isWatched })
+    })
+    .then(res => res.json())
+    .then(() => {
+      fetchContinueWatching();
+      fetchMediaLibrary(false);
+    })
+    .catch(err => console.error('Failed to toggle watched:', err));
+  };
+
   const playLocalLibrary = (filename, item = null) => {
-    const isM4b = filename.toLowerCase().endsWith('.m4b');
+    const isM4b = filename && filename.toLowerCase().endsWith('.m4b');
     if (isM4b) {
       playAudiobook(item || { filename });
       return;
     }
-    window.open(`/api/media/${encodeURIComponent(filename)}`, '_blank');
+    const resolvedItem = item || (mediaLibrary?.items || mediaLibrary || []).find(m => m.filename === filename) || { filename };
+    setActiveVideoItem(resolvedItem);
   };
 
   const saveAudiobookProgress = (filename, position) => {
@@ -2510,7 +2540,14 @@ function App() {
       <div className="app-container">
         
         <AppHeader
+          appMode={appMode}
           currentView={currentView}
+          selectedCategory={selectedCategory}
+          onToggleAppMode={(mode) => {
+            setAppMode(mode);
+            if (mode === 'media') setCurrentView('library');
+          }}
+          onSelectCategory={handleSelectCategory}
           onDownloadsClick={() => setCurrentView('downloads')}
           onLibraryClick={handleLibraryView}
           onExplorerClick={() => { setCurrentView('explorer'); fetchExplorerFiles(''); }}
@@ -2519,7 +2556,7 @@ function App() {
           onOpenSettings={handleOpenSettings}
         />
 
-        {currentView === 'downloads' && (
+        {appMode === 'advanced' && currentView === 'downloads' && (
           <div className="mobile-downloads-toggle">
             <button
               type="button"
@@ -2543,9 +2580,9 @@ function App() {
           </div>
         )}
 
-        <div className={currentView === 'downloads' ? "dashboard-grid" : "library-view-container"}>
+        <div className={appMode === 'advanced' && currentView === 'downloads' ? "dashboard-grid" : "library-view-container"}>
           
-          {currentView === 'downloads' && (
+          {appMode === 'advanced' && currentView === 'downloads' && (
             <div className={`search-panel-col ${mobileDownloadsTab !== 'search' ? 'mobile-hidden' : ''}`}>
               <SearchPanel
                 query={query}
@@ -2571,8 +2608,8 @@ function App() {
             </div>
           )}
 
-          <div className={`card queue-panel-col ${currentView === 'downloads' && mobileDownloadsTab !== 'queue' ? 'mobile-hidden' : ''}`} style={currentView !== 'downloads' ? { width: '100%' } : {}}>
-            {currentView === 'downloads' ? (
+          <div className={`card queue-panel-col ${appMode === 'advanced' && currentView === 'downloads' && mobileDownloadsTab !== 'queue' ? 'mobile-hidden' : ''}`} style={appMode !== 'advanced' || currentView !== 'downloads' ? { width: '100%' } : {}}>
+            {appMode === 'advanced' && currentView === 'downloads' ? (
               <DownloadsQueue
                 downloads={downloads}
                 downloadLogs={downloadLogs}
@@ -2593,7 +2630,7 @@ function App() {
                 onToggleAutoDownload={handleToggleAutoDownload}
                 onCheckNow={handleCheckNow}
               />
-            ) : currentView === 'library' ? (
+            ) : appMode === 'media' || currentView === 'library' ? (
               <MediaLibrary
                 mediaLibrary={mediaLibrary}
                 selectedCategory={selectedCategory}
@@ -2614,6 +2651,8 @@ function App() {
                 wsConnected={wsConnected}
                 xtreamEpisodes={xtreamEpisodes}
                 loadingXtreamEpisodes={loadingXtreamEpisodes}
+                continueWatchingItems={continueWatchingItems}
+                onToggleWatched={toggleWatched}
                 settings={settings}
                 onSelectCategory={handleSelectCategory}
                 onSelectSubcategory={handleSelectSubcategory}
@@ -2628,7 +2667,7 @@ function App() {
                 onStopCast={stopCast}
                 onScroll={handleScroll}
                 onSeriesClick={setActiveSeriesId}
-                onRefresh={(force) => fetchMediaLibrary(force)}
+                onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
                 onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
                 onXtreamDownload={triggerXtreamDownload}
                 onXtreamBatchDownload={triggerXtreamBatchDownload}
@@ -2785,6 +2824,19 @@ function App() {
           onClose={closeAudiobookPlayer}
           onSleepTimerToggle={() => setSleepTimerActive(prev => !prev)}
           formatTime={formatTime}
+        />
+
+        <VideoPlayerModal
+          isOpen={!!activeVideoItem}
+          item={activeVideoItem}
+          onClose={() => {
+            setActiveVideoItem(null);
+            fetchContinueWatching();
+            fetchMediaLibrary(false);
+          }}
+          onDownloadStream={() => {
+            fetchContinueWatching();
+          }}
         />
 
       </div>

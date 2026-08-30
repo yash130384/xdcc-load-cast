@@ -2,12 +2,15 @@ import React, { useState } from 'react';
 import MediaCard from './MediaCard.jsx';
 import MusicItem from './MusicItem.jsx';
 import SeasonDownloadModal from './SeasonDownloadModal.jsx';
+import NetflixHero from './NetflixHero.jsx';
+import ContinueWatchingRow from './ContinueWatchingRow.jsx';
 import { SearchIcon, CloseIcon, HeartIcon, CastIcon, PlayIcon, PauseIcon, DownloadIcon, TrashIcon, CalendarIcon } from './icons.jsx';
 import { getPosterSrc, formatDuration, formatBytes } from './utils.js';
 
 const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loadingLibrary, totalPages, totalItems, currentPage,
   counts, serverSubcategories, activeSeries, activeSeriesId, librarySearchQuery, debouncedSearchQuery,
   favoritesFilter, activeCasts, pendingCasts, wsConnected, xtreamEpisodes, loadingXtreamEpisodes,
+  continueWatchingItems, onToggleWatched,
   onSelectCategory, onSelectSubcategory, onSearchChange, onPageChange, onToggleFavorite,
   onDelete, onDeleteFile, onPlay, onCast, onCastControl, onStopCast, onScroll, onSeriesClick, onCheckNow,
   onToggleAutoDownload, onRefresh, onClearFilters, onXtreamDownload, onXtreamBatchDownload, autoDownloads, checkingShowId, renderFavoritesOverview,
@@ -514,6 +517,26 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                 🗑️ Bereinigen
               </button>
             </div>
+          )}
+
+          {/* Netflix Style Weiterschauen Row */}
+          {continueWatchingItems && continueWatchingItems.length > 0 && !librarySearchQuery && (
+            <ContinueWatchingRow
+              items={continueWatchingItems}
+              onPlay={onPlay}
+              onToggleWatched={onToggleWatched}
+            />
+          )}
+
+          {/* Netflix Style Featured Hero Banner */}
+          {!librarySearchQuery && selectedCategory === 'all' && groupedLibrary.length > 0 && (
+            <NetflixHero
+              item={groupedLibrary.find(i => (i.posterUrl || i.metadata?.posterUrl) && (i.metadata?.cast || i.cast || i.metadata?.year)) || groupedLibrary[0]}
+              onPlay={onPlay}
+              onSeriesClick={onSeriesClick}
+              onToggleFavorite={onToggleFavorite}
+              onDownload={onXtreamDownload}
+            />
           )}
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>

@@ -11,6 +11,8 @@ import androidx.lifecycle.lifecycleScope
 import com.bumptech.glide.Glide
 import com.pulsecast.tv.R
 import com.pulsecast.tv.api.ApiClient
+import com.pulsecast.tv.model.BatchDownloadRequest
+import com.pulsecast.tv.model.BatchEpisodeItem
 import com.pulsecast.tv.model.MediaItem
 import com.pulsecast.tv.model.XtreamDownloadRequest
 import com.pulsecast.tv.presenter.CardPresenter
@@ -80,6 +82,15 @@ class DetailsFragment : DetailsSupportFragment() {
             if (item.isXtream && !item.isLive) {
                 actionAdapter.add(Action(ACTION_DOWNLOAD, getString(R.string.action_download)))
             }
+        } else {
+            // Series actions
+            if (item.files.isNotEmpty()) {
+                val firstEp = item.files.first()
+                actionAdapter.add(Action(ACTION_PLAY, "▶ Erste Folge starten"))
+                if (item.isXtream) {
+                    actionAdapter.add(Action(ACTION_BATCH_DOWNLOAD, "📥 Ganze Staffel laden (${item.files.size} Folgen)"))
+                }
+            }
         }
         detailsOverview.actionsAdapter = actionAdapter
 
@@ -95,13 +106,17 @@ class DetailsFragment : DetailsSupportFragment() {
         helper.setOnActionClickedListener { action ->
             when (action.id) {
                 ACTION_PLAY -> {
+                    val playTarget = if (item.isGroup && item.files.isNotEmpty()) item.files.first() else item
                     val intent = Intent(requireContext(), PlayerActivity::class.java).apply {
-                        putExtra(PlayerActivity.EXTRA_MEDIA_ITEM, item)
+                        putExtra(PlayerActivity.EXTRA_MEDIA_ITEM, playTarget)
                     }
                     startActivity(intent)
                 }
                 ACTION_DOWNLOAD -> {
                     triggerDownload(item)
+                }
+                ACTION_BATCH_DOWNLOAD -> {
+                    triggerBatchDownload(item)
                 }
             }
         }
@@ -158,8 +173,45 @@ class DetailsFragment : DetailsSupportFragment() {
         }
     }
 
+    private fun triggerBatchDownload(series: MediaItem) {
+        val batchItems = series.files.mapNotNull { ep ->
+            val url = ep.streamUrl ?: ""
+            if (url.isNotEmpty()) BatchEpisodeItem(url = url, title = ep.displayTitle) else null
+        }
+
+        if (batchItems.isEmpty()) {
+            Toast.makeText(requireContext(), "Keine herunterladbaren Folgen gefunden", Toast.LENGTH_SHORT).show()
+            return
+        }
+
+        lifecycleScope.launch {
+            try {
+                val res = withContext(Dispatchers.IO) {
+                    ApiClient.api.startBatchDownload(
+                        BatchDownloadRequest(
+                            seriesTitle = series.displayTitle,
+                            items = batchItems
+                        )
+                    )
+                }
+                if (res.isSuccessful && res.body()?.success == true) {
+                    Toast.makeText(
+                        requireContext(),
+                        "📥 Staffel-Download gestartet! (${batchItems.size} Folgen in Warteschlange)",
+                        Toast.LENGTH_LONG
+                    ).show()
+                } else {
+                    Toast.makeText(requireContext(), "Fehler: ${res.body()?.error}", Toast.LENGTH_LONG).show()
+                }
+            } catch (e: Exception) {
+                Toast.makeText(requireContext(), "Fehler: ${e.message}", Toast.LENGTH_LONG).show()
+            }
+        }
+    }
+
     companion object {
         private const val ACTION_PLAY = 1L
         private const val ACTION_DOWNLOAD = 2L
+        private const val ACTION_BATCH_DOWNLOAD = 3L
     }
 }

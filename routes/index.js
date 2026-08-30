@@ -1170,16 +1170,166 @@ export function registerAllRoutes(app) {
   });
 
   app.post('/api/media/progress', (req, res) => {
-    const { filename, position } = req.body;
+    const {
+      filename,
+      position,
+      currentTime,
+      duration,
+      percentage,
+      seriesTitle,
+      episodeTitle,
+      seasonNumber,
+      episodeNumber,
+      isWatched
+    } = req.body;
+
     if (!filename) {
       return res.status(400).json({ error: 'Missing filename' });
     }
+
+    const pos = parseFloat(position ?? currentTime) || 0;
+    const dur = parseFloat(duration) || 0;
+    const pct = dur > 0 ? (pos / dur) * 100 : (parseFloat(percentage) || 0);
+    const watched = typeof isWatched === 'boolean' ? isWatched : (pct >= 90);
+
     appState.playProgress[filename] = {
-      position: parseFloat(position) || 0,
+      position: pos,
+      currentTime: pos,
+      duration: dur,
+      percentage: Math.min(100, Math.max(0, Math.round(pct * 10) / 10)),
+      isWatched: watched,
+      seriesTitle: seriesTitle || null,
+      episodeTitle: episodeTitle || null,
+      seasonNumber: seasonNumber || null,
+      episodeNumber: episodeNumber || null,
       updatedAt: Date.now()
     };
+
     savePlayProgress();
     return res.json({ success: true, progress: appState.playProgress[filename] });
+  });
+
+  app.get('/api/media/continue-watching', async (req, res) => {
+    try {
+      const allMedia = [
+        ...(appState.cachedMappedList || []),
+        ...(appState.cachedMappedMovies || []),
+        ...(appState.cachedMappedSeries || [])
+      ];
+
+      const continueList = [];
+      const entries = Object.entries(appState.playProgress || {});
+
+      for (const [filename, prog] of entries) {
+        if (!prog || prog.percentage <= 1) continue;
+
+        // Find matching item in library or create a lightweight entry
+        let item = allMedia.find(m => m.filename === filename || m.streamUrl === filename);
+        
+        // If not found directly, check series episodes
+        if (!item) {
+          for (const m of allMedia) {
+            if (m.isGroup && Array.isArray(m.files)) {
+              const ep = m.files.find(f => f.filename === filename);
+              if (ep) {
+                item = {
+                  ...ep,
+                  seriesTitle: m.displayTitle || m.title || m.metadata?.title,
+                  posterUrl: m.posterUrl || m.metadata?.posterUrl,
+                  isSeriesEpisode: true
+                };
+                break;
+              }
+            }
+          }
+        }
+
+        if (item) {
+          continueList.push({
+            ...item,
+            progress: prog,
+            updatedAt: prog.updatedAt || 0
+          });
+        }
+      }
+
+      // Sort by newest watch progress
+      continueList.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+      return res.json({ items: continueList.slice(0, 20) });
+    } catch (err) {
+      console.error('[Continue Watching] Error:', err);
+      return res.status(500).json({ error: err.message, items: [] });
+    }
+  });
+
+  app.post('/api/media/toggle-watched', (req, res) => {
+    const { filename, isWatched } = req.body;
+    if (!filename) return res.status(400).json({ error: 'Missing filename' });
+
+    const current = appState.playProgress[filename] || { position: 0, currentTime: 0, duration: 0, percentage: 0 };
+    const newWatched = typeof isWatched === 'boolean' ? isWatched : !current.isWatched;
+
+    appState.playProgress[filename] = {
+      ...current,
+      isWatched: newWatched,
+      percentage: newWatched ? 100 : current.percentage,
+      updatedAt: Date.now()
+    };
+
+    savePlayProgress();
+    return res.json({ success: true, isWatched: newWatched, progress: appState.playProgress[filename] });
+  });
+
+  app.post('/api/media/download-stream', async (req, res) => {
+    const { streamUrl, title, seriesTitle, filename: customFilename } = req.body;
+    if (!streamUrl && !title) {
+      return res.status(400).json({ error: 'Missing streamUrl or title' });
+    }
+
+    try {
+      const url = streamUrl || '';
+      let extension = '.mp4';
+      try {
+        const pathname = new URL(url).pathname;
+        const ext = path.extname(pathname);
+        if (ext && ext.length > 1 && ext.length < 6) extension = ext.toLowerCase();
+      } catch (e) {}
+
+      let filename = customFilename || (seriesTitle ? `${seriesTitle} - ${title}${extension}` : `${title || 'Stream_Download'}${extension}`);
+      filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+
+      const id = Date.now().toString();
+      const shouldQueue = isHttpDownloadActive();
+      const downloader = new HttpDownloader({
+        id,
+        url,
+        filename,
+        downloadDir: appState.appConfig.downloadDir,
+        initialStatus: shouldQueue ? 'queued' : 'connecting'
+      });
+
+      downloader.on('progress', (data) => {
+        if (data.status === 'completed') {
+          appState.cachedLocalFiles = null;
+          organizeAllFiles().catch(err => console.error('[Stream Download] Organize error:', err));
+          processNextHttpDownload();
+        } else if (data.status === 'error' || data.status === 'cancelled') {
+          processNextHttpDownload();
+        }
+        broadcastStatus(id);
+      });
+
+      appState.downloadQueue.set(id, { downloader });
+      if (!shouldQueue) {
+        downloader.start();
+      }
+      broadcastStatus(id);
+
+      return res.json({ success: true, id, filename, status: downloader.status });
+    } catch (err) {
+      console.error('[Download Stream] Error:', err);
+      return res.status(500).json({ error: err.message });
+    }
   });
 
   app.post('/api/favorites/toggle', (req, res) => {

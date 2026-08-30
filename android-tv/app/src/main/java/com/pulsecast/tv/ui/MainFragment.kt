@@ -42,6 +42,12 @@ class MainFragment : BrowseSupportFragment() {
         com.pulsecast.tv.updater.UpdateManager.checkForUpdate(requireActivity(), manualCheck = false)
     }
 
+    override fun onResume() {
+        super.onResume()
+        // Refresh continue-watching list when coming back from player
+        loadDashboardAndMedia()
+    }
+
     override fun onDestroyView() {
         super.onDestroyView()
         ServerDiscovery.stopDiscovery()
@@ -97,6 +103,7 @@ class MainFragment : BrowseSupportFragment() {
                 }
                 is ActionItem -> {
                     when (item.id) {
+                        ACTION_SEARCH -> startActivity(Intent(requireContext(), SearchActivity::class.java))
                         ACTION_QUEUE -> startActivity(Intent(requireContext(), QueueActivity::class.java))
                         ACTION_SETTINGS -> startActivity(Intent(requireContext(), SettingsActivity::class.java))
                     }
@@ -114,7 +121,12 @@ class MainFragment : BrowseSupportFragment() {
                 }
                 systemStatus = statusRes?.body()
 
-                // 2. Fetch Media Categories
+                // 2. Fetch Multi-Device Continue Watching Row
+                val continueRes = withContext(Dispatchers.IO) {
+                    try { ApiClient.api.getContinueWatching() } catch (e: Exception) { null }
+                }
+
+                // 3. Fetch Media Categories
                 val localRes = withContext(Dispatchers.IO) {
                     try { ApiClient.api.getMediaLibrary(category = "Lokal", limit = 100) } catch (e: Exception) { null }
                 }
@@ -129,80 +141,27 @@ class MainFragment : BrowseSupportFragment() {
                 }
 
                 rowsAdapter.clear()
-
-                // Row 0: 🟢 Live Status & Connectivity Dashboard
-                val statusRowAdapter = ArrayObjectAdapter(StatusCardPresenter())
-                val currentUrl = PulseCastApp.instance.prefs.getString(PulseCastApp.KEY_SERVER_URL, ApiClient.baseUrl) ?: ApiClient.baseUrl
-
-                // Server Status Card
-                val serverIp = systemStatus?.server?.localIp ?: currentUrl.replace("http://", "").replace(":3000", "")
-                statusRowAdapter.add(
-                    StatusDashboardItem(
-                        StatusType.SERVER,
-                        "🟢 Server Online",
-                        "IP: $serverIp:3000",
-                        "Lokales LAN angebunden"
-                    )
-                )
-
-                // Tailscale Card
-                val tsDetected = systemStatus?.server?.tailscaleDetected == true
-                val tsIp = systemStatus?.server?.tailscaleIp
-                statusRowAdapter.add(
-                    StatusDashboardItem(
-                        StatusType.TAILSCALE,
-                        if (tsDetected) "🔒 Tailscale Aktiv" else "🔒 Tailscale Bereit",
-                        tsIp ?: "Direktverbindung",
-                        if (tsDetected) "IP: $tsIp (Unterwegs)" else "Manuelle IP in Settings"
-                    )
-                )
-
-                // XDCC & Downloads Card
-                val activeDl = systemStatus?.xdcc?.activeDownloads ?: 0
-                val queueTotal = systemStatus?.xdcc?.queueTotal ?: 0
-                statusRowAdapter.add(
-                    StatusDashboardItem(
-                        StatusType.XDCC_QUEUE,
-                        "📥 XDCC & Downloads",
-                        "$activeDl aktiv / $queueTotal in Queue",
-                        "Moviegods Bot bereit"
-                    )
-                )
-
-                // Xtream IPTV Card
-                val xtreamMovies = systemStatus?.xtream?.moviesCount ?: 0
-                val xtreamLive = systemStatus?.xtream?.liveCount ?: 0
-                statusRowAdapter.add(
-                    StatusDashboardItem(
-                        StatusType.XTREAM,
-                        "📡 IPTV & Streams",
-                        "$xtreamLive Sender • $xtreamMovies VODs",
-                        "Xtream Codes angebunden"
-                    )
-                )
-
-                // Voice Search Trigger Card
-                statusRowAdapter.add(
-                    StatusDashboardItem(
-                        StatusType.SEARCH_VOICE,
-                        "🎤 Sprachsuche",
-                        "Suchen per Fernbedienung",
-                        "XDCC & Moviegods Releases"
-                    )
-                )
-
-                val statusHeader = HeaderItem(0, "📡 System- & Netzwerkstatus")
-                rowsAdapter.add(ListRow(statusHeader, statusRowAdapter))
-
                 val cardPresenter = CardPresenter()
+                var rowIndex = 0
+
+                // Row 0: ▶ Weiterschauen (Cross-Device Resume)
+                val continueItems = continueRes?.body()?.items ?: emptyList()
+                if (continueItems.isNotEmpty()) {
+                    val continueAdapter = ArrayObjectAdapter(cardPresenter)
+                    continueItems.forEach { continueAdapter.add(it) }
+                    val header = HeaderItem(rowIndex.toLong(), "▶ Weiterschauen (${continueItems.size})")
+                    rowsAdapter.add(ListRow(header, continueAdapter))
+                    rowIndex++
+                }
 
                 // Row 1: Lokale Mediathek
                 val localItems = localRes?.body()?.items ?: emptyList()
                 if (localItems.isNotEmpty()) {
                     val localAdapter = ArrayObjectAdapter(cardPresenter)
                     localItems.forEach { localAdapter.add(it) }
-                    val header = HeaderItem(1, "${getString(R.string.category_local)} (${localItems.size})")
+                    val header = HeaderItem(rowIndex.toLong(), "${getString(R.string.category_local)} (${localItems.size})")
                     rowsAdapter.add(ListRow(header, localAdapter))
+                    rowIndex++
                 }
 
                 // Row 2: Live TV
@@ -210,8 +169,9 @@ class MainFragment : BrowseSupportFragment() {
                 if (liveItems.isNotEmpty()) {
                     val liveAdapter = ArrayObjectAdapter(cardPresenter)
                     liveItems.forEach { liveAdapter.add(it) }
-                    val header = HeaderItem(2, "${getString(R.string.category_iptv_live)} (${liveItems.size})")
+                    val header = HeaderItem(rowIndex.toLong(), "${getString(R.string.category_iptv_live)} (${liveItems.size})")
                     rowsAdapter.add(ListRow(header, liveAdapter))
+                    rowIndex++
                 }
 
                 // Row 3: IPTV Movies
@@ -219,8 +179,9 @@ class MainFragment : BrowseSupportFragment() {
                 if (movieItems.isNotEmpty()) {
                     val movieAdapter = ArrayObjectAdapter(cardPresenter)
                     movieItems.forEach { movieAdapter.add(it) }
-                    val header = HeaderItem(3, "${getString(R.string.category_iptv_movies)} (${movieItems.size})")
+                    val header = HeaderItem(rowIndex.toLong(), "${getString(R.string.category_iptv_movies)} (${movieItems.size})")
                     rowsAdapter.add(ListRow(header, movieAdapter))
+                    rowIndex++
                 }
 
                 // Row 4: IPTV Series
@@ -228,15 +189,17 @@ class MainFragment : BrowseSupportFragment() {
                 if (seriesItems.isNotEmpty()) {
                     val seriesAdapter = ArrayObjectAdapter(cardPresenter)
                     seriesItems.forEach { seriesAdapter.add(it) }
-                    val header = HeaderItem(4, "${getString(R.string.category_iptv_series)} (${seriesItems.size})")
+                    val header = HeaderItem(rowIndex.toLong(), "${getString(R.string.category_iptv_series)} (${seriesItems.size})")
                     rowsAdapter.add(ListRow(header, seriesAdapter))
+                    rowIndex++
                 }
 
-                // Row 5: Quick System Actions (Warteschlange, Einstellungen)
+                // Row 5: ⚡ Erweiterter Modus (Profi-Tools, XDCC, Queue, Status)
                 val actionsAdapter = ArrayObjectAdapter(ActionCardPresenter())
+                actionsAdapter.add(ActionItem(ACTION_SEARCH, "🔍 XDCC Suche", "Moviegods Bots & Releases"))
                 actionsAdapter.add(ActionItem(ACTION_QUEUE, getString(R.string.action_queue), "Laufende Server-Downloads"))
                 actionsAdapter.add(ActionItem(ACTION_SETTINGS, getString(R.string.action_settings), "Server-IP / Netzwerk"))
-                val header = HeaderItem(5, "⚡ Schnellzugriff")
+                val header = HeaderItem(rowIndex.toLong(), "⚡ Erweiterter Modus & Werkzeuge")
                 rowsAdapter.add(ListRow(header, actionsAdapter))
 
             } catch (e: Exception) {
@@ -246,8 +209,9 @@ class MainFragment : BrowseSupportFragment() {
     }
 
     companion object {
-        const val ACTION_QUEUE = 1
-        const val ACTION_SETTINGS = 2
+        const val ACTION_SEARCH = 1
+        const val ACTION_QUEUE = 2
+        const val ACTION_SETTINGS = 3
     }
 
     enum class StatusType {

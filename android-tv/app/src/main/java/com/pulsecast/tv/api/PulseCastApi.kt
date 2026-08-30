@@ -53,6 +53,24 @@ interface PulseCastApi {
         @Body progressMap: Map<String, PlayProgress>
     ): Response<Void>
 
+    @GET("/api/media/continue-watching")
+    suspend fun getContinueWatching(): Response<MediaLibraryResponse>
+
+    @POST("/api/media/progress")
+    suspend fun saveMediaProgress(
+        @Body body: ProgressUpdateRequest
+    ): Response<Void>
+
+    @POST("/api/media/download-stream")
+    suspend fun downloadStream(
+        @Body request: StreamDownloadRequest
+    ): Response<DownloadResponse>
+
+    @POST("/api/xtream/download-batch")
+    suspend fun startBatchDownload(
+        @Body request: BatchDownloadRequest
+    ): Response<DownloadResponse>
+
     @GET("/api/status")
     suspend fun getSystemStatus(): Response<SystemStatusResponse>
 
