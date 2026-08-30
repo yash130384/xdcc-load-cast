@@ -36,9 +36,13 @@ data class MediaItem(
     @SerializedName("metadata") val metadata: MediaMetadata? = null,
     @com.google.gson.annotations.SerializedName("season") val season: Int? = null,
     @com.google.gson.annotations.SerializedName("episodeNum") val episodeNum: Int? = null
-) : Serializable {
     val displayTitle: String
-        get() = metadata?.title ?: title ?: filename
+        get() {
+            val raw = metadata?.title?.takeIf { it.isNotBlank() && it != "Unbekannte Serie" && it != "Unbekannter Film" }
+                ?: title?.takeIf { it.isNotBlank() && it != "Unbekannte Serie" && it != "Unbekannter Film" }
+                ?: filename
+            return cleanTitle(raw)
+        }
 
     val displayPoster: String?
         get() = metadata?.posterUrl ?: posterUrl ?: coverUrl
@@ -49,6 +53,15 @@ data class MediaItem(
             val yr = metadata?.year ?: year ?: ""
             return if (yr.isNotEmpty()) "$cat • $yr" else cat
         }
+
+    private fun cleanTitle(raw: String): String {
+        var c = raw.substringAfterLast('/').substringAfterLast('\\')
+        c = c.replace(Regex("^\\d+_+"), "")
+        c = c.replace(Regex("(?i)\\.(mp4|mkv|avi|mov|ts|webm|flac|mp3|m4a|m4b|mpg|mpeg)$"), "")
+        c = c.replace(Regex("[._]"), " ")
+        c = c.replace(Regex("(?i)\\b(2160p|1080p|720p|480p|4k|uhd|bluray|bdrip|brrip|hdtv|webrip|web-dl|webdl|dvdrip|x264|h264|x265|h265|hevc|aac|dd5\\.1|dts|german|english|multi|dl|dubbed|proper|repack)\\b.*$"), "")
+        return c.replace(Regex("\\s+"), " ").trim().ifEmpty { raw }
+    }
 }
 
 data class MediaMetadata(

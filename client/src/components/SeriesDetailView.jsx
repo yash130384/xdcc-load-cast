@@ -8,22 +8,50 @@ const SeriesDetailView = ({
   onCheckNow,
   autoDownloads,
   checkingShowId,
-  xtreamEpisodes,
-  loadingXtreamEpisodes,
+  xtreamEpisodes = {},
+  loadingXtreamEpisodes = false,
   settings
 }) => {
   const [selectedSeason, setSelectedSeason] = useState(1);
+  const [episodesList, setEpisodesList] = useState([]);
+  const [loading, setLoading] = useState(false);
+
   const metadata = series.metadata || {};
   const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || series.coverUrl || series.posterUrl || '');
   const posterUrl = getPosterSrc(metadata.posterUrl || metadata.coverUrl || series.coverUrl || series.posterUrl || '');
   const title = getDisplayTitle(series);
+
+  // Fetch episodes if Xtream, or use series.files
+  useEffect(() => {
+    if (series.isXtream && series.xtreamSeriesId) {
+      const cached = xtreamEpisodes[series.xtreamSeriesId];
+      if (cached && Array.isArray(cached) && cached.length > 0) {
+        setEpisodesList(cached);
+      } else {
+        setLoading(true);
+        fetch(`/api/xtream/series-episodes?seriesId=${series.xtreamSeriesId}`)
+          .then(res => res.json())
+          .then(data => {
+            const list = Array.isArray(data) ? data : (data?.episodes || []);
+            setEpisodesList(list);
+            setLoading(false);
+          })
+          .catch(err => {
+            console.error('Error fetching series episodes:', err);
+            setLoading(false);
+          });
+      }
+    } else {
+      setEpisodesList(series.files || []);
+    }
+  }, [series, xtreamEpisodes]);
 
   // Determine episodes
   const parseEpisodeInfo = (item) => {
     if (item.season && typeof item.season === 'number') {
       return { season: item.season, episode: item.episodeNum || 1 };
     }
-    const sEp = item.metadata?.seasonEpisode || item.filename || '';
+    const sEp = item.metadata?.seasonEpisode || item.filename || item.title || '';
     const match = sEp.match(/S(\d+)E(\d+)/i) || sEp.match(/(\d+)x(\d+)/i);
     if (match) {
       return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10) };
@@ -35,12 +63,8 @@ const SeriesDetailView = ({
     return { season: 1, episode: 1 };
   };
 
-  const activeSeriesFiles = series.isXtream
-    ? (xtreamEpisodes[series.xtreamSeriesId] || [])
-    : (series.files || []);
-
   const seasonMap = new Map();
-  activeSeriesFiles.forEach((file) => {
+  episodesList.forEach((file) => {
     const { season } = parseEpisodeInfo(file);
     const seasonKey = season || 1;
     if (!seasonMap.has(seasonKey)) {
@@ -64,6 +88,7 @@ const SeriesDetailView = ({
   });
 
   const isAutoDlActive = autoDownloads && autoDownloads[series.imdbId]?.enabled;
+  const isLoading = loading || loadingXtreamEpisodes;
 
   return (
     <div className="sdv-container">
@@ -121,7 +146,7 @@ const SeriesDetailView = ({
           </div>
         </div>
 
-        {loadingXtreamEpisodes ? (
+        {isLoading ? (
           <div className="sdv-loading">
             <div className="nb-spinner"></div>
             <p>Lade Episoden...</p>
