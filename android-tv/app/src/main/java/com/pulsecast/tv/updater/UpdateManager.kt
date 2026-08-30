@@ -4,9 +4,9 @@ import android.app.Activity
 import android.app.AlertDialog
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
-import android.os.Environment
 import android.provider.Settings
 import android.util.Log
 import android.widget.ProgressBar
@@ -50,13 +50,10 @@ object UpdateManager {
             // 2. Fallback to GitHub raw package.json if server unreachable
             if (remoteVersion == null) {
                 try {
-                    val url = URL(GITHUB_RAW_PACKAGE)
-                    val conn = (url.openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 3000
-                        readTimeout = 3000
-                    }
+                    val conn = openFollowRedirects(GITHUB_RAW_PACKAGE)
                     if (conn.responseCode == 200) {
                         val text = conn.inputStream.bufferedReader().readText()
+                        conn.disconnect()
                         val json = JSONObject(text)
                         val gitVersion = json.optString("version", currentVersion)
                         remoteVersion = AppVersionResponse(
@@ -153,21 +150,15 @@ object UpdateManager {
 
         CoroutineScope(Dispatchers.IO).launch {
             try {
-                val apkFile = File(activity.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS), "PulseCast-update.apk")
+                val apkFile = File(activity.cacheDir, "PulseCast-update.apk")
                 if (apkFile.exists()) apkFile.delete()
 
-                val url = URL(downloadUrl)
-                val conn = (url.openConnection() as HttpURLConnection).apply {
-                    connectTimeout = 8000
-                    readTimeout = 30000
-                    instanceFollowRedirects = true
-                }
-
+                val conn = openFollowRedirects(downloadUrl)
                 val contentLength = conn.contentLength
                 val input = conn.inputStream
                 val output = FileOutputStream(apkFile)
 
-                val buffer = ByteArray(8192)
+                val buffer = ByteArray(16384)
                 var bytesRead: Int
                 var totalBytesRead = 0L
 
@@ -187,6 +178,11 @@ object UpdateManager {
                 output.flush()
                 output.close()
                 input.close()
+                conn.disconnect()
+
+                if (apkFile.length() < 100_000) {
+                    throw IllegalStateException("Heruntergeladene Datei ist unvollständig (${apkFile.length()} Bytes)")
+                }
 
                 withContext(Dispatchers.Main) {
                     progressDialog.dismiss()
@@ -203,6 +199,34 @@ object UpdateManager {
         }
     }
 
+    private fun openFollowRedirects(initialUrl: String, maxRedirects: Int = 10): HttpURLConnection {
+        var currentUrl = initialUrl
+        var redirects = 0
+
+        while (redirects < maxRedirects) {
+            val url = URL(currentUrl)
+            val conn = (url.openConnection() as HttpURLConnection).apply {
+                connectTimeout = 10000
+                readTimeout = 30000
+                instanceFollowRedirects = false
+                setRequestProperty("User-Agent", "PulseCast-TV-Updater")
+            }
+
+            val status = conn.responseCode
+            if (status in 300..399) {
+                val newUrl = conn.getHeaderField("Location")
+                conn.disconnect()
+                if (!newUrl.isNullOrEmpty()) {
+                    currentUrl = if (newUrl.startsWith("http")) newUrl else URL(url, newUrl).toString()
+                    redirects++
+                    continue
+                }
+            }
+            return conn
+        }
+        throw IllegalStateException("Zu viele Weiterleitungen für URL: $initialUrl")
+    }
+
     private fun triggerApkInstall(activity: Activity, apkFile: File) {
         try {
             val apkUri = FileProvider.getUriForFile(
@@ -215,6 +239,13 @@ object UpdateManager {
                 setDataAndType(apkUri, "application/vnd.android.package-archive")
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+
+            // Grant read permission to all matching package installer handlers
+            val resInfoList = activity.packageManager.queryIntentActivities(installIntent, PackageManager.MATCH_DEFAULT_ONLY)
+            for (resolveInfo in resInfoList) {
+                val packageName = resolveInfo.activityInfo.packageName
+                activity.grantUriPermission(packageName, apkUri, Intent.FLAG_GRANT_READ_URI_PERMISSION)
             }
 
             activity.startActivity(installIntent)
