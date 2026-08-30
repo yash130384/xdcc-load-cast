@@ -8,7 +8,7 @@ import { SearchIcon, CloseIcon, HeartIcon, CastIcon, PlayIcon, PauseIcon, Downlo
 import { getPosterSrc, formatDuration, formatBytes } from './utils.js';
 
 const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loadingLibrary, totalPages, totalItems, currentPage,
-  counts, serverSubcategories, activeSeries, activeSeriesId, librarySearchQuery, debouncedSearchQuery,
+  counts, serverSubcategories, activeSeries, activeSeriesItem, librarySearchQuery, debouncedSearchQuery,
   favoritesFilter, activeCasts, pendingCasts, wsConnected, xtreamEpisodes, loadingXtreamEpisodes,
   continueWatchingItems, onToggleWatched,
   onSelectCategory, onSelectSubcategory, onSearchChange, onPageChange, onToggleFavorite,

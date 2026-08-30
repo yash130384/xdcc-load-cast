@@ -30,12 +30,12 @@ const AppHeader = ({
           </div>
         </div>
 
+        
         {/* Mode Switcher & Global Actions */}
         <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
-          {/* Primary Switcher: Medien-Modus vs Erweiterter Modus */}
           <button
-            className={`btn ${appMode === 'advanced' ? 'btn-primary' : 'btn-secondary'}`}
-            onClick={() => onToggleAppMode(appMode === 'media' ? 'advanced' : 'media')}
+            className="btn btn-primary"
+            onClick={() => onToggleAppMode('media')}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -45,51 +45,38 @@ const AppHeader = ({
               fontWeight: '600',
               fontSize: '0.85rem'
             }}
-            title={appMode === 'media' ? 'Zu Downloads, XDCC-Suche & Warteschlange' : 'Zurück zur Film- und Serien-Übersicht'}
           >
-            <span>{appMode === 'media' ? '⚡ Erweiterter Modus' : '🎬 Medien-Modus'}</span>
-          </button>
-
-          {appMode === 'advanced' && settings.xtreamEnabled && (
-            <button className="btn btn-secondary header-btn-vcr" onClick={onOpenVcr} title="Videorekorder">
-              <span className="btn-icon">📹</span>
-              <span className="btn-label">VCR</span>
-            </button>
-          )}
-
-          <button className="btn btn-secondary header-btn-settings" onClick={onOpenSettings} title="Einstellungen">
-            <SettingsIcon />
+            <span>◀ Zurück zur Übersicht</span>
           </button>
         </div>
       </div>
 
-      {/* Navigation depending on App Mode */}
-      {appMode === 'advanced' ? (
-        <nav className="header-nav" aria-label="Erweiterte Navigation">
-          <button
-            className={`nav-btn ${currentView === 'downloads' ? 'active' : ''}`}
-            onClick={onDownloadsClick}
-          >
-            <DownloadIcon />
-            <span>Downloads & Queue</span>
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'library' ? 'active' : ''}`}
-            onClick={onLibraryClick}
-          >
-            <MediaIcon />
-            <span>Mediathek-Verwaltung</span>
-          </button>
-          <button
-            className={`nav-btn ${currentView === 'explorer' ? 'active' : ''}`}
-            onClick={onExplorerClick}
-          >
-            <FolderIcon />
-            <span>Dateiexplorer</span>
-          </button>
-        </nav>
-      ) : null}
+      {/* Navigation for Advanced/Settings area */}
+      <nav className="header-nav" aria-label="Erweiterte Navigation">
+        <button
+          className={`nav-btn ${currentView === 'downloads' ? 'active' : ''}`}
+          onClick={onDownloadsClick}
+        >
+          <DownloadIcon />
+          <span>Suche & Warteschlange</span>
+        </button>
+        <button
+          className={`nav-btn ${currentView === 'explorer' ? 'active' : ''}`}
+          onClick={onExplorerClick}
+        >
+          <FolderIcon />
+          <span>Dateiexplorer (Downloads)</span>
+        </button>
+        <button
+          className={`nav-btn`}
+          onClick={onOpenSettings}
+        >
+          <SettingsIcon />
+          <span>System-Einstellungen</span>
+        </button>
+      </nav>
     </header>
+
   );
 };
 

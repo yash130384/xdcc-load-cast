@@ -1,19 +1,31 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { getPosterSrc } from './utils.js';
+import { SettingsIcon } from './icons.jsx';
 
-const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings }) => {
-  const [categories, setCategories] = useState({
-    continueWatching: [],
-    neueFilme: [],
-    neueSerien: [],
-    lokaleFilme: [],
-    lokaleSerien: [],
-    streamFilme: [],
-    streamSerien: [],
-    liveTv: []
-  });
+const PulseCastLogo = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#logoGrad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 5px rgba(6, 182, 212, 0.4))' }}>
+    <defs>
+      <linearGradient id="logoGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stopColor="var(--accent-cyan)" />
+        <stop offset="100%" stopColor="var(--accent-blue)" />
+      </linearGradient>
+    </defs>
+    <path d="M2 12h3l2-5 3 10 2-7 2 5 2-3h3" />
+    <path d="M15 5a8 8 0 0 1 5 5" strokeWidth="2" opacity="0.8" />
+    <path d="M17 3a11 11 0 0 1 6 6" strokeWidth="1.5" opacity="0.5" />
+  </svg>
+);
+
+const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings, onOpenAdvanced }) => {
+  const [activeTab, setActiveTab] = useState('Lokal');
+  const [activeSubTab, setActiveSubTab] = useState('Filme'); // Filme, Serien
+  const [loading, setLoading] = useState(false);
+  
   const [heroItem, setHeroItem] = useState(null);
-  const [loading, setLoading] = useState(true);
+  const [continueWatching, setContinueWatching] = useState([]);
+  
+  // Rows data: array of { title, items }
+  const [rowsData, setRowsData] = useState([]);
 
   const isXtreamEnabled = settings?.xtreamEnabled;
 
@@ -31,120 +43,141 @@ const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings }) =>
   useEffect(() => {
     const loadData = async () => {
       setLoading(true);
-
-      const fetchTasks = [
-        fetchItems('/api/media/continue-watching'),
-        fetchItems('/api/media-library?category=Lokal_Filme&limit=50'),
-        fetchItems('/api/media-library?category=Lokal_Serien&limit=50')
-      ];
-
-      if (isXtreamEnabled) {
-        fetchTasks.push(fetchItems('/api/media-library?category=Filme&limit=50'));
-        fetchTasks.push(fetchItems('/api/media-library?category=Serien&limit=50'));
-        fetchTasks.push(fetchItems('/api/media-library?category=Live%20TV&limit=50'));
-      } else {
-        fetchTasks.push(Promise.resolve([]));
-        fetchTasks.push(Promise.resolve([]));
-        fetchTasks.push(Promise.resolve([]));
-      }
-
-      const [
-        continueWatching,
-        lokaleFilme,
-        lokaleSerien,
-        streamFilme,
-        streamSerien,
-        liveTv
-      ] = await Promise.all(fetchTasks);
-
-      // Merge for "Neue Filme" and "Neue Serien"
-      const allFilme = [...lokaleFilme, ...streamFilme];
-      const allSerien = [...lokaleSerien, ...streamSerien];
       
-      const sortByMtime = (a, b) => (b.mtime || 0) - (a.mtime || 0);
-
-      const neueFilme = [...allFilme].sort(sortByMtime).slice(0, 50);
-      const neueSerien = [...allSerien].sort(sortByMtime).slice(0, 50);
-
-      const newCategories = {
-        continueWatching,
-        neueFilme,
-        neueSerien,
-        lokaleFilme,
-        lokaleSerien,
-        streamFilme,
-        streamSerien,
-        liveTv
-      };
-
-      setCategories(newCategories);
-
-      // Pick a random hero item from Neue Filme or Neue Serien
-      const possibleHeroes = [...neueFilme, ...neueSerien].filter(
-        item => item.metadata?.backdrop || item.metadata?.posterUrl
-      );
-      if (possibleHeroes.length > 0) {
-        setHeroItem(possibleHeroes[Math.floor(Math.random() * possibleHeroes.length)]);
+      // Fetch continue watching always
+      const cw = await fetchItems('/api/media/continue-watching');
+      
+      let items = [];
+      let mappedRows = [];
+      
+      if (activeTab === 'Lokal') {
+        const cat = activeSubTab === 'Filme' ? 'Lokal_Filme' : 'Lokal_Serien';
+        items = await fetchItems(`/api/media-library?category=${cat}&limit=2000`);
+      } else if (activeTab === 'Stream') {
+        const cat = activeSubTab === 'Filme' ? 'Filme' : 'Serien';
+        if (isXtreamEnabled) items = await fetchItems(`/api/media-library?category=${cat}&limit=2000`);
+      } else if (activeTab === 'IPTV') {
+        if (isXtreamEnabled) items = await fetchItems(`/api/media-library?category=Live%20TV&limit=2000`);
       }
 
+      // Filter Continue Watching for the current tab
+      const isStreamTab = activeTab === 'Stream' || activeTab === 'IPTV';
+      const filteredCw = cw.filter(item => (!!item.isXtream) === isStreamTab);
+      setContinueWatching(filteredCw);
+
+      if (items.length > 0) {
+        // Group by subcategory
+        const grouped = {};
+        const getSub = (it) => {
+           if (activeTab === 'IPTV') return it.metadata?.category || 'Sonstige';
+           return it.metadata?.subcategory || it.subcategory || 'Sonstige';
+        };
+        
+        items.forEach(it => {
+          const sub = getSub(it);
+          if (!grouped[sub]) grouped[sub] = [];
+          grouped[sub].push(it);
+        });
+
+        // Convert to rows array
+        mappedRows = Object.keys(grouped).sort().map(key => ({
+          title: key === 'Sonstige' ? 'Weitere' : key,
+          items: grouped[key].sort((a,b) => (b.mtime || 0) - (a.mtime || 0))
+        }));
+
+        // Sort so "Weitere" is last
+        mappedRows.sort((a,b) => {
+          if (a.title === 'Weitere') return 1;
+          if (b.title === 'Weitere') return -1;
+          return a.title.localeCompare(b.title);
+        });
+
+        // Set hero to a random item that has a backdrop/poster
+        const possibleHeroes = items.filter(it => it.metadata?.backdrop || it.metadata?.posterUrl);
+        if (possibleHeroes.length > 0) {
+          setHeroItem(possibleHeroes[Math.floor(Math.random() * possibleHeroes.length)]);
+        } else {
+          setHeroItem(items[0]);
+        }
+      } else {
+        setHeroItem(null);
+      }
+
+      setRowsData(mappedRows);
       setLoading(false);
     };
 
     loadData();
-  }, [isXtreamEnabled]);
-
-  if (loading) {
-    return (
-      <div className="nb-loading-screen">
-        <div className="nb-spinner"></div>
-      </div>
-    );
-  }
+  }, [activeTab, activeSubTab, isXtreamEnabled]);
 
   return (
     <div className="nb-container">
-      {heroItem && <HeroBanner item={heroItem} onPlay={onPlay} onSeriesClick={onSeriesClick} />}
-      
-      <div className="nb-content">
-        {categories.continueWatching.length > 0 && (
-          <MediaRow 
-            title="▶ Weiterschauen" 
-            items={categories.continueWatching} 
-            isContinueWatching={true}
-            onPlay={onPlay}
-            onSeriesClick={onSeriesClick}
-            onToggleFavorite={onToggleFavorite}
-          />
-        )}
-        
-        {categories.neueFilme.length > 0 && (
-          <MediaRow title="🆕 Neue Filme" items={categories.neueFilme} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
-        
-        {categories.neueSerien.length > 0 && (
-          <MediaRow title="🆕 Neue Serien" items={categories.neueSerien} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
-        
-        {categories.lokaleFilme.length > 0 && (
-          <MediaRow title="💾 Lokale Filme" items={categories.lokaleFilme} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
-        
-        {categories.lokaleSerien.length > 0 && (
-          <MediaRow title="💾 Lokale Serien" items={categories.lokaleSerien} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
-        
-        {isXtreamEnabled && categories.streamFilme.length > 0 && (
-          <MediaRow title="🍿 Stream Filme" items={categories.streamFilme} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
-        
-        {isXtreamEnabled && categories.streamSerien.length > 0 && (
-          <MediaRow title="📺 Stream Serien" items={categories.streamSerien} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
-        
-        {isXtreamEnabled && categories.liveTv.length > 0 && (
-          <MediaRow title="📡 Live TV" items={categories.liveTv} onPlay={onPlay} onSeriesClick={onSeriesClick} onToggleFavorite={onToggleFavorite} />
-        )}
+      {/* Navbar */}
+      <div className="nb-navbar">
+        <div className="nb-nav-left">
+          <div className="nb-brand">
+            <PulseCastLogo />
+            <span>PulseCast</span>
+          </div>
+          <button className={`nb-nav-link ${activeTab === 'Lokal' ? 'active' : ''}`} onClick={() => setActiveTab('Lokal')}>Lokal</button>
+          <button className={`nb-nav-link ${activeTab === 'Stream' ? 'active' : ''}`} onClick={() => setActiveTab('Stream')}>Stream</button>
+          <button className={`nb-nav-link ${activeTab === 'IPTV' ? 'active' : ''}`} onClick={() => setActiveTab('IPTV')}>IPTV</button>
+        </div>
+        <div className="nb-nav-right">
+          <button className="nb-settings-btn" onClick={onOpenAdvanced} title="System & Einstellungen">
+            <SettingsIcon />
+          </button>
+        </div>
       </div>
+
+      {/* Sub Navbar for Filme/Serien */}
+      {(activeTab === 'Lokal' || activeTab === 'Stream') && (
+        <div className="nb-subnav">
+          <button className={`nb-subnav-link ${activeSubTab === 'Filme' ? 'active' : ''}`} onClick={() => setActiveSubTab('Filme')}>Filme</button>
+          <button className={`nb-subnav-link ${activeSubTab === 'Serien' ? 'active' : ''}`} onClick={() => setActiveSubTab('Serien')}>Serien</button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="nb-loading-screen">
+          <div className="nb-spinner"></div>
+        </div>
+      ) : (
+        <>
+          {heroItem && <HeroBanner item={heroItem} onPlay={onPlay} onSeriesClick={onSeriesClick} />}
+          
+          <div className="nb-content">
+            {continueWatching.length > 0 && (
+              <MediaRow 
+                title="▶ Weiterschauen" 
+                items={continueWatching} 
+                isContinueWatching={true}
+                onPlay={onPlay}
+                onSeriesClick={onSeriesClick}
+                onToggleFavorite={onToggleFavorite}
+              />
+            )}
+
+            {rowsData.length > 0 ? (
+              rowsData.map((row, idx) => (
+                <MediaRow 
+                  key={idx}
+                  title={row.title} 
+                  items={row.items} 
+                  onPlay={onPlay} 
+                  onSeriesClick={onSeriesClick} 
+                  onToggleFavorite={onToggleFavorite} 
+                />
+              ))
+            ) : (
+              <div style={{ textAlign: 'center', marginTop: '4rem', color: 'var(--text-muted)' }}>
+                <h2>Keine Medien gefunden</h2>
+                <p>Unter dieser Kategorie gibt es aktuell keine Inhalte.</p>
+              </div>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 };
@@ -156,7 +189,7 @@ const HeroBanner = ({ item, onPlay, onSeriesClick }) => {
   
   const handlePlayClick = () => {
     if (item.isGroup) {
-      onSeriesClick(item.imdbId || item.title || (item.isXtream && item.xtreamSeriesId));
+      onSeriesClick(item);
     } else {
       onPlay(item.filename, item);
     }
@@ -253,7 +286,7 @@ const MediaCard = ({ item, isContinueWatching, onPlay, onSeriesClick, onToggleFa
 
   const handleClick = () => {
     if (item.isGroup) {
-      onSeriesClick(item.imdbId || item.title || (item.isXtream && item.xtreamSeriesId));
+      onSeriesClick(item);
     } else {
       onPlay(item.filename, item);
     }

@@ -5,6 +5,7 @@ import SearchPanel from './components/SearchPanel';
 import DownloadsQueue from './components/DownloadsQueue';
 import MediaLibrary from './components/MediaLibrary';
 import NetflixBrowse from './components/NetflixBrowse';
+import SeriesDetailView from './components/SeriesDetailView';
 import SettingsModal from './components/SettingsModal';
 import VcrModal from './components/VcrModal';
 import EpgModal from './components/EpgModal';
@@ -240,7 +241,7 @@ function App() {
   const [continueWatchingItems, setContinueWatchingItems] = useState([]);
   const [activeVideoItem, setActiveVideoItem] = useState(null);
   const [mobileDownloadsTab, setMobileDownloadsTab] = useState('search');
-  const [activeSeriesId, setActiveSeriesId] = useState(null);
+  const [activeSeriesItem, setActiveSeriesItem] = useState(null);
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
   
   const [tempDownloadDir, setTempDownloadDir] = useState('');
@@ -723,9 +724,7 @@ function App() {
   const filteredLibrary = mediaLibrary;
   const groupedLibrary = mediaLibrary;
   
-  const activeSeries = activeSeriesId 
-    ? groupedLibrary.find(g => g.isGroup && (g.imdbId === activeSeriesId || g.title === activeSeriesId || (g.isXtream && g.xtreamSeriesId === activeSeriesId)))
-    : null;
+  const activeSeries = activeSeriesItem;
 
   useEffect(() => {
     if (activeSeries && activeSeries.isXtream) {
@@ -744,16 +743,16 @@ function App() {
           });
       }
     }
-  }, [activeSeriesId, activeSeries]);
+  }, [activeSeriesItem, activeSeries]);
 
   useEffect(() => {
-    if (activeSeriesId && !activeSeries) {
-      setActiveSeriesId(null);
+    if (activeSeriesItem && !activeSeries) {
+      setActiveSeriesItem(null);
     }
-  }, [activeSeriesId, activeSeries]);
+  }, [activeSeriesItem, activeSeries]);
 
   useEffect(() => {
-    setActiveSeriesId(null);
+    setActiveSeriesItem(null);
   }, [selectedCategory, currentView]);
 
   const handleSelectCategory = (cat) => {
@@ -1476,7 +1475,7 @@ function App() {
         <div 
           key={idx} 
           className="media-card series-group-card" 
-          onClick={() => setActiveSeriesId(item.imdbId || item.title || (item.isXtream && item.xtreamSeriesId))}
+          onClick={() => setActiveSeriesItem(item.imdbId || item.title || (item.isXtream && item.xtreamSeriesId))}
           style={{ cursor: 'pointer', position: 'relative' }}
         >
           <div className="media-poster-container" style={{ position: 'relative' }}>
@@ -2525,7 +2524,7 @@ function App() {
                          currentPage === 1;
     
     setCurrentView('library');
-    setActiveSeriesId(null);
+    setActiveSeriesItem(null);
     setSelectedCategory('all');
     setSelectedSubcategory('all');
     setLibrarySearchQuery('');
@@ -2540,6 +2539,7 @@ function App() {
     <div className="app-layout">
       <div className="app-container">
         
+        {appMode === 'advanced' && (
         <AppHeader
           appMode={appMode}
           currentView={currentView}
@@ -2556,8 +2556,126 @@ function App() {
           onOpenVcr={openVcrModalAndLoad}
           onOpenSettings={handleOpenSettings}
         />
+      )}
 
-        {appMode === 'advanced' && currentView === 'downloads' && (
+        <div className={`card queue-panel-col ${appMode === 'advanced' && currentView === 'downloads' && mobileDownloadsTab !== 'queue' ? 'mobile-hidden' : ''}`} style={appMode !== 'advanced' || currentView !== 'downloads' ? { width: '100%' } : {}}>
+            {appMode === 'advanced' && currentView === 'downloads' ? (
+              <DownloadsQueue
+                downloads={downloads}
+                downloadLogs={downloadLogs}
+                expandedLogs={expandedLogs}
+                activeCasts={activeCasts}
+                pendingCasts={pendingCasts}
+                autoDownloads={autoDownloads}
+                checkingShowId={checkingShowId}
+                onPause={handlePause}
+                onResume={handleResume}
+                onCancel={handleCancel}
+                onDelete={handleDelete}
+                onDeleteFile={handleDeleteFile}
+                onConfirmFilename={confirmFilename}
+                onPlayLocal={playLocal}
+                onStartCast={(item) => setCastingItem(item)}
+                onToggleLogs={toggleLogs}
+                onToggleAutoDownload={handleToggleAutoDownload}
+                onCheckNow={handleCheckNow}
+              />
+            ) : appMode === 'media' && !activeSeriesItem ? (
+              <NetflixBrowse
+                onPlay={playLocalLibrary}
+                onSeriesClick={setActiveSeriesItem}
+                onToggleFavorite={toggleFavorite}
+                settings={settings}
+                onOpenAdvanced={() => {
+                  setAppMode('advanced');
+                  setCurrentView('downloads');
+                }}
+              />
+            ) : appMode === 'media' && activeSeriesItem ? (
+              <SeriesDetailView
+                series={activeSeriesItem}
+                onClose={() => setActiveSeriesItem(null)}
+                onPlay={playLocalLibrary}
+                onCheckNow={handleCheckNow}
+                autoDownloads={autoDownloads}
+                checkingShowId={checkingShowId}
+                xtreamEpisodes={xtreamEpisodes}
+                loadingXtreamEpisodes={loadingXtreamEpisodes}
+                settings={settings}
+              />
+            ) : currentView === 'library' ? (
+              <MediaLibrary
+                mediaLibrary={mediaLibrary}
+                selectedCategory={selectedCategory}
+                selectedSubcategory={selectedSubcategory}
+                loadingLibrary={loadingLibrary}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                currentPage={currentPage}
+                counts={categoryCounts}
+                serverSubcategories={serverSubcategories}
+                activeSeriesItem={activeSeriesItem}
+                activeSeries={activeSeries}
+                librarySearchQuery={librarySearchQuery}
+                debouncedSearchQuery={debouncedSearchQuery}
+                favoritesFilter={favoritesFilter}
+                activeCasts={activeCasts}
+                pendingCasts={pendingCasts}
+                wsConnected={wsConnected}
+                xtreamEpisodes={xtreamEpisodes}
+                loadingXtreamEpisodes={loadingXtreamEpisodes}
+                continueWatchingItems={continueWatchingItems}
+                onToggleWatched={toggleWatched}
+                settings={settings}
+                onSelectCategory={handleSelectCategory}
+                onSelectSubcategory={handleSelectSubcategory}
+                onSearchChange={setLibrarySearchQuery}
+                onPageChange={setCurrentPage}
+                onToggleFavorite={toggleFavorite}
+                onDelete={handleDeleteMediaFile}
+                onDeleteFile={handleDeleteMediaFile}
+                onPlay={playLocalLibrary}
+                onCast={startCastLibrary}
+                onCastControl={handleCastControl}
+                onStopCast={stopCast}
+                onScroll={handleScroll}
+                onSeriesClick={setActiveSeriesItem}
+                onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
+                onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
+                onXtreamDownload={triggerXtreamDownload}
+                onXtreamBatchDownload={triggerXtreamBatchDownload}
+                renderFavoritesOverview={renderFavoritesOverview}
+                autoDownloads={autoDownloads}
+                checkingShowId={checkingShowId}
+                onCheckNow={handleCheckNow}
+                onToggleAutoDownload={handleToggleAutoDownload}
+              />
+            ) : (
+              <FileExplorer
+                explorerPath={explorerPath}
+                explorerFiles={explorerFiles}
+                explorerLoading={explorerLoading}
+                explorerError={explorerError}
+                showNewFolderModal={showNewFolderModal}
+                newFolderName={newFolderName}
+                showMoveModal={showMoveModal}
+                movingItem={movingItem}
+                moveDestination={moveDestination}
+                onNavigate={fetchExplorerFiles}
+                onCreateFolder={handleCreateFolder}
+                onDelete={handleDeleteExplorerItem}
+                onMove={handleMoveExplorerItem}
+                onCloseNewFolder={() => setShowNewFolderModal(false)}
+                onCloseMove={() => setShowMoveModal(false)}
+                onNewFolderNameChange={setNewFolderName}
+                onMoveDestinationChange={setMoveDestination}
+                onOpenNewFolder={() => setShowNewFolderModal(true)}
+                onOpenMove={(item) => { setMovingItem(item); setShowMoveModal(true); setMoveDestination(item.name); }}
+              />
+            )}
+          </div>
+
+          {appMode === 'advanced' && currentView === 'downloads' && (
           <div className="mobile-downloads-toggle">
             <button
               type="button"
@@ -2608,154 +2726,6 @@ function App() {
               />
             </div>
           )}
-
-          <div className={`card queue-panel-col ${appMode === 'advanced' && currentView === 'downloads' && mobileDownloadsTab !== 'queue' ? 'mobile-hidden' : ''}`} style={appMode !== 'advanced' || currentView !== 'downloads' ? { width: '100%' } : {}}>
-            {appMode === 'advanced' && currentView === 'downloads' ? (
-              <DownloadsQueue
-                downloads={downloads}
-                downloadLogs={downloadLogs}
-                expandedLogs={expandedLogs}
-                activeCasts={activeCasts}
-                pendingCasts={pendingCasts}
-                autoDownloads={autoDownloads}
-                checkingShowId={checkingShowId}
-                onPause={handlePause}
-                onResume={handleResume}
-                onCancel={handleCancel}
-                onDelete={handleDelete}
-                onDeleteFile={handleDeleteFile}
-                onConfirmFilename={confirmFilename}
-                onPlayLocal={playLocal}
-                onStartCast={(item) => setCastingItem(item)}
-                onToggleLogs={toggleLogs}
-                onToggleAutoDownload={handleToggleAutoDownload}
-                onCheckNow={handleCheckNow}
-              />
-            ) : appMode === 'media' && !activeSeriesId ? (
-              <NetflixBrowse
-                onPlay={playLocalLibrary}
-                onSeriesClick={setActiveSeriesId}
-                onToggleFavorite={toggleFavorite}
-                settings={settings}
-              />
-            ) : appMode === 'media' && activeSeriesId ? (
-              <MediaLibrary
-                mediaLibrary={mediaLibrary}
-                selectedCategory={selectedCategory}
-                selectedSubcategory={selectedSubcategory}
-                loadingLibrary={loadingLibrary}
-                totalPages={totalPages}
-                totalItems={totalItems}
-                currentPage={currentPage}
-                counts={categoryCounts}
-                serverSubcategories={serverSubcategories}
-                activeSeriesId={activeSeriesId}
-                activeSeries={activeSeries}
-                librarySearchQuery={librarySearchQuery}
-                debouncedSearchQuery={debouncedSearchQuery}
-                favoritesFilter={favoritesFilter}
-                activeCasts={activeCasts}
-                pendingCasts={pendingCasts}
-                wsConnected={wsConnected}
-                xtreamEpisodes={xtreamEpisodes}
-                loadingXtreamEpisodes={loadingXtreamEpisodes}
-                continueWatchingItems={continueWatchingItems}
-                onToggleWatched={toggleWatched}
-                settings={settings}
-                onSelectCategory={handleSelectCategory}
-                onSelectSubcategory={handleSelectSubcategory}
-                onSearchChange={setLibrarySearchQuery}
-                onPageChange={setCurrentPage}
-                onToggleFavorite={toggleFavorite}
-                onDelete={handleDeleteMediaFile}
-                onDeleteFile={handleDeleteMediaFile}
-                onPlay={playLocalLibrary}
-                onCast={startCastLibrary}
-                onCastControl={handleCastControl}
-                onStopCast={stopCast}
-                onScroll={handleScroll}
-                onSeriesClick={setActiveSeriesId}
-                onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
-                onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
-                onXtreamDownload={triggerXtreamDownload}
-                onXtreamBatchDownload={triggerXtreamBatchDownload}
-                renderFavoritesOverview={renderFavoritesOverview}
-                autoDownloads={autoDownloads}
-                checkingShowId={checkingShowId}
-                onCheckNow={handleCheckNow}
-                onToggleAutoDownload={handleToggleAutoDownload}
-              />
-            ) : currentView === 'library' ? (
-              <MediaLibrary
-                mediaLibrary={mediaLibrary}
-                selectedCategory={selectedCategory}
-                selectedSubcategory={selectedSubcategory}
-                loadingLibrary={loadingLibrary}
-                totalPages={totalPages}
-                totalItems={totalItems}
-                currentPage={currentPage}
-                counts={categoryCounts}
-                serverSubcategories={serverSubcategories}
-                activeSeriesId={activeSeriesId}
-                activeSeries={activeSeries}
-                librarySearchQuery={librarySearchQuery}
-                debouncedSearchQuery={debouncedSearchQuery}
-                favoritesFilter={favoritesFilter}
-                activeCasts={activeCasts}
-                pendingCasts={pendingCasts}
-                wsConnected={wsConnected}
-                xtreamEpisodes={xtreamEpisodes}
-                loadingXtreamEpisodes={loadingXtreamEpisodes}
-                continueWatchingItems={continueWatchingItems}
-                onToggleWatched={toggleWatched}
-                settings={settings}
-                onSelectCategory={handleSelectCategory}
-                onSelectSubcategory={handleSelectSubcategory}
-                onSearchChange={setLibrarySearchQuery}
-                onPageChange={setCurrentPage}
-                onToggleFavorite={toggleFavorite}
-                onDelete={handleDeleteMediaFile}
-                onDeleteFile={handleDeleteMediaFile}
-                onPlay={playLocalLibrary}
-                onCast={startCastLibrary}
-                onCastControl={handleCastControl}
-                onStopCast={stopCast}
-                onScroll={handleScroll}
-                onSeriesClick={setActiveSeriesId}
-                onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
-                onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
-                onXtreamDownload={triggerXtreamDownload}
-                onXtreamBatchDownload={triggerXtreamBatchDownload}
-                renderFavoritesOverview={renderFavoritesOverview}
-                autoDownloads={autoDownloads}
-                checkingShowId={checkingShowId}
-                onCheckNow={handleCheckNow}
-                onToggleAutoDownload={handleToggleAutoDownload}
-              />
-            ) : (
-              <FileExplorer
-                explorerPath={explorerPath}
-                explorerFiles={explorerFiles}
-                explorerLoading={explorerLoading}
-                explorerError={explorerError}
-                showNewFolderModal={showNewFolderModal}
-                newFolderName={newFolderName}
-                showMoveModal={showMoveModal}
-                movingItem={movingItem}
-                moveDestination={moveDestination}
-                onNavigate={fetchExplorerFiles}
-                onCreateFolder={handleCreateFolder}
-                onDelete={handleDeleteExplorerItem}
-                onMove={handleMoveExplorerItem}
-                onCloseNewFolder={() => setShowNewFolderModal(false)}
-                onCloseMove={() => setShowMoveModal(false)}
-                onNewFolderNameChange={setNewFolderName}
-                onMoveDestinationChange={setMoveDestination}
-                onOpenNewFolder={() => setShowNewFolderModal(true)}
-                onOpenMove={(item) => { setMovingItem(item); setShowMoveModal(true); setMoveDestination(item.name); }}
-              />
-            )}
-          </div>
 
         </div>
 
