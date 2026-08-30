@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PulseCast TV</string>
+    <string name="browse_title">PulseCast</string>
+    <string name="category_local">💾 Lokale Mediathek</string>
+    <string name="category_local_movies">🎬 Lokale Filme</string>
+    <string name="category_local_series">📺 Lokale Serien</string>
+    <string name="category_local_music">🎵 Lokale Musik</string>
+    <string name="category_local_audiobooks">🎧 Hörbücher</string>
+    <string name="category_iptv_live">📡 Live TV</string>
+    <string name="category_iptv_movies">🎬 IPTV Filme</string>
+    <string name="category_iptv_series">📺 IPTV Serien</string>
+    <string name="action_play">Abspielen</string>
+    <string name="action_download">Herunterladen</string>
+    <string name="action_search">🔍 Suche</string>
+    <string name="action_queue">📥 Warteschlange</string>
+    <string name="action_settings">⚙️ Einstellungen</string>
+    <string name="search_hint">Releases / Filme / Serien suchen…</string>
+    <string name="server_connecting">Verbinde mit PulseCast Server…</string>
+    <string name="server_connected">Verbunden mit %s</string>
+    <string name="server_not_found">Kein PulseCast Server gefunden. Bitte IP in den Einstellungen prüfen.</string>
+</resources>

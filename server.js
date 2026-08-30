@@ -16,6 +16,7 @@ import { getDownloadDetails } from './services/download-manager.js';
 import { runStartupTests } from './services/search-service.js';
 import { registerAllRoutes } from './routes/index.js';
 import { configureSambaShare } from './services/samba.js';
+import { startMdnsAdvertisement, stopMdnsAdvertisement } from './services/mdns-service.js';
 
 // Read version
 try {
@@ -110,6 +111,7 @@ server.on('error', (err) => {
 
 server.listen(PORT, '0.0.0.0', () => {
   console.log(`Server started at http://localhost:${PORT}`);
+  startMdnsAdvertisement(PORT, 'PulseCast');
   setTimeout(runStartupTests, 3000);
   recreateXtreamSyncInterval();
   recreateCheckInterval();
@@ -117,4 +119,13 @@ server.listen(PORT, '0.0.0.0', () => {
   setInterval(checkVcrRecordings, 10000);
   setTimeout(checkAllAutoDownloads, 5000);
   updateLocalMappedList().catch(err => console.error('[Startup] Local scan cache error:', err));
+});
+
+process.on('SIGINT', () => {
+  stopMdnsAdvertisement();
+  process.exit(0);
+});
+process.on('SIGTERM', () => {
+  stopMdnsAdvertisement();
+  process.exit(0);
 });

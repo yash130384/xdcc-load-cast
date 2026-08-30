@@ -13,6 +13,7 @@ import { IrcDccDownloader } from '../irc-dcc-client.js';
 import { HttpDownloader } from '../http-downloader.js';
 import { configureSambaShare } from '../services/samba.js';
 import { attachDeviceStatusListeners, attachDlnaDeviceStatusListeners, attachAirplayDeviceStatusListeners, broadcastActiveCasts, getActiveCasts, playLocalFile, startCasting, stopCasting } from '../services/cast-service.js';
+import { generateM3uPlaylist, generateXmltvEpg } from '../services/m3u-service.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
@@ -23,14 +24,52 @@ import { Readable } from 'stream';
 const LOG_FILE = path.join(os.homedir(), '.xdcc_downloader_logs.txt');
 const PORT = process.env.PORT || 3000;
 
-
-
 export function registerAllRoutes(app) {
   if (!appState.playProgress) appState.playProgress = {};
   if (!appState.metadataCache) appState.metadataCache = {};
   if (!(appState.favorites instanceof Set)) {
     appState.favorites = new Set(Array.isArray(appState.favorites) ? appState.favorites : []);
   }
+
+  // M3U Playlist Exporter
+  const handleM3uPlaylist = async (req, res) => {
+    try {
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`;
+      const baseUrl = `${protocol}://${host}`;
+      const playlist = await generateM3uPlaylist(baseUrl);
+      res.setHeader('Content-Type', 'application/x-mpegurl; charset=utf-8');
+      res.setHeader('Content-Disposition', 'inline; filename="pulsecast.m3u8"');
+      return res.send(playlist);
+    } catch (err) {
+      console.error('[M3U Export] Error generating playlist:', err.message);
+      return res.status(500).send('Fehler beim Generieren der M3U Playlist');
+    }
+  };
+
+  app.get('/api/playlist.m3u', handleM3uPlaylist);
+  app.get('/api/playlist.m3u8', handleM3uPlaylist);
+  app.get('/api/iptv/playlist.m3u', handleM3uPlaylist);
+  app.get('/api/iptv/playlist.m3u8', handleM3uPlaylist);
+
+  // XMLTV EPG Exporter
+  const handleXmltvEpg = (req, res) => {
+    try {
+      const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+      const host = req.headers['x-forwarded-host'] || req.headers.host || `localhost:${PORT}`;
+      const baseUrl = `${protocol}://${host}`;
+      const xml = generateXmltvEpg(baseUrl);
+      res.setHeader('Content-Type', 'application/xml; charset=utf-8');
+      res.setHeader('Content-Disposition', 'inline; filename="pulsecast-epg.xml"');
+      return res.send(xml);
+    } catch (err) {
+      console.error('[EPG Export] Error generating XMLTV:', err.message);
+      return res.status(500).send('Fehler beim Generieren des EPG');
+    }
+  };
+
+  app.get('/api/epg.xml', handleXmltvEpg);
+  app.get('/api/iptv/epg.xml', handleXmltvEpg);
 
   app.get('/api/epg/:streamId', async (req, res) => {
     if (!appState.appConfig.xtreamEnabled || !appState.appConfig.xtreamHost) {

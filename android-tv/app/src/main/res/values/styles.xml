@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.PulseCastTV" parent="Theme.Leanback">
+        <item name="colorPrimary">@color/primary</item>
+        <item name="colorPrimaryDark">@color/primary_dark</item>
+        <item name="colorAccent">@color/accent_cyan</item>
+        <item name="defaultBrandColor">@color/primary</item>
+        <item name="defaultSearchColor">@color/accent_pink</item>
+        <item name="defaultSearchIcon">@drawable/ic_search</item>
+    </style>
+
+    <style name="Theme.PulseCastTV.Player" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowBackground">@android:color/black</item>
+    </style>
+</resources>

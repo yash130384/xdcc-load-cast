@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="320dp"
+    android:height="180dp"
+    android:viewportWidth="320"
+    android:viewportHeight="180">
+    <path
+        android:pathData="M0,0h320v180h-320z">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="45"
+                android:endColor="#161E2E"
+                android:startColor="#0A0E17"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+    <!-- Logo Accent Glow Circle -->
+    <path
+        android:pathData="M160,90m-40,0a40,40 0,1 1,80 0a40,40 0,1 1,-80 0">
+        <aapt:attr name="android:fillColor">
+            <gradient
+                android:angle="0"
+                android:endColor="#00F2FE"
+                android:startColor="#4FACFE"
+                android:type="linear" />
+        </aapt:attr>
+    </path>
+    <!-- Play Triangle Inside Circle -->
+    <path
+        android:fillColor="#0A0E17"
+        android:pathData="M152,75 L175,90 L152,105 Z" />
+</vector>
