@@ -53,6 +53,9 @@ interface PulseCastApi {
         @Body progressMap: Map<String, PlayProgress>
     ): Response<Void>
 
+    @GET("/api/status")
+    suspend fun getSystemStatus(): Response<SystemStatusResponse>
+
     @POST("/api/favorites/{key}")
     suspend fun toggleFavorite(
         @Path("key") key: String

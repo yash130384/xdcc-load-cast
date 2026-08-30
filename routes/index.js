@@ -211,6 +211,51 @@ export function registerAllRoutes(app) {
     return res.json(list);
   });
 
+  app.get('/api/status', (req, res) => {
+    const net = getNetworkDetails(appState.appConfig);
+    const localList = appState.cachedMappedList || [];
+    const localMovies = localList.filter(i => i.metadata?.originalCategory === 'Filme' || i.metadata?.type === 'movie').length;
+    const localSeries = localList.filter(i => i.metadata?.originalCategory === 'Serien' || i.metadata?.type === 'series' || i.metadata?.isSeries).length;
+    const localAudio = localList.filter(i => i.metadata?.originalCategory === 'Musik' || i.metadata?.originalCategory === 'Hörbücher').length;
+
+    const activeDownloadsCount = Array.from(appState.downloadQueue.values()).filter(item => {
+      const st = item.downloader?.status;
+      return ['connecting', 'registering', 'joining', 'requesting', 'queued', 'dcc_negotiating', 'dcc_downloading', 'extracting', 'downloading'].includes(st);
+    }).length;
+
+    return res.json({
+      server: {
+        name: 'PulseCast Server',
+        version: appState.appVersion || '1.0.0',
+        uptimeSeconds: Math.floor((Date.now() - (appState.serverStartTime || Date.now())) / 1000),
+        localIp: net.localIp,
+        tailscaleDetected: net.tailscaleDetected,
+        tailscaleIp: net.tailscaleIp,
+        allIps: net.allIps,
+        port: PORT
+      },
+      xdcc: {
+        moviegodsNick: appState.appConfig.moviegodsNick || 'PulseCast_Bot_99',
+        activeDownloads: activeDownloadsCount,
+        queueTotal: appState.downloadQueue.size
+      },
+      xtream: {
+        enabled: !!appState.appConfig.xtreamEnabled,
+        host: appState.appConfig.xtreamHost ? appState.appConfig.xtreamHost.replace(/:\/\/[^@]+@/, '://') : null,
+        moviesCount: (appState.cachedMappedMovies || []).length,
+        seriesCount: (appState.cachedMappedSeries || []).length,
+        liveCount: (appState.cachedMappedLive || []).length,
+        lastFetch: appState.lastXtreamFetch || 0
+      },
+      library: {
+        totalLocalFiles: localList.length,
+        localMovies,
+        localSeries,
+        localAudio
+      }
+    });
+  });
+
   app.get('/api/settings', (req, res) => {
     const publicConfig = { ...appState.appConfig };
     delete publicConfig.xxxPin;

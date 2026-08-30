@@ -123,3 +123,42 @@ data class QueueItem(
 data class QueueResponse(
     @SerializedName("queue") val queue: List<QueueItem> = emptyList()
 ) : Serializable
+
+data class SystemStatusResponse(
+    @SerializedName("server") val server: ServerInfo = ServerInfo(),
+    @SerializedName("xdcc") val xdcc: XdccInfo = XdccInfo(),
+    @SerializedName("xtream") val xtream: XtreamInfo = XtreamInfo(),
+    @SerializedName("library") val library: LibraryInfo = LibraryInfo()
+) : Serializable
+
+data class ServerInfo(
+    @SerializedName("name") val name: String = "PulseCast Server",
+    @SerializedName("version") val version: String = "1.0.0",
+    @SerializedName("uptimeSeconds") val uptimeSeconds: Long = 0L,
+    @SerializedName("localIp") val localIp: String = "",
+    @SerializedName("tailscaleDetected") val tailscaleDetected: Boolean = false,
+    @SerializedName("tailscaleIp") val tailscaleIp: String? = null,
+    @SerializedName("port") val port: Int = 3000
+) : Serializable
+
+data class XdccInfo(
+    @SerializedName("moviegodsNick") val moviegodsNick: String = "",
+    @SerializedName("activeDownloads") val activeDownloads: Int = 0,
+    @SerializedName("queueTotal") val queueTotal: Int = 0
+) : Serializable
+
+data class XtreamInfo(
+    @SerializedName("enabled") val enabled: Boolean = false,
+    @SerializedName("host") val host: String? = null,
+    @SerializedName("moviesCount") val moviesCount: Int = 0,
+    @SerializedName("seriesCount") val seriesCount: Int = 0,
+    @SerializedName("liveCount") val liveCount: Int = 0,
+    @SerializedName("lastFetch") val lastFetch: Long = 0L
+) : Serializable
+
+data class LibraryInfo(
+    @SerializedName("totalLocalFiles") val totalLocalFiles: Int = 0,
+    @SerializedName("localMovies") val localMovies: Int = 0,
+    @SerializedName("localSeries") val localSeries: Int = 0,
+    @SerializedName("localAudio") val localAudio: Int = 0
+) : Serializable

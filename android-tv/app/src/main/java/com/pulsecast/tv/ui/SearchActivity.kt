@@ -1,7 +1,11 @@
 package com.pulsecast.tv.ui
 
+import android.Manifest
+import android.content.pm.PackageManager
 import android.os.Bundle
 import android.widget.Toast
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.app.SearchSupportFragment
 import androidx.leanback.widget.*
@@ -27,6 +31,11 @@ class SearchActivity : FragmentActivity() {
                 .replace(R.id.search_fragment, SearchFragment())
                 .commitNow()
         }
+
+        // Request Record Audio permission for TV remote voice search if needed
+        if (ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.RECORD_AUDIO), 101)
+        }
     }
 }
 
@@ -46,6 +55,9 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
                 downloadRelease(item)
             }
         }
+
+        // Load initial top downloads on open
+        loadTopDownloads()
     }
 
     override fun getResultsAdapter(): ObjectAdapter {
@@ -62,18 +74,39 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
         return true
     }
 
+    private fun loadTopDownloads() {
+        lifecycleScope.launch {
+            try {
+                val res = withContext(Dispatchers.IO) {
+                    ApiClient.api.getTopDownloads(query = "german")
+                }
+                val results = res.body()?.results ?: emptyList()
+                if (results.isNotEmpty() && rowsAdapter.size() == 0) {
+                    val presenter = SearchResultPresenter()
+                    val listAdapter = ArrayObjectAdapter(presenter)
+                    results.forEach { listAdapter.add(it) }
+                    val header = HeaderItem(0, "🔥 Top Moviegods Releases (${results.size})")
+                    rowsAdapter.add(ListRow(header, listAdapter))
+                }
+            } catch (e: Exception) {
+                // Ignore top downloads fetch failure
+            }
+        }
+    }
+
     private fun performSearch(query: String) {
         searchJob?.cancel()
-        if (query.length < 2) {
+        if (query.trim().length < 2) {
             rowsAdapter.clear()
+            loadTopDownloads()
             return
         }
 
         searchJob = lifecycleScope.launch {
-            delay(400) // Debounce
+            delay(350) // Debounce
             try {
                 val res = withContext(Dispatchers.IO) {
-                    ApiClient.api.searchXdcc(query, maxResults = 50)
+                    ApiClient.api.searchXdcc(query.trim(), maxResults = 50)
                 }
                 val results = res.body()?.results ?: emptyList()
 
@@ -82,7 +115,7 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
                 val listAdapter = ArrayObjectAdapter(presenter)
                 results.forEach { listAdapter.add(it) }
 
-                val header = HeaderItem(0, "Suchergebnisse (${results.size})")
+                val header = HeaderItem(0, "🎤 Suchergebnisse für \"$query\" (${results.size})")
                 rowsAdapter.add(ListRow(header, listAdapter))
             } catch (e: Exception) {
                 Toast.makeText(requireContext(), "Suchfehler: ${e.message}", Toast.LENGTH_SHORT).show()
@@ -112,7 +145,7 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
                 if (res.isSuccessful && res.body()?.success == true) {
                     Toast.makeText(requireContext(), "Download gestartet für: ${item.filename} 📥", Toast.LENGTH_LONG).show()
                 } else {
-                    Toast.makeText(requireContext(), "Fehler: ${res.body()?.error}", Toast.LENGTH_LONG).show()
+                    Toast.makeText(requireContext(), "Fehler: ${res.body()?.error ?: "Konnte Download nicht starten"}", Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
                 Toast.makeText(requireContext(), "Fehler: ${e.message}", Toast.LENGTH_LONG).show()
@@ -135,7 +168,7 @@ class SearchFragment : SearchSupportFragment(), SearchSupportFragment.SearchResu
             val cardView = viewHolder.view as ImageCardView
             cardView.titleText = result.filename
             cardView.contentText = "${result.size ?: ""} • Bot: ${result.botName ?: ""} #${result.packNumber ?: ""}"
-            cardView.mainImage = androidx.core.content.ContextCompat.getDrawable(viewHolder.view.context, R.drawable.ic_download)
+            cardView.mainImage = ContextCompat.getDrawable(viewHolder.view.context, R.drawable.ic_download)
         }
 
         override fun onUnbindViewHolder(viewHolder: ViewHolder) {

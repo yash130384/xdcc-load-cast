@@ -1,16 +1,17 @@
 package com.pulsecast.tv.ui
 
-import android.content.Context
 import android.os.Bundle
-import android.widget.EditText
 import android.widget.Toast
 import androidx.fragment.app.FragmentActivity
 import androidx.leanback.app.GuidedStepSupportFragment
 import androidx.leanback.widget.GuidanceStylist
 import androidx.leanback.widget.GuidedAction
+import androidx.lifecycle.lifecycleScope
 import com.pulsecast.tv.PulseCastApp
-import com.pulsecast.tv.R
 import com.pulsecast.tv.api.ApiClient
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 class SettingsActivity : FragmentActivity() {
 
@@ -26,14 +27,15 @@ class SettingsFragment : GuidedStepSupportFragment() {
 
     companion object {
         private const val ACTION_SERVER_URL = 1L
-        private const val ACTION_SAVE = 2L
+        private const val ACTION_TEST_CONNECT = 2L
+        private const val ACTION_SAVE = 3L
     }
 
     override fun onCreateGuidance(savedInstanceState: Bundle?): GuidanceStylist.Guidance {
         return GuidanceStylist.Guidance(
-            "⚙️ Server-Einstellungen",
-            "Gib die IP-Adresse oder Tailscale-Adresse deines PulseCast-Servers an.",
-            "Netzwerk",
+            "⚙️ Server- & Netzwerk-Setup",
+            "Gib die lokale LAN-IP (z.B. 192.168.31.242) oder Tailscale-IP (100.x.y.z) deines PulseCast Servers an.",
+            "Verbindung",
             null
         )
     }
@@ -48,7 +50,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
             GuidedAction.Builder(requireContext())
                 .id(ACTION_SERVER_URL)
                 .title("Server URL / IP")
-                .description(currentUrl)
+                .description("Aktuell: $currentUrl")
                 .editTitle(currentUrl)
                 .editable(true)
                 .build()
@@ -56,26 +58,60 @@ class SettingsFragment : GuidedStepSupportFragment() {
 
         actions.add(
             GuidedAction.Builder(requireContext())
+                .id(ACTION_TEST_CONNECT)
+                .title("Verbindung testen 🔍")
+                .build()
+        )
+
+        actions.add(
+            GuidedAction.Builder(requireContext())
                 .id(ACTION_SAVE)
-                .title("Speichern & Verbinden")
+                .title("Speichern & Verbinden 💾")
                 .build()
         )
     }
 
     override fun onGuidedActionClicked(action: GuidedAction) {
-        if (action.id == ACTION_SAVE) {
-            val urlAction = findActionById(ACTION_SERVER_URL)
-            val newUrl = urlAction?.editTitle?.toString()?.trim() ?: ApiClient.baseUrl
+        val urlAction = findActionById(ACTION_SERVER_URL)
+        var rawInput = urlAction?.editTitle?.toString()?.trim() ?: ApiClient.baseUrl
 
-            if (newUrl.startsWith("http://") || newUrl.startsWith("https://")) {
+        if (!rawInput.startsWith("http://") && !rawInput.startsWith("https://")) {
+            rawInput = "http://$rawInput"
+        }
+        if (!rawInput.matches(Regex(".+:\\d+$"))) {
+            rawInput = "$rawInput:3000"
+        }
+
+        when (action.id) {
+            ACTION_TEST_CONNECT -> {
+                lifecycleScope.launch {
+                    try {
+                        val testClient = ApiClient.updateBaseUrl(rawInput)
+                        val res = withContext(Dispatchers.IO) {
+                            ApiClient.api.getSystemStatus()
+                        }
+                        if (res.isSuccessful) {
+                            val status = res.body()
+                            Toast.makeText(
+                                requireContext(),
+                                "✅ Verbunden mit ${status?.server?.name ?: "PulseCast"} (${status?.library?.totalLocalFiles ?: 0} Medien)",
+                                Toast.LENGTH_LONG
+                            ).show()
+                        } else {
+                            Toast.makeText(requireContext(), "⚠️ Server antwortet mit Status ${res.code()}", Toast.LENGTH_LONG).show()
+                        }
+                    } catch (e: Exception) {
+                        Toast.makeText(requireContext(), "❌ Verbindung fehlgeschlagen: ${e.message}", Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+            ACTION_SAVE -> {
                 PulseCastApp.instance.prefs.edit()
-                    .putString(PulseCastApp.KEY_SERVER_URL, newUrl)
+                    .putString(PulseCastApp.KEY_SERVER_URL, rawInput)
                     .apply()
-                ApiClient.updateBaseUrl(newUrl)
-                Toast.makeText(requireContext(), "Server-URL gespeichert: $newUrl", Toast.LENGTH_SHORT).show()
+                ApiClient.updateBaseUrl(rawInput)
+                Toast.makeText(requireContext(), "✅ Server gespeichert: $rawInput", Toast.LENGTH_SHORT).show()
                 activity?.finish()
-            } else {
-                Toast.makeText(requireContext(), "Bitte gültige URL eingeben (z.B. http://192.168.1.50:3000)", Toast.LENGTH_LONG).show()
             }
         }
     }
