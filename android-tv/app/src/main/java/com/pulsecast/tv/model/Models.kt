@@ -33,7 +33,9 @@ data class MediaItem(
     @SerializedName("favorite") val favorite: Boolean = false,
     @SerializedName("progress") val progress: PlayProgress? = null,
     @SerializedName("files") val files: List<MediaItem> = emptyList(),
-    @SerializedName("metadata") val metadata: MediaMetadata? = null
+    @SerializedName("metadata") val metadata: MediaMetadata? = null,
+    @com.google.gson.annotations.SerializedName("season") val season: Int? = null,
+    @com.google.gson.annotations.SerializedName("episodeNum") val episodeNum: Int? = null
 ) : Serializable {
     val displayTitle: String
         get() = metadata?.title ?: title ?: filename
@@ -199,3 +201,12 @@ data class AppVersionResponse(
     @SerializedName("releaseNotes") val releaseNotes: String? = null
 ) : Serializable
 
+
+data class XtreamEpisodesResponse(
+    @com.google.gson.annotations.SerializedName("episodes") val episodes: List<MediaItem> = emptyList()
+) : java.io.Serializable
+
+data class AutoDownloadResponse(
+    @com.google.gson.annotations.SerializedName("success") val success: Boolean = false,
+    @com.google.gson.annotations.SerializedName("startedCount") val startedCount: Int = 0
+) : java.io.Serializable

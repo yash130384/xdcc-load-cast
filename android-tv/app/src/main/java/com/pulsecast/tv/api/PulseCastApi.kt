@@ -81,4 +81,14 @@ interface PulseCastApi {
     suspend fun toggleFavorite(
         @Path("key") key: String
     ): Response<Void>
+
+    @GET("/api/xtream/series-episodes")
+    suspend fun getXtreamSeriesEpisodes(
+        @Query("seriesId") seriesId: String
+    ): Response<XtreamEpisodesResponse>
+
+    @POST("/api/auto-downloads/check")
+    suspend fun checkAutoDownload(
+        @Body body: Map<String, String>
+    ): Response<AutoDownloadResponse>
 }
