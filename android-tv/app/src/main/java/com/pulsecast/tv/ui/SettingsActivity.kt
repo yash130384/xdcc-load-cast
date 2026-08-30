@@ -78,7 +78,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
             GuidedAction.Builder(requireContext())
                 .id(ACTION_CHECK_UPDATE)
                 .title("Nach App-Updates suchen 🔄")
-                .description("Aktuelle Version: v1.1.1")
+                .description("Aktuelle Version: v1.2.0")
                 .build()
         )
 

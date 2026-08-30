@@ -4,6 +4,7 @@ import StatusBar from './components/StatusBar';
 import SearchPanel from './components/SearchPanel';
 import DownloadsQueue from './components/DownloadsQueue';
 import MediaLibrary from './components/MediaLibrary';
+import NetflixBrowse from './components/NetflixBrowse';
 import SettingsModal from './components/SettingsModal';
 import VcrModal from './components/VcrModal';
 import EpgModal from './components/EpgModal';
@@ -2630,7 +2631,61 @@ function App() {
                 onToggleAutoDownload={handleToggleAutoDownload}
                 onCheckNow={handleCheckNow}
               />
-            ) : appMode === 'media' || currentView === 'library' ? (
+            ) : appMode === 'media' && !activeSeriesId ? (
+              <NetflixBrowse
+                onPlay={playLocalLibrary}
+                onSeriesClick={setActiveSeriesId}
+                onToggleFavorite={toggleFavorite}
+                settings={settings}
+              />
+            ) : appMode === 'media' && activeSeriesId ? (
+              <MediaLibrary
+                mediaLibrary={mediaLibrary}
+                selectedCategory={selectedCategory}
+                selectedSubcategory={selectedSubcategory}
+                loadingLibrary={loadingLibrary}
+                totalPages={totalPages}
+                totalItems={totalItems}
+                currentPage={currentPage}
+                counts={categoryCounts}
+                serverSubcategories={serverSubcategories}
+                activeSeriesId={activeSeriesId}
+                activeSeries={activeSeries}
+                librarySearchQuery={librarySearchQuery}
+                debouncedSearchQuery={debouncedSearchQuery}
+                favoritesFilter={favoritesFilter}
+                activeCasts={activeCasts}
+                pendingCasts={pendingCasts}
+                wsConnected={wsConnected}
+                xtreamEpisodes={xtreamEpisodes}
+                loadingXtreamEpisodes={loadingXtreamEpisodes}
+                continueWatchingItems={continueWatchingItems}
+                onToggleWatched={toggleWatched}
+                settings={settings}
+                onSelectCategory={handleSelectCategory}
+                onSelectSubcategory={handleSelectSubcategory}
+                onSearchChange={setLibrarySearchQuery}
+                onPageChange={setCurrentPage}
+                onToggleFavorite={toggleFavorite}
+                onDelete={handleDeleteMediaFile}
+                onDeleteFile={handleDeleteMediaFile}
+                onPlay={playLocalLibrary}
+                onCast={startCastLibrary}
+                onCastControl={handleCastControl}
+                onStopCast={stopCast}
+                onScroll={handleScroll}
+                onSeriesClick={setActiveSeriesId}
+                onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
+                onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
+                onXtreamDownload={triggerXtreamDownload}
+                onXtreamBatchDownload={triggerXtreamBatchDownload}
+                renderFavoritesOverview={renderFavoritesOverview}
+                autoDownloads={autoDownloads}
+                checkingShowId={checkingShowId}
+                onCheckNow={handleCheckNow}
+                onToggleAutoDownload={handleToggleAutoDownload}
+              />
+            ) : currentView === 'library' ? (
               <MediaLibrary
                 mediaLibrary={mediaLibrary}
                 selectedCategory={selectedCategory}

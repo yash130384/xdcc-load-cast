@@ -88,28 +88,7 @@ const AppHeader = ({
             <span>Dateiexplorer</span>
           </button>
         </nav>
-      ) : (
-        <nav className="header-nav media-categories-nav" aria-label="Medien Navigation" style={{ overflowX: 'auto', whiteSpace: 'nowrap' }}>
-          {[
-            { id: 'all', label: '🎬 Alle Medien' },
-            { id: 'Lokal_Filme', label: '💾 Lokale Filme' },
-            { id: 'Lokal_Serien', label: '💾 Lokale Serien' },
-            { id: 'Filme', label: '🍿 Stream Filme' },
-            { id: 'Serien', label: '📺 Stream Serien' },
-            { id: 'Live TV', label: '📡 Live TV' },
-            { id: 'Favoriten', label: '❤️ Favoriten' }
-          ].map(cat => (
-            <button
-              key={cat.id}
-              className={`nav-btn ${selectedCategory === cat.id ? 'active' : ''}`}
-              onClick={() => onSelectCategory(cat.id)}
-              style={{ padding: '0.4rem 1rem', borderRadius: '20px' }}
-            >
-              <span>{cat.label}</span>
-            </button>
-          ))}
-        </nav>
-      )}
+      ) : null}
     </header>
   );
 };
