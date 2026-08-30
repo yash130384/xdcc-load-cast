@@ -117,40 +117,38 @@ class MainFragment : BrowseSupportFragment() {
                 // 2. Lokal Section
                 val localMovies = localMoviesRes?.body()?.items ?: emptyList()
                 val localSeries = localSeriesRes?.body()?.items ?: emptyList()
-                if (localMovies.isNotEmpty() || localSeries.isNotEmpty()) {
-                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "💾 LOKAL")))
-                    
-                    if (localMovies.isNotEmpty()) {
-                        buildSubcategoryRows("Filme", localMovies, rowIndex).forEach { 
-                            rowsAdapter.add(it)
-                            rowIndex++
-                        }
+                
+                if (localMovies.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "💾 LOKAL: FILME")))
+                    buildSubcategoryRows(localMovies, rowIndex).forEach { 
+                        rowsAdapter.add(it)
+                        rowIndex++
                     }
-                    if (localSeries.isNotEmpty()) {
-                        buildSubcategoryRows("Serien", localSeries, rowIndex).forEach { 
-                            rowsAdapter.add(it)
-                            rowIndex++
-                        }
+                }
+                if (localSeries.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "💾 LOKAL: SERIEN")))
+                    buildSubcategoryRows(localSeries, rowIndex).forEach { 
+                        rowsAdapter.add(it)
+                        rowIndex++
                     }
                 }
 
-                // 3. Stream Section
+                // 3. Stream Section (Filme & Serien als Oberkategorien)
                 val streamMovies = streamMoviesRes?.body()?.items ?: emptyList()
                 val streamSeries = streamSeriesRes?.body()?.items ?: emptyList()
-                if (streamMovies.isNotEmpty() || streamSeries.isNotEmpty()) {
-                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "🍿 STREAM")))
-                    
-                    if (streamMovies.isNotEmpty()) {
-                        buildSubcategoryRows("Filme", streamMovies, rowIndex).forEach { 
-                            rowsAdapter.add(it)
-                            rowIndex++
-                        }
+                
+                if (streamMovies.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "🍿 STREAM: FILME")))
+                    buildSubcategoryRows(streamMovies, rowIndex).forEach { 
+                        rowsAdapter.add(it)
+                        rowIndex++
                     }
-                    if (streamSeries.isNotEmpty()) {
-                        buildSubcategoryRows("Serien", streamSeries, rowIndex).forEach { 
-                            rowsAdapter.add(it)
-                            rowIndex++
-                        }
+                }
+                if (streamSeries.isNotEmpty()) {
+                    rowsAdapter.add(SectionRow(HeaderItem(rowIndex++, "📺 STREAM: SERIEN")))
+                    buildSubcategoryRows(streamSeries, rowIndex).forEach { 
+                        rowsAdapter.add(it)
+                        rowIndex++
                     }
                 }
 
@@ -175,7 +173,22 @@ class MainFragment : BrowseSupportFragment() {
         }
     }
 
-    private fun buildSubcategoryRows(prefix: String, items: List<MediaItem>, startingId: Long): List<ListRow> {
+    private fun buildSubcategoryRows(items: List<MediaItem>, startingId: Long): List<ListRow> {
+        val rows = mutableListOf<ListRow>()
+        var currentId = startingId
+
+        if (items.isEmpty()) return rows
+
+        // 1. NEWEST: Die letzten 50 hinzugefügten Elemente
+        val newest50 = items.sortedByDescending { it.mtime }.take(50)
+        if (newest50.isNotEmpty()) {
+            val newestAdapter = ArrayObjectAdapter(cardPresenter)
+            newest50.forEach { newestAdapter.add(it) }
+            val countLabel = if (newest50.size >= 50) "50" else "${newest50.size}"
+            rows.add(ListRow(HeaderItem(currentId++, "🆕 NEWEST ($countLabel)"), newestAdapter))
+        }
+
+        // 2. Nach Unterkategorien gruppieren
         val grouped = mutableMapOf<String, MutableList<MediaItem>>()
         for (item in items) {
             val sub = item.metadata?.subcategory ?: item.subcategory ?: "Weitere"
@@ -185,9 +198,6 @@ class MainFragment : BrowseSupportFragment() {
             grouped[sub]!!.add(item)
         }
 
-        var currentId = startingId
-        val rows = mutableListOf<ListRow>()
-        
         // Sort keys but put "Weitere" at the end
         val sortedKeys = grouped.keys.sortedWith(Comparator { a, b ->
             if (a == "Weitere") 1
@@ -196,11 +206,10 @@ class MainFragment : BrowseSupportFragment() {
         })
 
         for (key in sortedKeys) {
-            val catItems = grouped[key]!!.sortedByDescending { it.mtime ?: 0 }
+            val catItems = grouped[key]!!.sortedByDescending { it.mtime }
             val adapter = ArrayObjectAdapter(cardPresenter)
             catItems.forEach { adapter.add(it) }
-            val headerTitle = if (key == "Weitere") "$prefix ($key)" else "$prefix - $key"
-            rows.add(ListRow(HeaderItem(currentId++, headerTitle), adapter))
+            rows.add(ListRow(HeaderItem(currentId++, key), adapter))
         }
         
         return rows
