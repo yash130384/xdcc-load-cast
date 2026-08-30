@@ -162,3 +162,12 @@ data class LibraryInfo(
     @SerializedName("localSeries") val localSeries: Int = 0,
     @SerializedName("localAudio") val localAudio: Int = 0
 ) : Serializable
+
+data class AppVersionResponse(
+    @SerializedName("name") val name: String = "PulseCast TV",
+    @SerializedName("version") val version: String = "1.0.0",
+    @SerializedName("apkUrl") val apkUrl: String = "/api/app/apk",
+    @SerializedName("githubRawUrl") val githubRawUrl: String? = null,
+    @SerializedName("releaseNotes") val releaseNotes: String? = null
+) : Serializable
+

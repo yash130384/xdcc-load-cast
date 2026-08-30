@@ -56,6 +56,9 @@ interface PulseCastApi {
     @GET("/api/status")
     suspend fun getSystemStatus(): Response<SystemStatusResponse>
 
+    @GET("/api/app/version")
+    suspend fun getAppVersion(): Response<AppVersionResponse>
+
     @POST("/api/favorites/{key}")
     suspend fun toggleFavorite(
         @Path("key") key: String

@@ -9,6 +9,7 @@ import androidx.leanback.widget.GuidedAction
 import androidx.lifecycle.lifecycleScope
 import com.pulsecast.tv.PulseCastApp
 import com.pulsecast.tv.api.ApiClient
+import com.pulsecast.tv.updater.UpdateManager
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -29,6 +30,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
         private const val ACTION_SERVER_URL = 1L
         private const val ACTION_TEST_CONNECT = 2L
         private const val ACTION_SAVE = 3L
+        private const val ACTION_CHECK_UPDATE = 4L
     }
 
     override fun onCreateGuidance(savedInstanceState: Bundle?): GuidanceStylist.Guidance {
@@ -65,6 +67,14 @@ class SettingsFragment : GuidedStepSupportFragment() {
 
         actions.add(
             GuidedAction.Builder(requireContext())
+                .id(ACTION_CHECK_UPDATE)
+                .title("Nach App-Updates suchen 🔄")
+                .description("Prüft auf neue Versionen im Git")
+                .build()
+        )
+
+        actions.add(
+            GuidedAction.Builder(requireContext())
                 .id(ACTION_SAVE)
                 .title("Speichern & Verbinden 💾")
                 .build()
@@ -86,7 +96,7 @@ class SettingsFragment : GuidedStepSupportFragment() {
             ACTION_TEST_CONNECT -> {
                 lifecycleScope.launch {
                     try {
-                        val testClient = ApiClient.updateBaseUrl(rawInput)
+                        ApiClient.updateBaseUrl(rawInput)
                         val res = withContext(Dispatchers.IO) {
                             ApiClient.api.getSystemStatus()
                         }
@@ -104,6 +114,9 @@ class SettingsFragment : GuidedStepSupportFragment() {
                         Toast.makeText(requireContext(), "❌ Verbindung fehlgeschlagen: ${e.message}", Toast.LENGTH_LONG).show()
                     }
                 }
+            }
+            ACTION_CHECK_UPDATE -> {
+                UpdateManager.checkForUpdate(requireActivity(), manualCheck = true)
             }
             ACTION_SAVE -> {
                 PulseCastApp.instance.prefs.edit()

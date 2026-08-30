@@ -256,6 +256,26 @@ export function registerAllRoutes(app) {
     });
   });
 
+  app.get('/api/app/version', (req, res) => {
+    return res.json({
+      name: 'PulseCast TV',
+      version: appState.appVersion || '1.0.0',
+      apkUrl: '/api/app/apk',
+      githubRawUrl: 'https://raw.githubusercontent.com/yash130384/xdcc-load-cast/main/android-tv/PulseCast-TV.apk',
+      releaseNotes: 'Neueste Fehlerbehebungen & Features'
+    });
+  });
+
+  app.get('/api/app/apk', (req, res) => {
+    const apkPath = path.resolve(__dirname, '../android-tv/PulseCast-TV.apk');
+    if (fs.existsSync(apkPath)) {
+      res.setHeader('Content-Type', 'application/vnd.android.package-archive');
+      res.setHeader('Content-Disposition', 'attachment; filename="PulseCast-TV.apk"');
+      return res.sendFile(apkPath);
+    }
+    return res.redirect('https://raw.githubusercontent.com/yash130384/xdcc-load-cast/main/android-tv/PulseCast-TV.apk');
+  });
+
   app.get('/api/settings', (req, res) => {
     const publicConfig = { ...appState.appConfig };
     delete publicConfig.xxxPin;

@@ -32,11 +32,14 @@ class MainFragment : BrowseSupportFragment() {
         setupEventListeners()
 
         // Start Auto-Discovery and load data
-        ServerDiscovery.startDiscovery(requireContext()) { discoveredUrl ->
+        ServerDiscovery.startDiscovery(requireContext()) { _ ->
             loadDashboardAndMedia()
         }
 
         loadDashboardAndMedia()
+
+        // Check for App Updates in background
+        com.pulsecast.tv.updater.UpdateManager.checkForUpdate(requireActivity(), manualCheck = false)
     }
 
     override fun onDestroyView() {
