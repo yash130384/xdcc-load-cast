@@ -560,26 +560,16 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                 📁 Alle ({counts.all || 0})
               </button>
               <button
-                className={`category-tab-btn ${selectedCategory === 'Favoriten' ? 'active' : ''}`}
-                onClick={() => onSelectCategory('Favoriten')}
-                style={{
-                  border: selectedCategory === 'Favoriten' ? '1px solid var(--accent-red)' : '1px solid transparent',
-                  boxShadow: selectedCategory === 'Favoriten' ? '0 0 8px rgba(255, 51, 102, 0.2)' : 'none'
-                }}
+                className={`category-tab-btn ${selectedCategory === 'Lokal_Filme' ? 'active' : ''}`}
+                onClick={() => onSelectCategory('Lokal_Filme')}
               >
-                ❤️ Favoriten ({counts.Favoriten || 0})
+                💾 Lokale Filme
               </button>
               <button
-                className={`category-tab-btn ${selectedCategory === 'Neu' ? 'active' : ''}`}
-                onClick={() => onSelectCategory('Neu')}
+                className={`category-tab-btn ${selectedCategory === 'Lokal_Serien' ? 'active' : ''}`}
+                onClick={() => onSelectCategory('Lokal_Serien')}
               >
-                🆕 Neu ({counts.Neu || 0})
-              </button>
-              <button
-                className={`category-tab-btn ${selectedCategory === 'Lokal' ? 'active' : ''}`}
-                onClick={() => onSelectCategory('Lokal')}
-              >
-                💾 Lokal ({counts.Lokal || 0})
+                💾 Lokale Serien
               </button>
               {settings?.xtreamEnabled && (
                 <>
@@ -587,13 +577,13 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                     className={`category-tab-btn ${selectedCategory === 'Filme' ? 'active' : ''}`}
                     onClick={() => onSelectCategory('Filme')}
                   >
-                    🎬 Filme ({counts.Filme || 0})
+                    🍿 Stream Filme ({counts.Filme || 0})
                   </button>
                   <button
                     className={`category-tab-btn ${selectedCategory === 'Serien' ? 'active' : ''}`}
                     onClick={() => onSelectCategory('Serien')}
                   >
-                    📺 Serien ({counts.Serien || 0})
+                    📺 Stream Serien ({counts.Serien || 0})
                   </button>
                   <button
                     className={`category-tab-btn ${selectedCategory === 'Live TV' ? 'active' : ''}`}
@@ -603,6 +593,16 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                   </button>
                 </>
               )}
+              <button
+                className={`category-tab-btn ${selectedCategory === 'Favoriten' ? 'active' : ''}`}
+                onClick={() => onSelectCategory('Favoriten')}
+                style={{
+                  border: selectedCategory === 'Favoriten' ? '1px solid var(--accent-red)' : '1px solid transparent',
+                  boxShadow: selectedCategory === 'Favoriten' ? '0 0 8px rgba(255, 51, 102, 0.2)' : 'none'
+                }}
+              >
+                ❤️ Favoriten ({counts.Favoriten || 0})
+              </button>
               {!settings?.xtreamEnabled && (
                 <button
                   className={`category-tab-btn ${selectedCategory === 'Videos' ? 'active' : ''}`}

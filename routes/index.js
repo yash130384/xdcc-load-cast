@@ -968,6 +968,10 @@ export function registerAllRoutes(app) {
       });
     } else if (category === 'Lokal') {
       filteredGrouped = groupedItems.filter(item => !item.isXtream);
+    } else if (category === 'Lokal_Filme') {
+      filteredGrouped = groupedItems.filter(item => !item.isXtream && !item.isGroup && item.metadata?.originalCategory !== 'Musik' && item.metadata?.originalCategory !== 'Hörbücher');
+    } else if (category === 'Lokal_Serien') {
+      filteredGrouped = groupedItems.filter(item => !item.isXtream && item.isGroup);
     } else if (category === 'Filme') {
       filteredGrouped = groupedItems.filter(item => item.isXtream && (item.category === 'Filme' || item.type === 'movie'));
     } else if (category === 'Serien') {

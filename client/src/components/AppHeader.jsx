@@ -92,10 +92,12 @@ const AppHeader = ({
         <nav className="header-nav media-categories-nav" aria-label="Medien Navigation" style={{ overflowX: 'auto', whiteSpace: 'nowrap' }}>
           {[
             { id: 'all', label: '🎬 Alle Medien' },
-            { id: 'Filme', label: '🍿 Filme' },
-            { id: 'Serien', label: '📺 Serien' },
+            { id: 'Lokal_Filme', label: '💾 Lokale Filme' },
+            { id: 'Lokal_Serien', label: '💾 Lokale Serien' },
+            { id: 'Filme', label: '🍿 Stream Filme' },
+            { id: 'Serien', label: '📺 Stream Serien' },
             { id: 'Live TV', label: '📡 Live TV' },
-            { id: 'Lokal', label: '💾 Nur Lokal' }
+            { id: 'Favoriten', label: '❤️ Favoriten' }
           ].map(cat => (
             <button
               key={cat.id}
