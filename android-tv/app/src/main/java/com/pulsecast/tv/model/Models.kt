@@ -36,6 +36,7 @@ data class MediaItem(
     @SerializedName("metadata") val metadata: MediaMetadata? = null,
     @com.google.gson.annotations.SerializedName("season") val season: Int? = null,
     @com.google.gson.annotations.SerializedName("episodeNum") val episodeNum: Int? = null
+) : Serializable {
     val displayTitle: String
         get() {
             val raw = metadata?.title?.takeIf { it.isNotBlank() && it != "Unbekannte Serie" && it != "Unbekannter Film" }
