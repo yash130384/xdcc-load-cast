@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { getPosterSrc, formatBytes } from './utils.js';
+import { getPosterSrc, formatBytes, getDisplayTitle, formatMediaTitle } from './utils.js';
 
 const SeriesDetailView = ({
   series,
@@ -14,9 +14,9 @@ const SeriesDetailView = ({
 }) => {
   const [selectedSeason, setSelectedSeason] = useState(1);
   const metadata = series.metadata || {};
-  const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || '');
-  const posterUrl = getPosterSrc(metadata.posterUrl || metadata.coverUrl || '');
-  const title = metadata.title || series.title || series.filename;
+  const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || series.coverUrl || series.posterUrl || '');
+  const posterUrl = getPosterSrc(metadata.posterUrl || metadata.coverUrl || series.coverUrl || series.posterUrl || '');
+  const title = getDisplayTitle(series);
 
   // Determine episodes
   const parseEpisodeInfo = (item) => {
@@ -146,7 +146,7 @@ const SeriesDetailView = ({
             <div className="sdv-episodes-list">
               {episodes.map((ep, idx) => {
                 const epInfo = parseEpisodeInfo(ep);
-                const epTitle = ep.metadata?.title || ep.title || ep.filename;
+                const epTitle = ep.metadata?.title || ep.title ? (ep.metadata?.title || ep.title) : formatMediaTitle(ep.filename);
                 const pct = ep.progress?.percentage || 0;
                 
                 return (

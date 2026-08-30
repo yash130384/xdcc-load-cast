@@ -44,3 +44,55 @@ export function formatTime(seconds) {
   if (h > 0) return `${h}:${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
   return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
 }
+
+export function formatMediaTitle(raw) {
+  if (!raw || typeof raw !== 'string') return '';
+  
+  // Strip directory paths
+  let cleaned = raw.split('/').pop().split('\\').pop();
+
+  // If Xtream format with numeric ID prefix like 12345_Movie_Title.mp4, remove the leading ID
+  cleaned = cleaned.replace(/^\d+_+/, '');
+
+  // Strip extension
+  cleaned = cleaned.replace(/\.(mp4|mkv|avi|mov|ts|webm|flac|mp3|m4a|m4b|mpg|mpeg)$/i, '');
+
+  // Replace dots, underscores with spaces
+  cleaned = cleaned.replace(/[._]/g, ' ');
+
+  // Clean release tags like 1080p, BluRay, x264, etc.
+  const tags = [
+    '2160p', '1080p', '720p', '480p', '4k', 'uhd', 'bluray', 'bdrip', 'brrip', 
+    'hdtv', 'webrip', 'web-dl', 'webdl', 'dvdrip', 'x264', 'h264', 'x265', 'h265', 
+    'hevc', 'aac', 'dd5.1', 'dts', 'german', 'english', 'multi', 'dl', 'dubbed', 'proper', 'repack'
+  ];
+  for (const tag of tags) {
+    const pattern = new RegExp(`\\b${tag}\\b.*$`, 'i');
+    cleaned = cleaned.replace(pattern, '');
+  }
+
+  // Clean multiple whitespace
+  cleaned = cleaned.replace(/\s+/g, ' ').trim();
+
+  return cleaned || raw;
+}
+
+export function getDisplayTitle(item, isContinueWatching = false) {
+  if (!item) return '';
+
+  if (isContinueWatching && item.seriesTitle) {
+    const ep = item.episodeTitle || formatMediaTitle(item.title || item.filename);
+    return `${item.seriesTitle} - ${ep}`;
+  }
+
+  const metaTitle = item.metadata?.title;
+  if (metaTitle && metaTitle !== 'Unbekannte Serie' && metaTitle !== 'Unbekannter Film') {
+    return metaTitle;
+  }
+
+  if (item.title && item.title !== 'Unbekannte Serie' && item.title !== 'Unbekannter Film') {
+    return item.title;
+  }
+
+  return formatMediaTitle(item.filename || '');
+}

@@ -1,11 +1,11 @@
 import React from 'react';
 import { PlayIcon, HeartIcon, DownloadIcon } from './icons.jsx';
-import { getPosterSrc } from './utils.js';
+import { getPosterSrc, getDisplayTitle } from './utils.js';
 
 const NetflixHero = ({ item, onPlay, onSeriesClick, onToggleFavorite, onDownload }) => {
   if (!item) return null;
 
-  const title = item.displayTitle || item.title || item.metadata?.title || item.filename;
+  const title = getDisplayTitle(item);
   const poster = getPosterSrc(item.displayPoster || item.posterUrl || item.metadata?.posterUrl || item.coverUrl);
   const category = item.metadata?.originalCategory || item.category || 'Film';
   const year = item.metadata?.year || item.year || '';

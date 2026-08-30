@@ -1,10 +1,10 @@
 import React from 'react';
 import { HeartIcon, DownloadIcon, TrashIcon, PlayIcon, CastIcon, PauseIcon } from './icons.jsx';
-import { formatBytes, formatDuration, getPosterSrc } from './utils.js';
+import { formatBytes, formatDuration, getPosterSrc, getDisplayTitle } from './utils.js';
 
 const MediaCard = ({ item, idx, activeCasts, pendingCasts, onToggleFavorite, onDelete, onPlay, onCast, onCastControl, onStopCast, onShowEpg, onXtreamDownload, onSeriesClick }) => {
   if (item.isGroup) {
-    const title = item.title;
+    const title = getDisplayTitle(item);
     const posterUrl = item.posterUrl;
     const year = item.year;
     const cast = item.cast;
@@ -105,7 +105,7 @@ className="media-card series-group-card"
   const isPending = !!pendingCasts[item.filename];
 
   const meta = item.metadata || {};
-  const title = meta.title || item.filename;
+  const title = getDisplayTitle(item);
   const posterUrl = meta.posterUrl;
   const year = meta.year || null;
   const cast = meta.cast || null;

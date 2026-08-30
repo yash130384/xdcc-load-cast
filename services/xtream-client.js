@@ -181,29 +181,68 @@ export function updateMappedXtreamData() {
     const ext = movie.container_extension || 'mp4';
     const streamUrl = `${host}/movie/${appState.appConfig.xtreamUsername}/${appState.appConfig.xtreamPassword}/${movie.stream_id}.${ext}`;
     const subcat = vodCatMap.get(String(movie.category_id)) || 'Sonstige';
+    const movieTitle = movie.name || movie.title || 'Unbekannter Film';
+    const releaseYear = movie.release_date || movie.year || (movie.name ? (movie.name.match(/\b(19\d{2}|20\d{2})\b/) || [])[1] : '') || '';
+    const poster = movie.stream_icon || movie.cover || null;
+    const mtime = parseXtreamTimestamp(movie.last_modified || movie.added);
+
     return {
-      filename: movie.stream_id + '_' + (movie.title ? movie.title.replace(/[^a-zA-Z0-9]/g, '_') : 'movie') + '.mp4',
+      filename: movie.stream_id + '_' + movieTitle.replace(/[^a-zA-Z0-9]/g, '_') + '.mp4',
       isXtream: true, isGroup: false,
       source: 'xtream', type: 'movie', xtreamStreamId: movie.stream_id,
-      streamUrl, xtreamTitle: movie.title || 'Unbekannter Film',
-      title: movie.title || 'Unbekannter Film', year: movie.release_date || '',
+      streamUrl, xtreamTitle: movieTitle,
+      title: movieTitle, year: releaseYear,
       category: 'Filme', subcategory: subcat,
-      coverUrl: movie.stream_icon || null,
-      xtreamLastModified: parseXtreamTimestamp(movie.last_modified || movie.added)
+      coverUrl: poster,
+      posterUrl: poster,
+      mtime,
+      xtreamLastModified: mtime,
+      metadata: {
+        title: movieTitle,
+        category: 'Filme',
+        originalCategory: 'Filme',
+        subcategory: subcat,
+        year: releaseYear,
+        posterUrl: poster,
+        coverUrl: poster,
+        backdrop: poster,
+        description: movie.plot || movie.description || ''
+      }
     };
   });
 
   appState.cachedMappedSeries = appState.xtreamSeries.map(series => {
     const subcat = seriesCatMap.get(String(series.category_id)) || 'Sonstige';
+    const seriesTitle = series.name || series.title || 'Unbekannte Serie';
+    const releaseYear = series.year || series.release_date || (series.name ? (series.name.match(/\b(19\d{2}|20\d{2})\b/) || [])[1] : '') || '';
+    const poster = series.cover || series.stream_icon || series.movie_image || null;
+    const backdrop = series.backdrop_path && series.backdrop_path[0] ? `https://image.tmdb.org/t/p/w500${series.backdrop_path[0]}` : poster;
+    const mtime = parseXtreamTimestamp(series.last_modified || series.last_updated || series.added);
+
     return {
-      filename: series.series_id + '_' + (series.name ? series.name.replace(/[^a-zA-Z0-9]/g, '_') : 'series') + '.mp4',
+      filename: series.series_id + '_' + seriesTitle.replace(/[^a-zA-Z0-9]/g, '_') + '.mp4',
       isXtream: true, isGroup: true, files: [],
       source: 'xtream', type: 'series', xtreamSeriesId: series.series_id,
-      title: series.name || 'Unbekannte Serie', year: series.year || '',
+      title: seriesTitle, year: releaseYear,
       category: 'Serien', subcategory: subcat,
-      coverUrl: series.cover || series.movie_image || null,
+      coverUrl: poster,
+      posterUrl: poster,
       backdropUrl: series.backdrop_path ? series.backdrop_path.map(p => `https://image.tmdb.org/t/p/w500${p}`) : null,
-      xtreamLastModified: parseXtreamTimestamp(series.last_modified || series.last_updated)
+      mtime,
+      xtreamLastModified: mtime,
+      metadata: {
+        title: seriesTitle,
+        category: 'Serien',
+        originalCategory: 'Serien',
+        subcategory: subcat,
+        year: releaseYear,
+        posterUrl: poster,
+        coverUrl: poster,
+        backdrop: backdrop,
+        cast: series.cast || '',
+        genre: series.genre || subcat,
+        description: series.plot || series.description || ''
+      }
     };
   });
 
@@ -211,15 +250,30 @@ export function updateMappedXtreamData() {
     const ext = 'ts';
     const streamUrl = `${host}/live/${appState.appConfig.xtreamUsername}/${appState.appConfig.xtreamPassword}/${chan.stream_id}.${ext}`;
     const subcat = liveCatMap.get(String(chan.category_id)) || 'Sonstige';
+    const chanTitle = chan.name || chan.title || 'Unbekannter Kanal';
+    const icon = chan.stream_icon || null;
+    const mtime = parseXtreamTimestamp(chan.last_modified || chan.last_updated || chan.added);
+
     return {
-      filename: chan.stream_id + '_' + (chan.name ? chan.name.replace(/[^a-zA-Z0-9]/g, '_') : 'live') + '.ts',
+      filename: chan.stream_id + '_' + chanTitle.replace(/[^a-zA-Z0-9]/g, '_') + '.ts',
       isXtream: true, isLive: true, isGroup: false,
       source: 'xtream', type: 'live', xtreamStreamId: chan.stream_id,
-      streamUrl, title: chan.name || 'Unbekannter Kanal',
+      streamUrl, title: chanTitle,
       category: 'Live TV', subcategory: subcat,
+      coverUrl: icon,
+      posterUrl: icon,
       epgChannelId: chan.epg_channel_id || '',
       tvArchive: chan.tv_archive === 1 || chan.tv_archive === '1' || chan.tvod_archive,
-      xtreamLastModified: parseXtreamTimestamp(chan.last_modified || chan.last_updated)
+      mtime,
+      xtreamLastModified: mtime,
+      metadata: {
+        title: chanTitle,
+        category: 'Live TV',
+        originalCategory: 'Live TV',
+        subcategory: subcat,
+        posterUrl: icon,
+        coverUrl: icon
+      }
     };
   });
 

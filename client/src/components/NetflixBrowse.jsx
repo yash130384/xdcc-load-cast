@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { getPosterSrc } from './utils.js';
+import { getPosterSrc, getDisplayTitle } from './utils.js';
 import { SettingsIcon } from './icons.jsx';
 
 const PulseCastLogo = () => (
@@ -66,7 +66,18 @@ const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings, onOp
       setContinueWatching(filteredCw);
 
       if (items.length > 0) {
-        // Group by subcategory
+        // 1. Newest 50 row if not IPTV
+        if (activeTab !== 'IPTV') {
+          const newest50 = [...items].sort((a, b) => (b.mtime || 0) - (a.mtime || 0)).slice(0, 50);
+          if (newest50.length > 0) {
+            mappedRows.push({
+              title: `🆕 NEWEST (${newest50.length})`,
+              items: newest50
+            });
+          }
+        }
+
+        // 2. Group by subcategory
         const grouped = {};
         const getSub = (it) => {
            if (activeTab === 'IPTV') return it.metadata?.category || 'Sonstige';
@@ -80,20 +91,22 @@ const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings, onOp
         });
 
         // Convert to rows array
-        mappedRows = Object.keys(grouped).sort().map(key => ({
+        const subcatRows = Object.keys(grouped).sort().map(key => ({
           title: key === 'Sonstige' ? 'Weitere' : key,
           items: grouped[key].sort((a,b) => (b.mtime || 0) - (a.mtime || 0))
         }));
 
         // Sort so "Weitere" is last
-        mappedRows.sort((a,b) => {
+        subcatRows.sort((a,b) => {
           if (a.title === 'Weitere') return 1;
           if (b.title === 'Weitere') return -1;
           return a.title.localeCompare(b.title);
         });
 
+        mappedRows.push(...subcatRows);
+
         // Set hero to a random item that has a backdrop/poster
-        const possibleHeroes = items.filter(it => it.metadata?.backdrop || it.metadata?.posterUrl);
+        const possibleHeroes = items.filter(it => it.metadata?.backdrop || it.metadata?.posterUrl || it.coverUrl);
         if (possibleHeroes.length > 0) {
           setHeroItem(possibleHeroes[Math.floor(Math.random() * possibleHeroes.length)]);
         } else {
@@ -184,8 +197,8 @@ const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings, onOp
 
 const HeroBanner = ({ item, onPlay, onSeriesClick }) => {
   const metadata = item.metadata || {};
-  const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || '');
-  const title = metadata.title || item.title || item.filename;
+  const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || item.coverUrl || item.posterUrl || '');
+  const title = getDisplayTitle(item);
   
   const handlePlayClick = () => {
     if (item.isGroup) {
@@ -276,12 +289,9 @@ const MediaRow = ({ title, items, isContinueWatching = false, onPlay, onSeriesCl
 
 const MediaCard = ({ item, isContinueWatching, onPlay, onSeriesClick, onToggleFavorite }) => {
   const metadata = item.metadata || {};
-  
-  const displayTitle = isContinueWatching && item.seriesTitle 
-    ? `${item.seriesTitle} - ${item.episodeTitle || item.title || item.filename}`
-    : metadata.title || item.title || item.filename;
+  const displayTitle = getDisplayTitle(item, isContinueWatching);
 
-  const posterUrl = getPosterSrc(metadata.posterUrl || metadata.backdrop || metadata.coverUrl || item.posterUrl || '');
+  const posterUrl = getPosterSrc(metadata.posterUrl || metadata.backdrop || metadata.coverUrl || item.posterUrl || item.coverUrl || '');
   const progressPercentage = item.progress?.percentage || 0;
 
   const handleClick = () => {

@@ -1,6 +1,6 @@
 import React from 'react';
 import { PlayIcon, CloseIcon } from './icons.jsx';
-import { getPosterSrc, formatDuration } from './utils.js';
+import { getPosterSrc, formatDuration, getDisplayTitle } from './utils.js';
 
 const ContinueWatchingRow = ({ items, onPlay, onToggleWatched }) => {
   if (!items || items.length === 0) return null;
@@ -26,7 +26,7 @@ const ContinueWatchingRow = ({ items, onPlay, onToggleWatched }) => {
         }}
       >
         {items.map((item, idx) => {
-          const title = item.title || item.metadata?.title || item.filename;
+          const title = getDisplayTitle(item, false);
           const seriesTitle = item.seriesTitle || (item.isSeriesEpisode ? item.metadata?.originalCategory : '');
           const poster = getPosterSrc(item.posterUrl || item.metadata?.posterUrl || item.coverUrl);
           const progress = item.progress || {};
