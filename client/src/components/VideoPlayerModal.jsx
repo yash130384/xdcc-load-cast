@@ -117,6 +117,7 @@ const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream, onCast }) =
 
   const handleTriggerDownload = async () => {
     setDownloading(true);
+    const isUrlFilename = filename.startsWith('http://') || filename.startsWith('https://') || filename.startsWith('http___') || filename.startsWith('https___');
     try {
       const res = await fetch('/api/media/download-stream', {
         method: 'POST',
@@ -125,7 +126,7 @@ const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream, onCast }) =
           streamUrl: item.streamUrl || streamSrc,
           title: title,
           seriesTitle: seriesTitle,
-          filename: filename
+          filename: !isUrlFilename ? filename : undefined
         })
       });
       const data = await res.json();

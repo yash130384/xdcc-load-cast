@@ -450,6 +450,18 @@ function parseFilename(filename) {
     name = name.slice(0, extIndex);
   }
 
+  if (/^https?(_|\/)/i.test(name)) {
+    const streamIdMatch = name.match(/[_/](?:series|movie|live|get\.php)[_/].*?([a-zA-Z0-9_-]+)$/i) || name.match(/([0-9]+)$/);
+    if (streamIdMatch) {
+      return {
+        title: `Stream #${streamIdMatch[1]}`,
+        year: null,
+        isSeries: false,
+        seasonEpisode: null
+      };
+    }
+  }
+
   name = name.replace(/[._-]/g, ' ');
 
   const seriesPattern = /\b(s\d{1,2}\s?e\d{1,2}|\b\d{1,2}x\d{1,2})\b/i;

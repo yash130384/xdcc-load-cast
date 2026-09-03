@@ -3,11 +3,62 @@ import path from 'path';
 import EventEmitter from 'events';
 import { Readable } from 'stream';
 
+export function resolveStreamUrl(rawUrl, xtreamConfig = {}) {
+  if (!rawUrl) return '';
+  let str = String(rawUrl).trim();
+
+  // 1. If it's a proxy url like /api/media/http%3A%2F%2F...
+  if (str.startsWith('/api/media/')) {
+    const raw = str.replace('/api/media/', '');
+    try {
+      str = decodeURIComponent(raw);
+    } catch (e) {
+      str = raw;
+    }
+  }
+
+  // 2. If it's already a full http(s) URL
+  if (str.startsWith('http://') || str.startsWith('https://')) {
+    return str;
+  }
+
+  // 3. If it's a sanitized URL like http___vpn.c01.live_8080_series_bYfbW21W_twuqbyF6tQnM_1106772.mkv
+  if (/^https?___/i.test(str)) {
+    const isHttps = /^https___/i.test(str);
+    let rest = str.replace(/^https?___/i, '');
+    
+    // Match host, port, and the rest: e.g. vpn.c01.live_8080_series_...
+    const withPortMatch = rest.match(/^([a-zA-Z0-9.-]+)_(\d{2,5})_(.*)$/);
+    if (withPortMatch) {
+      const host = withPortMatch[1];
+      const port = withPortMatch[2];
+      const pathPart = withPortMatch[3].replace(/_/g, '/');
+      return `${isHttps ? 'https' : 'http'}://${host}:${port}/${pathPart}`;
+    }
+
+    const withoutPortMatch = rest.match(/^([a-zA-Z0-9.-]+)_(.*)$/);
+    if (withoutPortMatch) {
+      const host = withoutPortMatch[1];
+      const pathPart = withoutPortMatch[2].replace(/_/g, '/');
+      return `${isHttps ? 'https' : 'http'}://${host}/${pathPart}`;
+    }
+  }
+
+  // 4. If relative Xtream path like series/user/pass/id.mkv
+  const host = (xtreamConfig.xtreamHost || '').replace(/\/+$/, '');
+  if (host && (str.startsWith('series/') || str.startsWith('/series/') || str.startsWith('movie/') || str.startsWith('/movie/') || str.startsWith('live/') || str.startsWith('/live/'))) {
+    const cleanPath = str.replace(/^\/+/, '');
+    return `${host}/${cleanPath}`;
+  }
+
+  return str;
+}
+
 export class HttpDownloader extends EventEmitter {
   constructor(options) {
     super();
     this.id = options.id;
-    this.url = options.url;
+    this.url = resolveStreamUrl(options.url, options.xtreamConfig || {});
     this.filename = options.filename;
     this.downloadDir = options.downloadDir || path.join(process.cwd(), 'downloads');
     this.expectedSize = options.expectedSize || 0;
@@ -104,7 +155,9 @@ export class HttpDownloader extends EventEmitter {
     this.abortController = new AbortController();
 
     try {
-      const headers = {};
+      const headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+      };
       if (this.localSize > 0) {
         headers['Range'] = `bytes=${this.localSize}-`;
       }

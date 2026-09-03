@@ -54,6 +54,14 @@ export function formatMediaTitle(raw) {
   // If Xtream format with numeric ID prefix like 12345_Movie_Title.mp4, remove the leading ID
   cleaned = cleaned.replace(/^\d+_+/, '');
 
+  // If sanitized or raw URL (e.g. http___vpn.c01.live_8080_series_user_pass_12345)
+  if (/^https?(_|\/)/i.test(cleaned)) {
+    const streamIdMatch = cleaned.match(/[_/](?:series|movie|live|get\.php)[_/].*?([a-zA-Z0-9_-]+)$/i) || cleaned.match(/([0-9]+)$/);
+    if (streamIdMatch) {
+      cleaned = `Stream #${streamIdMatch[1]}`;
+    }
+  }
+
   // Strip extension
   cleaned = cleaned.replace(/\.(mp4|mkv|avi|mov|ts|webm|flac|mp3|m4a|m4b|mpg|mpeg)$/i, '');
 

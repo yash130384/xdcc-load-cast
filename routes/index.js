@@ -10,7 +10,7 @@ import { updateAllDiscovery } from '../services/discovery.js';
 import { saveConfig } from '../services/config.js';
 import { parseSizeToBytes, parseTimeStringToSeconds } from '../services/file-utils.js';
 import { IrcDccDownloader } from '../irc-dcc-client.js';
-import { HttpDownloader } from '../http-downloader.js';
+import { HttpDownloader, resolveStreamUrl } from '../http-downloader.js';
 import { configureSambaShare } from '../services/samba.js';
 import { attachDeviceStatusListeners, attachDlnaDeviceStatusListeners, attachAirplayDeviceStatusListeners, broadcastActiveCasts, getActiveCasts, playLocalFile, startCasting, stopCasting } from '../services/cast-service.js';
 import { generateM3uPlaylist, generateXmltvEpg } from '../services/m3u-service.js';
@@ -1285,21 +1285,31 @@ export function registerAllRoutes(app) {
   });
 
   app.post('/api/media/download-stream', async (req, res) => {
-    const { streamUrl, title, seriesTitle, filename: customFilename } = req.body;
-    if (!streamUrl && !title) {
+    const { streamUrl, title, seriesTitle, filename: customFilename, isXtream, xtreamStreamId } = req.body;
+    if (!streamUrl && !title && !xtreamStreamId) {
       return res.status(400).json({ error: 'Missing streamUrl or title' });
     }
 
     try {
-      const url = streamUrl || '';
+      const url = resolveStreamUrl(streamUrl || '', { ...appState.appConfig, xtreamStreamId, isXtream });
       let extension = '.mp4';
       try {
         const pathname = new URL(url).pathname;
         const ext = path.extname(pathname);
         if (ext && ext.length > 1 && ext.length < 6) extension = ext.toLowerCase();
-      } catch (e) {}
+      } catch (e) {
+        const match = (url || '').match(/\.(mkv|mp4|avi|ts|mov|webm)$/i);
+        if (match) extension = `.${match[1].toLowerCase()}`;
+      }
 
-      let filename = customFilename || (seriesTitle ? `${seriesTitle} - ${title}${extension}` : `${title || 'Stream_Download'}${extension}`);
+      const isCustomFilenameAUrl = customFilename && (
+        customFilename.startsWith('http://') || 
+        customFilename.startsWith('https://') || 
+        customFilename.startsWith('http___') || 
+        customFilename.startsWith('https___')
+      );
+      let validCustomFilename = !isCustomFilenameAUrl ? customFilename : null;
+      let filename = validCustomFilename || (seriesTitle ? `${seriesTitle} - ${title}${extension}` : `${title || 'Stream_Download'}${extension}`);
       filename = filename.replace(/[\\/:*?"<>|]/g, '_');
 
       const id = Date.now().toString();
@@ -1309,7 +1319,8 @@ export function registerAllRoutes(app) {
         url,
         filename,
         downloadDir: appState.appConfig.downloadDir,
-        initialStatus: shouldQueue ? 'queued' : 'connecting'
+        initialStatus: shouldQueue ? 'queued' : 'connecting',
+        xtreamConfig: appState.appConfig
       });
 
       downloader.on('progress', (data) => {
