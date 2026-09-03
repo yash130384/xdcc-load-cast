@@ -219,8 +219,16 @@ function App() {
   const [castingItem, setCastingItem] = useState(null);
   const [castDevices, setCastDevices] = useState([]);
   const [loadingDevices, setLoadingDevices] = useState(false);
+  const [selectedOutputDevice, setSelectedOutputDevice] = useState(() => {
+    return localStorage.getItem('pulsecast_selected_output_device') || 'local';
+  });
   const [activeCasts, setActiveCasts] = useState([]);
   const [pendingCasts, setPendingCasts] = useState({});
+
+  const handleSelectOutputDevice = (deviceName) => {
+    setSelectedOutputDevice(deviceName);
+    localStorage.setItem('pulsecast_selected_output_device', deviceName);
+  };
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [mediaLibrary, setMediaLibrary] = useState([]);
@@ -357,6 +365,7 @@ function App() {
       .catch(err => console.error('Error fetching downloads:', err));
 
     fetchActiveCasts();
+    fetchDevices();
 
     fetch('/api/auto-download')
       .then(res => res.json())
@@ -2091,7 +2100,26 @@ function App() {
       return;
     }
     const resolvedItem = item || (mediaLibrary?.items || mediaLibrary || []).find(m => m.filename === filename) || { filename };
+    
+    // Check if playback target is a Cast device
+    if (selectedOutputDevice && selectedOutputDevice !== 'local') {
+      const castTarget = filename || resolvedItem?.streamUrl || resolvedItem?.filename;
+      startCastLibrary(castTarget, selectedOutputDevice);
+      return;
+    }
+
     setActiveVideoItem(resolvedItem);
+  };
+
+  const handleStartCastModal = (itemOrId, deviceName) => {
+    if (typeof itemOrId === 'string' && downloads.some(d => d.id === itemOrId)) {
+      startCast(itemOrId, deviceName);
+    } else {
+      const filename = typeof itemOrId === 'string'
+        ? itemOrId
+        : (itemOrId?.filename || itemOrId?.streamUrl || itemOrId?.id);
+      startCastLibrary(filename, deviceName);
+    }
   };
 
   const saveAudiobookProgress = (filename, position) => {
@@ -2555,6 +2583,12 @@ function App() {
           settings={settings}
           onOpenVcr={openVcrModalAndLoad}
           onOpenSettings={handleOpenSettings}
+          selectedOutputDevice={selectedOutputDevice}
+          onSelectOutputDevice={handleSelectOutputDevice}
+          castDevices={castDevices}
+          loadingDevices={loadingDevices}
+          onRefreshDevices={fetchDevices}
+          activeCasts={activeCasts}
         />
       )}
 
@@ -2590,6 +2624,12 @@ function App() {
                   setAppMode('advanced');
                   setCurrentView('downloads');
                 }}
+                selectedOutputDevice={selectedOutputDevice}
+                onSelectOutputDevice={handleSelectOutputDevice}
+                castDevices={castDevices}
+                loadingDevices={loadingDevices}
+                onRefreshDevices={fetchDevices}
+                activeCasts={activeCasts}
               />
             ) : appMode === 'media' && activeSeriesItem ? (
               <SeriesDetailView
@@ -2819,7 +2859,7 @@ function App() {
           activeCasts={activeCasts}
           pendingCasts={pendingCasts}
           onClose={() => setCastingItem(null)}
-          onStartCast={startCast}
+          onStartCast={handleStartCastModal}
           onStopCast={stopCast}
         />
 
@@ -2861,6 +2901,11 @@ function App() {
           }}
           onDownloadStream={() => {
             fetchContinueWatching();
+          }}
+          onCast={(item) => {
+            setActiveVideoItem(null);
+            setCastingItem(item);
+            fetchDevices();
           }}
         />
 

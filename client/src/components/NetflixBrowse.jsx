@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getPosterSrc, getDisplayTitle } from './utils.js';
 import { SettingsIcon } from './icons.jsx';
+import OutputDeviceSelector from './OutputDeviceSelector.jsx';
 
 const PulseCastLogo = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#logoGrad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 5px rgba(6, 182, 212, 0.4))' }}>
@@ -16,7 +17,19 @@ const PulseCastLogo = () => (
   </svg>
 );
 
-const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings, onOpenAdvanced }) => {
+const NetflixBrowse = ({
+  onPlay,
+  onSeriesClick,
+  onToggleFavorite,
+  settings,
+  onOpenAdvanced,
+  selectedOutputDevice = 'local',
+  onSelectOutputDevice,
+  castDevices = [],
+  loadingDevices = false,
+  onRefreshDevices,
+  activeCasts = []
+}) => {
   const [activeTab, setActiveTab] = useState('Lokal');
   const [activeSubTab, setActiveSubTab] = useState('Filme'); // Filme, Serien
   const [loading, setLoading] = useState(false);
@@ -136,7 +149,15 @@ const NetflixBrowse = ({ onPlay, onSeriesClick, onToggleFavorite, settings, onOp
           <button className={`nb-nav-link ${activeTab === 'Stream' ? 'active' : ''}`} onClick={() => setActiveTab('Stream')}>Stream</button>
           <button className={`nb-nav-link ${activeTab === 'IPTV' ? 'active' : ''}`} onClick={() => setActiveTab('IPTV')}>IPTV</button>
         </div>
-        <div className="nb-nav-right">
+        <div className="nb-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+          <OutputDeviceSelector
+            selectedDevice={selectedOutputDevice}
+            onSelectDevice={onSelectOutputDevice}
+            castDevices={castDevices}
+            loadingDevices={loadingDevices}
+            onRefreshDevices={onRefreshDevices}
+            activeCasts={activeCasts}
+          />
           <button className="nb-settings-btn" onClick={onOpenAdvanced} title="System & Einstellungen">
             <SettingsIcon />
           </button>

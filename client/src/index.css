@@ -3151,3 +3151,15 @@ input:checked + .slider:before {
   .sdv-ep-thumb { width: 100%; height: auto; aspect-ratio: 16/9; }
   .sdv-ep-meta { text-align: left; flex-direction: row; }
 }
+
+/* Output Device Selector */
+.output-device-btn:hover {
+  background: rgba(255, 255, 255, 0.15) !important;
+}
+.output-device-btn.device-active {
+  box-shadow: 0 0 12px rgba(6, 182, 212, 0.35);
+}
+.device-item-btn:hover {
+  background: rgba(255, 255, 255, 0.08) !important;
+}
+

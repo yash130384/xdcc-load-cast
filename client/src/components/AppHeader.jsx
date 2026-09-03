@@ -1,5 +1,6 @@
 import React from 'react';
 import { PulseCastLogo, DownloadIcon, MediaIcon, FolderIcon, SettingsIcon } from './icons.jsx';
+import OutputDeviceSelector from './OutputDeviceSelector.jsx';
 
 const AppHeader = ({
   appMode, // 'media' or 'advanced'
@@ -12,7 +13,13 @@ const AppHeader = ({
   onLibraryClick,
   onExplorerClick,
   onOpenSettings,
-  onOpenVcr
+  onOpenVcr,
+  selectedOutputDevice = 'local',
+  onSelectOutputDevice,
+  castDevices = [],
+  loadingDevices = false,
+  onRefreshDevices,
+  activeCasts = []
 }) => {
   return (
     <header className="app-header">
@@ -32,7 +39,15 @@ const AppHeader = ({
 
         
         {/* Mode Switcher & Global Actions */}
-        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+        <div className="header-actions" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <OutputDeviceSelector
+            selectedDevice={selectedOutputDevice}
+            onSelectDevice={onSelectOutputDevice}
+            castDevices={castDevices}
+            loadingDevices={loadingDevices}
+            onRefreshDevices={onRefreshDevices}
+            activeCasts={activeCasts}
+          />
           <button
             className="btn btn-primary"
             onClick={() => onToggleAppMode('media')}

@@ -1,8 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { PlayIcon, PauseIcon, DownloadIcon, CloseIcon } from './icons.jsx';
+import { PlayIcon, PauseIcon, DownloadIcon, CloseIcon, CastIcon } from './icons.jsx';
 import { formatDuration } from './utils.js';
 
-const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream }) => {
+const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream, onCast }) => {
   const videoRef = useRef(null);
   const [isPlaying, setIsPlaying] = useState(true);
   const [currentTime, setCurrentTime] = useState(0);
@@ -140,6 +140,17 @@ const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream }) => {
     }
   };
 
+  const handleCast = () => {
+    if (videoRef.current) {
+      saveProgress(videoRef.current.currentTime, videoRef.current.duration);
+      videoRef.current.pause();
+      setIsPlaying(false);
+    }
+    if (onCast) {
+      onCast(item);
+    }
+  };
+
   if (!isOpen || !item) return null;
 
   return (
@@ -200,6 +211,29 @@ const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream }) => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          {/* Cast to TV Button */}
+          <button
+            onClick={handleCast}
+            className="btn"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              padding: '0.6rem 1.1rem',
+              borderRadius: '50px',
+              backgroundColor: 'rgba(6, 182, 212, 0.2)',
+              border: '1px solid var(--accent-cyan)',
+              color: '#fff',
+              fontWeight: '600',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease'
+            }}
+            title="Auf TV oder DLNA/Chromecast/AirPlay streamen"
+          >
+            <CastIcon />
+            <span>Auf TV streamen (Cast)</span>
+          </button>
+
           {/* In-Player Puffer-Fix Download Button */}
           <button
             onClick={handleTriggerDownload}
@@ -331,6 +365,26 @@ const VideoPlayerModal = ({ isOpen, item, onClose, onDownloadStream }) => {
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+            <button
+              onClick={handleCast}
+              style={{
+                background: 'none',
+                border: 'none',
+                color: 'rgba(255,255,255,0.9)',
+                cursor: 'pointer',
+                fontSize: '0.95rem',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.4rem',
+                padding: '0.3rem 0.6rem',
+                borderRadius: '6px',
+                transition: 'background 0.2s'
+              }}
+              title="Auf TV streamen (Cast)"
+            >
+              <CastIcon />
+              <span>Cast</span>
+            </button>
             <button
               onClick={() => {
                 if (videoRef.current) {
