@@ -17,7 +17,290 @@ const PulseCastLogo = () => (
   </svg>
 );
 
+const LockIcon = ({ size = 18, style = {} }) => (
+  <svg
+    xmlns="http://www.w3.org/2000/svg"
+    width={size}
+    height={size}
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    strokeLinecap="round"
+    strokeLinejoin="round"
+    style={style}
+  >
+    <rect x="3" y="11" width="18" height="11" rx="2" ry="2" />
+    <path d="M7 11V7a5 5 0 0 1 10 0v4" />
+  </svg>
+);
+
+const pinStyles = `
+.nb-pin-screen {
+  min-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 3rem 1.5rem;
+  position: relative;
+  z-index: 10;
+}
+.nb-pin-card {
+  box-sizing: border-box;
+}
+.nb-pin-inline-card {
+  background: rgba(13, 14, 21, 0.88);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-radius: 16px;
+  padding: 3rem 2.5rem;
+  max-width: 440px;
+  width: 100%;
+  text-align: center;
+  animation: nbFadeIn 0.25s ease-out;
+}
+.nb-pin-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.75);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1.5rem;
+  animation: nbFadeIn 0.2s ease-out;
+}
+.nb-pin-modal-card {
+  background: #0e1017;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.85);
+  border-radius: 16px;
+  padding: 2.5rem 2rem;
+  max-width: 400px;
+  width: 100%;
+  text-align: center;
+  position: relative;
+  animation: nbSlideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.nb-pin-modal-close {
+  position: absolute;
+  top: 1rem;
+  right: 1rem;
+  background: transparent;
+  border: none;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 0.25rem 0.5rem;
+  line-height: 1;
+  border-radius: 4px;
+  transition: color 0.2s;
+}
+.nb-pin-modal-close:hover {
+  color: #fff;
+}
+.nb-pin-lock-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: rgba(6, 182, 212, 0.12);
+  border: 1px solid rgba(6, 182, 212, 0.25);
+  color: var(--accent-cyan, #06b6d4);
+  margin-bottom: 1.25rem;
+  box-shadow: 0 0 16px rgba(6, 182, 212, 0.15);
+}
+.nb-pin-title {
+  font-size: 1.35rem;
+  font-weight: 700;
+  color: #fff;
+  margin-bottom: 0.5rem;
+  letter-spacing: -0.01em;
+}
+.nb-pin-subtitle {
+  font-size: 0.88rem;
+  color: var(--text-secondary, #9ca3af);
+  margin-bottom: 1.75rem;
+  line-height: 1.45;
+}
+.nb-pin-form {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 1.2rem;
+}
+.nb-pin-input-wrap {
+  width: 100%;
+  max-width: 260px;
+}
+.nb-pin-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 0.75rem 1rem;
+  font-size: 1.5rem;
+  letter-spacing: 0.45em;
+  text-align: center;
+  background: rgba(0, 0, 0, 0.65);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  border-radius: 10px;
+  color: #fff;
+  font-family: var(--font-mono, monospace);
+  outline: none;
+  transition: border-color 0.2s, box-shadow 0.2s;
+}
+.nb-pin-input:focus {
+  border-color: var(--accent-cyan, #06b6d4);
+  box-shadow: 0 0 14px rgba(6, 182, 212, 0.3);
+}
+.nb-pin-error-msg {
+  color: var(--accent-red, #ef4444);
+  font-size: 0.84rem;
+  font-weight: 500;
+  margin-top: -0.4rem;
+}
+.nb-pin-actions {
+  display: flex;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 260px;
+  margin-top: 0.25rem;
+}
+.nb-pin-btn-submit {
+  flex: 1;
+  padding: 0.65rem 1.25rem;
+  background: var(--grad-cyan-blue, linear-gradient(135deg, #06b6d4 0%, #3b82f6 100%));
+  border: none;
+  border-radius: 8px;
+  color: #fff;
+  font-size: 0.92rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+}
+.nb-pin-btn-submit:hover {
+  opacity: 0.92;
+  transform: translateY(-1px);
+}
+.nb-pin-btn-cancel {
+  padding: 0.65rem 1rem;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 8px;
+  color: var(--text-secondary, #9ca3af);
+  font-size: 0.92rem;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.nb-pin-btn-cancel:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+.nb-pin-trigger-btn {
+  background: rgba(0, 0, 0, 0.4);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  color: var(--text-secondary, #9ca3af);
+  width: 40px;
+  height: 40px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 0.2s, transform 0.2s, color 0.2s;
+}
+.nb-pin-trigger-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #fff;
+  transform: scale(1.05);
+}
+@keyframes nbFadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes nbSlideUp {
+  from { opacity: 0; transform: translateY(14px) scale(0.98); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+`;
+
+const PinInputCard = ({
+  pinInput,
+  onPinChange,
+  onSubmit,
+  pinError,
+  onCancel,
+  cancelText = 'Abbrechen',
+  title = 'PIN erforderlich',
+  subtitle = 'Bitte 6-stellige PIN eingeben, um lokale Medien freizuschalten.',
+  isModal = false,
+  onCloseModal
+}) => {
+  const inputRef = useRef(null);
+
+  useEffect(() => {
+    inputRef.current?.focus();
+  }, []);
+
+  return (
+    <div className={`nb-pin-card ${isModal ? 'nb-pin-modal-card' : 'nb-pin-inline-card'}`}>
+      {isModal && (
+        <button
+          type="button"
+          className="nb-pin-modal-close"
+          onClick={onCloseModal}
+          title="Schließen"
+        >
+          ✕
+        </button>
+      )}
+      <div className="nb-pin-lock-badge">
+        <LockIcon size={isModal ? 26 : 32} />
+      </div>
+      <h2 className="nb-pin-title">{title}</h2>
+      <p className="nb-pin-subtitle">{subtitle}</p>
+
+      <form onSubmit={onSubmit} className="nb-pin-form">
+        <div className="nb-pin-input-wrap">
+          <input
+            ref={inputRef}
+            type="password"
+            inputMode="numeric"
+            pattern="[0-9]*"
+            autoComplete="one-time-code"
+            maxLength={6}
+            value={pinInput}
+            onChange={onPinChange}
+            placeholder="••••••"
+            className="nb-pin-input"
+          />
+        </div>
+
+        {pinError && <div className="nb-pin-error-msg">{pinError}</div>}
+
+        <div className="nb-pin-actions">
+          <button type="submit" className="nb-pin-btn-submit">
+            Entsperren
+          </button>
+          {onCancel && (
+            <button type="button" onClick={onCancel} className="nb-pin-btn-cancel">
+              {cancelText}
+            </button>
+          )}
+        </div>
+      </form>
+    </div>
+  );
+};
+
 const NetflixBrowse = ({
+  showLocalFiles = false,
+  toggleLocalFiles,
   onPlay,
   onSeriesClick,
   onToggleFavorite,
@@ -30,7 +313,7 @@ const NetflixBrowse = ({
   onRefreshDevices,
   activeCasts = []
 }) => {
-  const [activeTab, setActiveTab] = useState('Lokal');
+  const [activeTab, setActiveTab] = useState(() => (showLocalFiles ? 'Lokal' : 'Stream'));
   const [activeSubTab, setActiveSubTab] = useState('Filme'); // Filme, Serien
   const [loading, setLoading] = useState(false);
   
@@ -40,9 +323,48 @@ const NetflixBrowse = ({
   // Rows data: array of { title, items }
   const [rowsData, setRowsData] = useState([]);
 
+  // PIN state
+  const [pinInput, setPinInput] = useState('');
+  const [pinError, setPinError] = useState('');
+  const [showPinModal, setShowPinModal] = useState(false);
+
   const isXtreamEnabled = settings?.xtreamEnabled;
 
+  const handleUnlock = () => {
+    if (typeof toggleLocalFiles === 'function') {
+      toggleLocalFiles(true);
+    }
+    setPinInput('');
+    setPinError('');
+    setShowPinModal(false);
+    setActiveTab('Lokal');
+  };
+
+  const handlePinChange = (e) => {
+    const val = e.target.value;
+    setPinInput(val);
+    setPinError('');
+    if (val === '009981') {
+      handleUnlock();
+    } else if (val.length >= 6) {
+      setPinError('Falsche PIN. Bitte erneut versuchen.');
+    }
+  };
+
+  const handlePinSubmit = (e) => {
+    if (e) e.preventDefault();
+    if (pinInput.trim() === '009981') {
+      handleUnlock();
+    } else {
+      setPinError('Falsche PIN. Bitte erneut versuchen.');
+    }
+  };
+
   const fetchItems = async (url) => {
+    // Only fetch local content if showLocalFiles is true
+    if (!showLocalFiles && (url.includes('Lokal') || url.includes('category=Lokal'))) {
+      return [];
+    }
     try {
       const response = await fetch(url);
       const data = await response.json();
@@ -55,6 +377,15 @@ const NetflixBrowse = ({
 
   useEffect(() => {
     const loadData = async () => {
+      // If user selected Lokal but showLocalFiles is false, do not fetch or display local content
+      if (activeTab === 'Lokal' && !showLocalFiles) {
+        setHeroItem(null);
+        setContinueWatching([]);
+        setRowsData([]);
+        setLoading(false);
+        return;
+      }
+
       setLoading(true);
       
       // Fetch continue watching always
@@ -64,8 +395,10 @@ const NetflixBrowse = ({
       let mappedRows = [];
       
       if (activeTab === 'Lokal') {
-        const cat = activeSubTab === 'Filme' ? 'Lokal_Filme' : 'Lokal_Serien';
-        items = await fetchItems(`/api/media-library?category=${cat}&limit=2000`);
+        if (showLocalFiles) {
+          const cat = activeSubTab === 'Filme' ? 'Lokal_Filme' : 'Lokal_Serien';
+          items = await fetchItems(`/api/media-library?category=${cat}&limit=2000`);
+        }
       } else if (activeTab === 'Stream') {
         const cat = activeSubTab === 'Filme' ? 'Filme' : 'Serien';
         if (isXtreamEnabled) items = await fetchItems(`/api/media-library?category=${cat}&limit=2000`);
@@ -134,10 +467,12 @@ const NetflixBrowse = ({
     };
 
     loadData();
-  }, [activeTab, activeSubTab, isXtreamEnabled]);
+  }, [activeTab, activeSubTab, isXtreamEnabled, showLocalFiles]);
 
   return (
     <div className="nb-container">
+      <style>{pinStyles}</style>
+
       {/* Navbar */}
       <div className="nb-navbar">
         <div className="nb-nav-left">
@@ -145,9 +480,33 @@ const NetflixBrowse = ({
             <PulseCastLogo />
             <span>PulseCast</span>
           </div>
-          <button className={`nb-nav-link ${activeTab === 'Lokal' ? 'active' : ''}`} onClick={() => setActiveTab('Lokal')}>Lokal</button>
-          <button className={`nb-nav-link ${activeTab === 'Stream' ? 'active' : ''}`} onClick={() => setActiveTab('Stream')}>Stream</button>
-          <button className={`nb-nav-link ${activeTab === 'IPTV' ? 'active' : ''}`} onClick={() => setActiveTab('IPTV')}>IPTV</button>
+          <button
+            className={`nb-nav-link ${activeTab === 'Lokal' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('Lokal');
+              setPinError('');
+            }}
+          >
+            Lokal {!showLocalFiles && <span style={{ display: 'inline-flex', verticalAlign: 'middle', opacity: 0.6, marginLeft: '4px' }}><LockIcon size={12} /></span>}
+          </button>
+          <button
+            className={`nb-nav-link ${activeTab === 'Stream' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('Stream');
+              setShowPinModal(false);
+            }}
+          >
+            Stream
+          </button>
+          <button
+            className={`nb-nav-link ${activeTab === 'IPTV' ? 'active' : ''}`}
+            onClick={() => {
+              setActiveTab('IPTV');
+              setShowPinModal(false);
+            }}
+          >
+            IPTV
+          </button>
         </div>
         <div className="nb-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
           <OutputDeviceSelector
@@ -158,21 +517,83 @@ const NetflixBrowse = ({
             onRefreshDevices={onRefreshDevices}
             activeCasts={activeCasts}
           />
+          {!showLocalFiles && (
+            <button
+              className="nb-pin-trigger-btn"
+              onClick={() => {
+                setShowPinModal(true);
+                setPinError('');
+                setPinInput('');
+              }}
+              title="Lokale Medien mit PIN entsperren"
+            >
+              <LockIcon size={16} />
+            </button>
+          )}
           <button className="nb-settings-btn" onClick={onOpenAdvanced} title="System & Einstellungen">
             <SettingsIcon />
           </button>
         </div>
       </div>
 
+      {/* Discreet PIN Modal */}
+      {showPinModal && !showLocalFiles && (
+        <div
+          className="nb-pin-modal-overlay"
+          onClick={() => {
+            setShowPinModal(false);
+            setPinInput('');
+            setPinError('');
+          }}
+        >
+          <div onClick={(e) => e.stopPropagation()}>
+            <PinInputCard
+              isModal={true}
+              onCloseModal={() => {
+                setShowPinModal(false);
+                setPinInput('');
+                setPinError('');
+              }}
+              pinInput={pinInput}
+              onPinChange={handlePinChange}
+              onSubmit={handlePinSubmit}
+              pinError={pinError}
+              onCancel={() => {
+                setShowPinModal(false);
+                setPinInput('');
+                setPinError('');
+              }}
+              cancelText="Abbrechen"
+              title="Lokale Medien entsperren"
+              subtitle="Gib die 6-stellige PIN ein, um lokale Inhalte freizuschalten."
+            />
+          </div>
+        </div>
+      )}
+
       {/* Sub Navbar for Filme/Serien */}
-      {(activeTab === 'Lokal' || activeTab === 'Stream') && (
+      {((activeTab === 'Lokal' && showLocalFiles) || activeTab === 'Stream') && (
         <div className="nb-subnav">
           <button className={`nb-subnav-link ${activeSubTab === 'Filme' ? 'active' : ''}`} onClick={() => setActiveSubTab('Filme')}>Filme</button>
           <button className={`nb-subnav-link ${activeSubTab === 'Serien' ? 'active' : ''}`} onClick={() => setActiveSubTab('Serien')}>Serien</button>
         </div>
       )}
 
-      {loading ? (
+      {/* Content Section */}
+      {activeTab === 'Lokal' && !showLocalFiles ? (
+        <div className="nb-pin-screen">
+          <PinInputCard
+            pinInput={pinInput}
+            onPinChange={handlePinChange}
+            onSubmit={handlePinSubmit}
+            pinError={pinError}
+            onCancel={() => setActiveTab('Stream')}
+            cancelText="Zurück zu Stream"
+            title="Geschützter Bereich"
+            subtitle="Lokale Medien sind geschützt. Bitte PIN eingeben, um Zugriff zu erhalten."
+          />
+        </div>
+      ) : loading ? (
         <div className="nb-loading-screen">
           <div className="nb-spinner"></div>
         </div>

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useRef, useMemo, useCallback } from 'react';
 import AppHeader from './components/AppHeader';
 import StatusBar from './components/StatusBar';
 import SearchPanel from './components/SearchPanel';
@@ -225,10 +225,16 @@ function App() {
   const [activeCasts, setActiveCasts] = useState([]);
   const [pendingCasts, setPendingCasts] = useState({});
 
-  const handleSelectOutputDevice = (deviceName) => {
+  const [showLocalFiles, setShowLocalFiles] = useState(false);
+
+  const toggleLocalFiles = useCallback((show) => {
+    setShowLocalFiles(show);
+  }, []);
+
+  const handleSelectOutputDevice = useCallback((deviceName) => {
     setSelectedOutputDevice(deviceName);
     localStorage.setItem('pulsecast_selected_output_device', deviceName);
-  };
+  }, []);
   const [librarySearchQuery, setLibrarySearchQuery] = useState('');
   const [debouncedSearchQuery, setDebouncedSearchQuery] = useState('');
   const [mediaLibrary, setMediaLibrary] = useState([]);
@@ -245,9 +251,9 @@ function App() {
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue');
   const [appMode, setAppMode] = useState('media'); // 'media' (Netflix default) or 'advanced' (profi)
-  const [currentView, setCurrentView] = useState('library');
-  const [continueWatchingItems, setContinueWatchingItems] = useState([]);
-  const [activeVideoItem, setActiveVideoItem] = useState(null);
+
+
+
   const [mobileDownloadsTab, setMobileDownloadsTab] = useState('search');
   const [activeSeriesItem, setActiveSeriesItem] = useState(null);
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
@@ -2616,6 +2622,8 @@ function App() {
               />
             ) : appMode === 'media' && !activeSeriesItem ? (
               <NetflixBrowse
+                showLocalFiles={showLocalFiles}
+                toggleLocalFiles={toggleLocalFiles}
                 onPlay={playLocalLibrary}
                 onSeriesClick={setActiveSeriesItem}
                 onToggleFavorite={toggleFavorite}
