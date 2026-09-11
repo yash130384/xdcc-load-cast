@@ -49,9 +49,9 @@ const pinStyles = `
   box-sizing: border-box;
 }
 .nb-pin-inline-card {
-  background: rgba(13, 14, 21, 0.88);
-  border: 1px solid rgba(255, 255, 255, 0.08);
-  box-shadow: 0 20px 45px rgba(0, 0, 0, 0.75);
+  background: rgba(13, 19, 34, 0.92);
+  border: 1px solid rgba(56, 189, 248, 0.2);
+  box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.15);
   backdrop-filter: blur(20px);
   -webkit-backdrop-filter: blur(20px);
   border-radius: 16px;
@@ -64,7 +64,7 @@ const pinStyles = `
 .nb-pin-modal-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(0, 0, 0, 0.75);
+  background: rgba(7, 10, 19, 0.8);
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
   z-index: 9999;
@@ -75,9 +75,9 @@ const pinStyles = `
   animation: nbFadeIn 0.2s ease-out;
 }
 .nb-pin-modal-card {
-  background: #0e1017;
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.85);
+  background: #0d1322;
+  border: 1px solid rgba(56, 189, 248, 0.25);
+  box-shadow: 0 25px 50px rgba(0, 0, 0, 0.85), 0 0 35px rgba(56, 189, 248, 0.2);
   border-radius: 16px;
   padding: 2.5rem 2rem;
   max-width: 400px;
@@ -110,11 +110,11 @@ const pinStyles = `
   width: 60px;
   height: 60px;
   border-radius: 50%;
-  background: rgba(6, 182, 212, 0.12);
-  border: 1px solid rgba(6, 182, 212, 0.25);
-  color: var(--accent-cyan, #06b6d4);
+  background: rgba(56, 189, 248, 0.15);
+  border: 1px solid rgba(56, 189, 248, 0.35);
+  color: #38bdf8;
   margin-bottom: 1.25rem;
-  box-shadow: 0 0 16px rgba(6, 182, 212, 0.15);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
 }
 .nb-pin-title {
   font-size: 1.35rem;

@@ -225,10 +225,14 @@ function App() {
   const [activeCasts, setActiveCasts] = useState([]);
   const [pendingCasts, setPendingCasts] = useState({});
 
-  const [showLocalFiles, setShowLocalFiles] = useState(false);
+  const [showLocalFiles, setShowLocalFiles] = useState(() => {
+    const saved = localStorage.getItem('pulsecast_show_local_files');
+    return saved !== null ? saved === 'true' : true;
+  });
 
   const toggleLocalFiles = useCallback((show) => {
     setShowLocalFiles(show);
+    localStorage.setItem('pulsecast_show_local_files', show ? 'true' : 'false');
   }, []);
 
   const handleSelectOutputDevice = useCallback((deviceName) => {
@@ -251,9 +255,9 @@ function App() {
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue');
   const [appMode, setAppMode] = useState('media'); // 'media' (Netflix default) or 'advanced' (profi)
-
-
-
+  const [currentView, setCurrentView] = useState('library');
+  const [continueWatchingItems, setContinueWatchingItems] = useState([]);
+  const [activeVideoItem, setActiveVideoItem] = useState(null);
   const [mobileDownloadsTab, setMobileDownloadsTab] = useState('search');
   const [activeSeriesItem, setActiveSeriesItem] = useState(null);
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
