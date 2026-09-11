@@ -12,7 +12,7 @@ import { parseSizeToBytes, parseTimeStringToSeconds } from '../services/file-uti
 import { IrcDccDownloader } from '../irc-dcc-client.js';
 import { HttpDownloader, resolveStreamUrl } from '../http-downloader.js';
 import { configureSambaShare } from '../services/samba.js';
-import { attachDeviceStatusListeners, attachDlnaDeviceStatusListeners, attachAirplayDeviceStatusListeners, broadcastActiveCasts, getActiveCasts, playLocalFile, startCasting, stopCasting } from '../services/cast-service.js';
+import { attachDeviceStatusListeners, attachDlnaDeviceStatusListeners, attachAirplayDeviceStatusListeners, broadcastActiveCasts, getActiveCasts, playLocalFile, launchVlc, startCasting, stopCasting } from '../services/cast-service.js';
 import { generateM3uPlaylist, generateXmltvEpg } from '../services/m3u-service.js';
 import fs from 'fs';
 import path from 'path';
@@ -1378,6 +1378,53 @@ export function registerAllRoutes(app) {
     });
   });
 
+  const handleVlcPlay = async (req, res) => {
+    const { filename, streamUrl, downloadId } = req.body || {};
+    let target = null;
+
+    if (downloadId) {
+      const item = appState.downloadQueue.get(downloadId);
+      if (item && item.downloader && item.downloader.filePath && fs.existsSync(item.downloader.filePath)) {
+        target = item.downloader.filePath;
+      }
+    }
+
+    if (!target) {
+      if (streamUrl && (streamUrl.startsWith('http://') || streamUrl.startsWith('https://'))) {
+        target = streamUrl;
+      } else if (filename && (filename.startsWith('http://') || filename.startsWith('https://'))) {
+        target = filename;
+      } else if (filename) {
+        const filePath = getSafeFilePath(filename);
+        if (filePath && fs.existsSync(filePath)) {
+          target = filePath;
+        } else {
+          const resolvedUrl = resolveStreamUrl(filename, appState.appConfig);
+          if (resolvedUrl && (resolvedUrl.startsWith('http://') || resolvedUrl.startsWith('https://'))) {
+            target = resolvedUrl;
+          } else {
+            target = `http://${getLocalIp(appState.appConfig)}:${PORT}/api/media/${encodeURIComponent(filename)}`;
+          }
+        }
+      }
+    }
+
+    if (!target) {
+      return res.status(400).json({ error: 'Kein gültiges Ziel für VLC angegeben (Datei oder URL fehlt)' });
+    }
+
+    try {
+      await launchVlc(target);
+      return res.json({ success: true, target });
+    } catch (err) {
+      console.error('[VLC] Fehler beim Starten von VLC:', err);
+      return res.status(500).json({ error: `Konnte VLC nicht starten: ${err.message}` });
+    }
+  };
+
+  app.post('/api/player/vlc', handleVlcPlay);
+  app.post('/api/media-library/play-vlc', handleVlcPlay);
+
   app.post('/api/media-library/cast/play', async (req, res) => {
     const { filename, deviceName } = req.body;
     if (!filename || !deviceName) {
@@ -1523,6 +1570,26 @@ export function registerAllRoutes(app) {
       }
       return res.json({ success: true });
     });
+  });
+
+  app.post('/api/download/:id/play-vlc', async (req, res) => {
+    const { id } = req.params;
+    const item = appState.downloadQueue.get(id);
+    if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
+    if (item.downloader.status !== 'completed') {
+      return res.status(400).json({ error: 'Download ist noch nicht abgeschlossen' });
+    }
+    const filePath = item.downloader.filePath;
+    if (!fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
+    }
+    try {
+      await launchVlc(filePath);
+      return res.json({ success: true, target: filePath });
+    } catch (error) {
+      console.error('[Playback] Fehler beim Öffnen in VLC:', error);
+      return res.status(500).json({ error: `Konnte die Datei nicht in VLC abspielen: ${error.message}` });
+    }
   });
 
   app.get('/api/chromecast/devices', (req, res) => {

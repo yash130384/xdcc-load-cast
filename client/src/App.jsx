@@ -899,10 +899,47 @@ function App() {
       });
   };
 
+  const isVlcDevice = (device) => device === 'vlc' || device === 'local_vlc';
+  const isCastDevice = (device) => !!device && device !== 'local' && device !== 'local_web' && device !== 'vlc' && device !== 'local_vlc';
+
+  const playVlc = (filename, item = null, downloadId = null) => {
+    const resolvedItem = item || (typeof filename === 'string' ? (mediaLibrary?.items || mediaLibrary || []).find(m => m.filename === filename) : null);
+    const targetFilename = typeof filename === 'string' ? filename : (resolvedItem?.filename || item?.filename);
+    const streamUrl = resolvedItem?.streamUrl || item?.streamUrl || (typeof filename === 'string' && (filename.startsWith('http://') || filename.startsWith('https://')) ? filename : null);
+
+    fetch('/api/player/vlc', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        filename: targetFilename,
+        streamUrl,
+        downloadId
+      })
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errData = await res.json().catch(() => ({}));
+          alert(`VLC konnte nicht gestartet werden: ${errData.error || res.statusText}`);
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to launch VLC:', err);
+        alert(`Fehler beim Starten von VLC: ${err.message}`);
+      });
+  };
+
   const playLocal = (id) => {
     const item = downloads.find(d => d.id === id);
     if (!item) {
       alert('Datei in Warteschlange nicht gefunden.');
+      return;
+    }
+    if (isVlcDevice(selectedOutputDevice)) {
+      playVlc(item.filename, item, id);
+      return;
+    }
+    if (isCastDevice(selectedOutputDevice)) {
+      startCast(id, selectedOutputDevice);
       return;
     }
     window.open(`/api/media/${encodeURIComponent(item.filename)}`, '_blank');
@@ -2100,17 +2137,25 @@ function App() {
   };
 
   const playLocalLibrary = (filename, item = null) => {
-    const isM4b = filename && filename.toLowerCase().endsWith('.m4b');
-    if (isM4b) {
-      playAudiobook(item || { filename });
-      return;
-    }
     const resolvedItem = item || (mediaLibrary?.items || mediaLibrary || []).find(m => m.filename === filename) || { filename };
     
+    // Check if playback target is VLC
+    if (isVlcDevice(selectedOutputDevice)) {
+      playVlc(filename, resolvedItem);
+      return;
+    }
+
     // Check if playback target is a Cast device
-    if (selectedOutputDevice && selectedOutputDevice !== 'local') {
+    if (isCastDevice(selectedOutputDevice)) {
       const castTarget = filename || resolvedItem?.streamUrl || resolvedItem?.filename;
       startCastLibrary(castTarget, selectedOutputDevice);
+      return;
+    }
+
+    // Default: Local Web Player
+    const isM4b = filename && typeof filename === 'string' && filename.toLowerCase().endsWith('.m4b');
+    if (isM4b) {
+      playAudiobook(resolvedItem || item || { filename });
       return;
     }
 

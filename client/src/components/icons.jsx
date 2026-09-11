@@ -22,3 +22,12 @@ export const ChevronUpIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width
 export const CastIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 16.1A5 5 0 0 1 5.9 20M2 12.05A9 9 0 0 1 9.95 20M2 8A13 13 0 0 1 14 20M2 20h.01M22 2H2a2 2 0 0 0-2 2v4h2V4h20v14h-7v2h7a2 2 0 0 0 2-2V4a2 2 0 0 0-2-2z"></path></svg>;
 export const StopIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect></svg>;
 export const MonitorIcon = () => <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>;
+export const VlcIcon = () => (
+  <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+    <path d="M12 2L8 16h8L12 2z" fill="rgba(255, 149, 0, 0.3)" />
+    <path d="M6 16l-3 4h18l-3-4H6z" fill="rgba(255, 149, 0, 0.5)" />
+    <line x1="2" y1="20" x2="22" y2="20" />
+    <line x1="9.5" y1="10.5" x2="14.5" y2="10.5" />
+    <line x1="8" y1="16" x2="16" y2="16" />
+  </svg>
+);

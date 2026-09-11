@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { CastIcon, MonitorIcon, ChevronDownIcon } from './icons.jsx';
+import { CastIcon, MonitorIcon, ChevronDownIcon, VlcIcon } from './icons.jsx';
 
 export default function OutputDeviceSelector({
   selectedDevice = 'local',
@@ -27,7 +27,9 @@ export default function OutputDeviceSelector({
     };
   }, [isOpen]);
 
-  const isLocal = selectedDevice === 'local' || !selectedDevice;
+  const isLocalWeb = selectedDevice === 'local' || selectedDevice === 'local_web' || !selectedDevice;
+  const isLocalVlc = selectedDevice === 'vlc' || selectedDevice === 'local_vlc';
+  const isLocal = isLocalWeb || isLocalVlc;
   const activeCastForSelected = !isLocal ? activeCasts.find(c => c.device === selectedDevice) : null;
 
   const handleDeviceClick = (deviceName) => {
@@ -49,7 +51,7 @@ export default function OutputDeviceSelector({
       <button
         className={`output-device-btn ${!isLocal ? 'device-active' : ''}`}
         onClick={handleToggle}
-        title="Ausgabegerät für Wiedergabe wählen (Lokal / TV Cast)"
+        title="Ausgabegerät für Wiedergabe wählen (Lokal Web Player / Lokal VLC / TV Cast)"
         style={{
           display: 'flex',
           alignItems: 'center',
@@ -58,9 +60,13 @@ export default function OutputDeviceSelector({
           borderRadius: '30px',
           background: !isLocal
             ? 'linear-gradient(135deg, rgba(6, 182, 212, 0.25), rgba(59, 130, 246, 0.25))'
+            : isLocalVlc
+            ? 'rgba(255, 149, 0, 0.18)'
             : 'rgba(0, 0, 0, 0.45)',
           border: !isLocal
             ? '1px solid var(--accent-cyan)'
+            : isLocalVlc
+            ? '1px solid rgba(255, 149, 0, 0.5)'
             : '1px solid rgba(255, 255, 255, 0.15)',
           color: '#fff',
           fontSize: '0.85rem',
@@ -70,11 +76,11 @@ export default function OutputDeviceSelector({
           backdropFilter: 'blur(8px)'
         }}
       >
-        <span style={{ display: 'flex', alignItems: 'center', color: !isLocal ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.8)' }}>
-          {isLocal ? <MonitorIcon /> : <CastIcon />}
+        <span style={{ display: 'flex', alignItems: 'center', color: isLocalVlc ? '#ff9f1c' : !isLocal ? 'var(--accent-cyan)' : 'rgba(255, 255, 255, 0.8)' }}>
+          {isLocalVlc ? <VlcIcon /> : isLocalWeb ? <MonitorIcon /> : <CastIcon />}
         </span>
         <span style={{ maxWidth: '140px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {isLocal ? 'Ausgabe: Lokal' : `TV: ${selectedDevice}`}
+          {isLocalVlc ? 'Lokal: VLC' : isLocalWeb ? 'Lokal: Web Player' : `TV: ${selectedDevice}`}
         </span>
         {activeCastForSelected && (
           <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#10b981', display: 'inline-block' }} title="Streamt gerade" />
@@ -89,7 +95,7 @@ export default function OutputDeviceSelector({
             position: 'absolute',
             top: 'calc(100% + 8px)',
             right: 0,
-            width: '280px',
+            width: '290px',
             backgroundColor: '#18181b',
             border: '1px solid rgba(255, 255, 255, 0.15)',
             borderRadius: '12px',
@@ -126,7 +132,12 @@ export default function OutputDeviceSelector({
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem', marginTop: '0.5rem' }}>
-            {/* Local Device Option */}
+            {/* Local Devices Section */}
+            <div style={{ margin: '0.2rem 0 0.1rem', padding: '0 0.6rem', fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.4)', textTransform: 'uppercase' }}>
+              Lokale Wiedergabe
+            </div>
+
+            {/* Local Web Player Option */}
             <button
               onClick={() => handleDeviceClick('local')}
               style={{
@@ -137,8 +148,8 @@ export default function OutputDeviceSelector({
                 padding: '0.55rem 0.75rem',
                 borderRadius: '8px',
                 border: 'none',
-                background: isLocal ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
-                color: isLocal ? 'var(--accent-cyan)' : '#fff',
+                background: isLocalWeb ? 'rgba(6, 182, 212, 0.15)' : 'transparent',
+                color: isLocalWeb ? 'var(--accent-cyan)' : '#fff',
                 cursor: 'pointer',
                 textAlign: 'left',
                 transition: 'background 0.15s'
@@ -148,11 +159,42 @@ export default function OutputDeviceSelector({
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
                 <MonitorIcon />
                 <div>
-                  <div style={{ fontSize: '0.85rem', fontWeight: isLocal ? '600' : '400' }}>Lokal (Dieses Gerät)</div>
-                  <div style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.5)' }}>Browser Player</div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: isLocalWeb ? '600' : '400' }}>Lokal (Web Player)</div>
+                  <div style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.5)' }}>Im Browser abspielen</div>
                 </div>
               </div>
-              {isLocal && <span style={{ color: 'var(--accent-cyan)', fontSize: '0.9rem' }}>✓</span>}
+              {isLocalWeb && <span style={{ color: 'var(--accent-cyan)', fontSize: '0.9rem' }}>✓</span>}
+            </button>
+
+            {/* Local VLC Option */}
+            <button
+              onClick={() => handleDeviceClick('vlc')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                width: '100%',
+                padding: '0.55rem 0.75rem',
+                borderRadius: '8px',
+                border: 'none',
+                background: isLocalVlc ? 'rgba(255, 149, 0, 0.18)' : 'transparent',
+                color: isLocalVlc ? '#ff9f1c' : '#fff',
+                cursor: 'pointer',
+                textAlign: 'left',
+                transition: 'background 0.15s'
+              }}
+              className="device-item-btn"
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+                <span style={{ color: '#ff9f1c', display: 'flex', alignItems: 'center' }}>
+                  <VlcIcon />
+                </span>
+                <div>
+                  <div style={{ fontSize: '0.85rem', fontWeight: isLocalVlc ? '600' : '400' }}>Lokal (VLC)</div>
+                  <div style={{ fontSize: '0.7rem', color: 'rgba(255, 255, 255, 0.5)' }}>In VLC Media Player öffnen</div>
+                </div>
+              </div>
+              {isLocalVlc && <span style={{ color: '#ff9f1c', fontSize: '0.9rem' }}>✓</span>}
             </button>
 
             {/* Cast Devices Section */}

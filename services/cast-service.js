@@ -306,6 +306,60 @@ export function playLocalFile(filePath) {
   });
 }
 
+export function launchVlc(target) {
+  return new Promise((resolve, reject) => {
+    if (!target) {
+      reject(new Error('Kein Ziel zum Abspielen übergeben'));
+      return;
+    }
+    const isDarwin = process.platform === 'darwin';
+    const isWin = process.platform === 'win32';
+
+    console.log(`[VLC] Starte VLC für Ziel: "${target}" (Plattform: ${process.platform})`);
+
+    if (isDarwin) {
+      // macOS: Try opening with VLC app
+      execFile('open', ['-a', 'VLC', target], (error) => {
+        if (!error) return resolve({ success: true, target });
+        console.warn('[VLC] "open -a VLC" fehlgeschlagen, versuche /Applications/VLC.app:', error?.message);
+        execFile('open', ['-a', '/Applications/VLC.app', target], (error2) => {
+          if (!error2) return resolve({ success: true, target });
+          console.warn('[VLC] "open -a /Applications/VLC.app" fehlgeschlagen, versuche vlc CLI:', error2?.message);
+          execFile('vlc', [target], (error3) => {
+            if (!error3) return resolve({ success: true, target });
+            // Fallback: system default open
+            execFile('open', [target], (error4) => {
+              if (error4) return reject(new Error(`Konnte VLC nicht starten: ${error?.message || error4.message}`));
+              resolve({ success: true, target });
+            });
+          });
+        });
+      });
+    } else if (isWin) {
+      // Windows
+      execFile('vlc', [target], (error) => {
+        if (!error) return resolve({ success: true, target });
+        execFile('cmd', ['/c', 'start', '', 'vlc', target], (error2) => {
+          if (!error2) return resolve({ success: true, target });
+          execFile('cmd', ['/c', 'start', '', target], (error3) => {
+            if (error3) return reject(new Error(`Konnte VLC nicht starten: ${error?.message || error3.message}`));
+            resolve({ success: true, target });
+          });
+        });
+      });
+    } else {
+      // Linux / Unix
+      execFile('vlc', [target], (error) => {
+        if (!error) return resolve({ success: true, target });
+        execFile('xdg-open', [target], (error2) => {
+          if (error2) return reject(new Error(`Konnte VLC nicht starten: ${error?.message || error2.message}`));
+          resolve({ success: true, target });
+        });
+      });
+    }
+  });
+}
+
 // Periodic status check (every 8 seconds) to verify active casts are still playing
 setInterval(() => {
   if (appState.activeCasts.size === 0) return;
