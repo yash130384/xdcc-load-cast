@@ -946,9 +946,13 @@ function App() {
 
   const triggerStreamDownload = async (item, activeSeries = null) => {
     try {
-      const rawTitle = item.metadata?.title || item.title || item.name || item.filename;
+      const rawTitle = item.metadata?.title || item.title || item.name || item.filename || 'Stream';
       const seasonEpisode = item.metadata?.seasonEpisode || '';
-      const title = seasonEpisode ? `${seasonEpisode} - ${rawTitle}` : rawTitle;
+      const hasSeasonEpisode = seasonEpisode && (
+        rawTitle.toLowerCase().includes(seasonEpisode.toLowerCase()) ||
+        /(?:S\d{1,2}E\d{1,2}|\d{1,2}x\d{1,2})/i.test(rawTitle)
+      );
+      const title = (!hasSeasonEpisode && seasonEpisode) ? `${seasonEpisode} - ${rawTitle}` : rawTitle;
       const seriesTitle = activeSeries?.title || item.seriesTitle;
       const streamUrl = item.streamUrl || (item.isXtream ? item.filename : null);
 

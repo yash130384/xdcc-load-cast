@@ -1,321 +1,436 @@
-# AGY.md — Umbau-Plan: Client-Streaming & Download-Hub
+# AGY.md — Architektur- & Implementierungsplan: Robuste Pfadauflösung, M3U-Streaming & Namensbereinigung
 
 **Projekt:** PulseCast (`xdcc-load-cast`)  
-**Pfad:** `/home/yash/Projects/xdcc-load-cast`  
+**Pfade:** `/home/yash/Projects/xdcc-load-cast` & `/home/yash/xdcc-load-cast`  
 **Datum:** 17. September 2026  
-**Status:** In Planung / Spezifiziert  
+**Status:** Detaillierte Fehleranalyse abgeschlossen / Architektur & Implementierung spezifiziert  
 
 ---
 
-## 1. Executive Summary & Zielsetzung
+## 1. Problemstellung & Verifikation am Live-System
 
-PulseCast wird von einem hybriden Medien-Hub (der fälschlicherweise versuchte, Medien direkt auf dem Server bzw. Raspberry Pi via `execFile('vlc')`, über einen internen Web-Player oder per Chromecast/DLNA abzuspielen) in ein **leistungsfähiges, schlankes Download- und Streaming-Backend** umgebaut:
+### 1.1 Symptom
+Wenn der Benutzer eine neue Datei (z. B. *Ted Lasso Staffel 4 Folge 6* oder *Folge 7*) über den Xtream-VOD-Bereich herunterlädt, schlägt die Wiedergabe über die generierte `.m3u` Playlist in VLC mit einem **HTTP 404 (File Not Found)** fehl. Ältere Dateien, die bereits vor dem Download im Dateisystem lagen, lassen sich hingegen abspielen.
 
-1. **Kein Medienwiedergabe-Gerät mehr auf dem Server:**
-   - Vollständige Entfernung des server-seitigen VLC-Starts (`execFile('vlc')`).
-   - Vollständiges Entfernen bzw. Deaktivieren des internen Web-Players (`VideoPlayerModal`) sowie der Cast-Dienste (`CastModal`, `cast-service`, Gerätediscovery).
-   - Wegfall der Gerätediscovery-Warteschlangen und des `OutputDeviceSelector`.
-2. **Lokale Bibliothek als zentrale Kernfunktion:**
-   - Klare, aufgeräumte und übersichtliche Präsentation der lokal gespeicherten Filme, Serien, Episoden, Hörbücher und Musik.
-   - Nahtloser Start der Medien direkt im **VLC Media Player auf dem Client/Notebook des Benutzers**:
-     - `.m3u` Playlist-Download (MIME: `application/x-mpegurl` oder `video/x-mpegurl`) für sofortigen Autostart in VLC.
-     - Direkter `vlc://`-Protokolllink für 1-Klick-Öffnen ohne Download-Umweg.
-     - Komfortable Option zum Kopieren der direkten Stream-URL in die Zwischenablage.
-3. **IPTV-Bereich bleibt unverändert:**
-   - Live-TV-Sender, EPG-Programmführer (`EpgModal`) und geplante VCR-Aufnahmen (`VcrModal`, `vcr.js`) bleiben zu 100 % erhalten.
-4. **Stream-Bereich (Xtream VOD / NetflixBrowse):**
-   - Klick auf Filme, Serien oder Episoden startet **keinen** Player mehr.
-   - Stattdessen wird der gewählte Inhalt direkt in die Download-Warteschlange eingereiht (`POST /api/media/download-stream`), damit er nach Fertigstellung dauerhaft und performant in der lokalen Mediathek via VLC gestreamt werden kann.
+### 1.2 Live-Reproduktion am Server (Port 3000)
+1. **M3U-Generierung mit Basename:**
+   ```bash
+   curl -s "http://localhost:3000/api/media/stream.m3u?filename=Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Vorsicht%20beim%20Springen!.mkv"
+   ```
+   *Ergebnis:*
+   ```text
+   #EXTM3U
+   #EXTINF:-1 tvg-name="Ted Lasso...", ...
+   http://localhost:3000/api/media/stream/Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Vorsicht%20beim%20Springen!.mkv
+   ```
+2. **Abruf der Stream-URL durch VLC:**
+   ```bash
+   curl -I "http://localhost:3000/api/media/stream/Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Vorsicht%20beim%20Springen!.mkv"
+   # -> HTTP/1.1 404 Not Found
+   ```
+3. **Abruf mit vollständigem relativem Pfad zum Unterordner:**
+   ```bash
+   curl -I "http://localhost:3000/api/media/stream/Serien/Ted%20Lasso/Staffel%2004/Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Vorsicht%20beim%20Springen!.mkv"
+   # -> HTTP/1.1 200 OK (Content-Length: 3967008550, Content-Type: video/x-matroska)
+   ```
 
 ---
 
-## 2. Architektur & IST-Zustand
-
-### 2.1 IST-Zustand & Schwachstellen
+## 2. Detaillierte Ursachen-Analyse (Root Causes)
 
 ```mermaid
 flowchart TD
-    subgraph Client["Client (Notebook / Browser)"]
-        UI[React SPA]
-        DevSelect["OutputDeviceSelector (Lokal/VLC/Cast)"]
-        WPlayer["VideoPlayerModal (HTML5 Web Player)"]
-        CModal["CastModal (Chromecast/DLNA/AirPlay)"]
+    subgraph UI["Client / React App"]
+        VODClick["Klick auf Folge (z.B. Ted Lasso S04E06)"]
+        PayloadGen["App.jsx: title = S04E06 - [ep.title]"]
+        VLCBtn["Klick auf 'In VLC öffnen' (DownloadItem)"]
     end
 
-    subgraph Server["Server (Raspberry Pi / Linux)"]
-        API[Express REST API]
-        Discovery["Discovery Service (SSDP, mDNS, Bonjour)"]
-        CastService["cast-service.js"]
-        ServerVLC["execFile('vlc') / xdg-open"]
-        MediaStream["/api/media/* (Range Stream / ffmpeg)"]
-        Downloader["Download Manager (XDCC & Xtream)"]
+    subgraph Backend["Express Server"]
+        DLStream["POST /api/media/download-stream"]
+        NameGen["Duplizierung: seriesTitle - title.ext"]
+        DiskRoot["Schreiben nach downloadDir/<filename>"]
+        AutoOrg["organizeAllFiles() verschiebt Datei nach: Serien/Ted Lasso/Staffel 04/<filename>"]
+        M3URoute["GET /api/media/stream.m3u?filename=<basename>"]
+        MatchFail["(cachedMappedList).find(i => i.filename === filename) scheitert!"]
+        FallbackURL["Fallback-Stream-URL mit Basename generiert"]
+        RangeStream["GET /api/media/stream/<basename>"]
+        SafePath["getSafeFilePath(basename) = path.resolve(baseDir, basename)"]
+        NotFound["Datei existiert nicht im Root von INTENSO -> 404!"]
     end
 
-    UI --> DevSelect
-    UI --> WPlayer
-    UI --> CModal
-    DevSelect -.->|Auswahl| ServerVLC
-    CModal -.->|Steuerung| CastService
-    Discovery -.->|Multicast Traffic| Server
-    ServerVLC -.->|Scheitert auf Headless Pi| Server
+    VODClick --> PayloadGen
+    PayloadGen --> DLStream
+    DLStream --> NameGen
+    NameGen --> DiskRoot
+    DiskRoot --> AutoOrg
+    AutoOrg -.->|"updateLocalMappedList() fehlt!"| MatchFail
+    VLCBtn --> M3URoute
+    M3URoute --> MatchFail
+    MatchFail --> FallbackURL
+    FallbackURL --> RangeStream
+    RangeStream --> SafePath
+    SafePath --> NotFound
 ```
 
-#### Hauptprobleme des IST-Zustands:
-1. **Server-Side Playback Paradoxon:** `launchVlc()` in `cast-service.js` rief `execFile('vlc', [target])` auf dem Host-System auf. Läuft der Server headless auf einem Raspberry Pi, schlägt der Aufruf fehl oder versucht Audio/Video auf dem lokalen HDMI-Port des Pi auszugeben – völlig am Benutzer vorbei, der am Notebook sitzt.
-2. **Ressourcenverschwendung durch Cast Discovery:** `discovery.js` startete permanente mDNS- und SSDP-Discovery-Dienste (`chromecast-api`, `dlnacasts2`, `airplayer`) mit Polling-Intervallen, was kontinuierlich CPU und Netzwerk auf dem Pi belastete.
-3. **Fehlgeschlagene Streams im Web-Player:** Viele Container (z.B. MKV mit DTS/AC3/TrueHD, AVI, oder hohe Bitraten) überforderten den internen Web-Player (`VideoPlayerModal`) oder erforderten CPU-intensives On-the-Fly Transcoding mit `ffmpeg`.
-4. **Inkohärente Benutzerführung im Stream-Bereich:** Das Anklicken eines Films oder einer Serien-Episode im Xtream-Stream-Bereich versuchte eine direkte Wiedergabe im Web-Player, anstatt den Download zu starten, der für eine flüssige Wiedergabe erforderlich ist.
+### Ursache 1: Starre Pfad-Auflösung in `getSafeFilePath(filename)`
+- In `services/media-library.js` (Zeile 49–57):
+  ```javascript
+  function getSafeFilePath(filename) {
+    if (!filename) return null;
+    const baseDir = path.resolve(appState.appConfig.downloadDir);
+    const filePath = path.resolve(baseDir, filename);
+    if (!filePath.startsWith(baseDir)) return null;
+    return filePath;
+  }
+  ```
+- Wenn `filename` nur der Basename ist (z. B. `Ted Lasso (2020) DE - S04E06 - ...mkv`), sucht `path.resolve(baseDir, filename)` ausschließlich direkt im Wurzelverzeichnis `/media/yash/INTENSO/`.
+- Da `organizeAllFiles()` die Datei bereits nach `/media/yash/INTENSO/Serien/Ted Lasso/Staffel 04/` verschoben hat, existiert die Datei im Root nicht mehr. `fs.existsSync(filePath)` liefert `false` und der HTTP Range Stream bricht mit 404 ab.
+
+### Ursache 2: M3U-Generierung & Cache-Desynchronisation
+- **In `/api/media/stream.m3u`:**
+  ```javascript
+  const item = (appState.cachedMappedList || []).find(i => i.filename === filename) || {
+    filename,
+    metadata: { title: path.parse(filename).name }
+  };
+  ```
+  In `cachedMappedList` lautet `item.filename` `Serien/Ted Lasso/Staffel 04/...mkv` (relativer Pfad). Wenn die Route mit `filename=<basename>` aufgerufen wird, scheitert der strikte Vergleich `i.filename === filename`.
+  Der Fallback erzeugt einen Stream-Link mit dem reinen Basename (`/api/media/stream/<basename>`), der wegen Ursache 1 auf 404 läuft.
+- **Veralteter Cache nach Download:**
+  Beim Download-Abschluss wird `appState.cachedLocalFiles = null` gesetzt, aber `updateLocalMappedList()` wird **nicht** ausgeführt. `appState.cachedMappedList` bleibt veraltet, bis ein Client zufällig `GET /api/media-library` aufruft.
+- **In `/api/media/season.m3u`:**
+  Die Route ignoriert den vom Frontend gesendeten Parameter `req.query.filenames` vollständig. Sie sucht ausschließlich im potentiell veralteten `cachedMappedList` nach dem Serientitel. Bei fehlendem Cache oder nicht aktualisierter Bibliothek gibt die Route 404 zurück.
+
+### Ursache 3: Redundante Dateinamen bei Xtream-Downloads
+- In `routes/index.js` (Zeile 1311):
+  ```javascript
+  let filename = validCustomFilename || (seriesTitle ? `${seriesTitle} - ${title}${extension}` : `${title || 'Stream_Download'}${extension}`);
+  ```
+- Und in `client/src/App.jsx` (Zeile 951):
+  ```javascript
+  const rawTitle = item.title || item.name || 'Stream';
+  const seasonEpisode = item.metadata?.seasonEpisode || '';
+  const title = seasonEpisode ? `${seasonEpisode} - ${rawTitle}` : rawTitle;
+  ```
+- Xtream-Provider liefern im Feld `ep.title` häufig bereits den kompletten Titel samt Staffel und Serie (z. B. `Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!`).
+- Dadurch wird `seriesTitle` zweifach und `S04E06` zweifach vorangestellt:
+  `Ted Lasso (2020) DE - S04E06 - Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv`.
+- Weil der Dateiname abweicht, greift auch die Duplikatserkennung nicht, sodass dieselbe Episode mehrfach heruntergeladen wird.
+
+### Ursache 4: Fehlende Synchronisation nach Download
+- In `routes/index.js` (Zeile 1334–1343):
+  ```javascript
+  downloader.on('progress', (data) => {
+    if (data.status === 'completed') {
+      appState.cachedLocalFiles = null;
+      organizeAllFiles().catch(err => console.error('[Stream Download] Organize error:', err));
+      processNextHttpDownload();
+    }
+    broadcastStatus(id);
+  });
+  ```
+- `broadcastStatus(id)` meldet dem Client sofort `status: 'completed'`.
+- `organizeAllFiles()` läuft im Hintergrund asynchron weiter. Der Benutzer sieht in der UI sofort den Play-Button, klickt darauf, während die Datei entweder gerade verschoben wird oder `cachedMappedList` noch nicht aktualisiert wurde.
+
+### Ursache 5: Bereits vorhandene Dateiduplikate auf dem Datenträger
+Auf `/media/yash/INTENSO` existieren bereits mehrere doppelt/ungünstig benannte Dateien:
+- `/media/yash/INTENSO/Serien/Ted Lasso/Staffel 04/Ted Lasso (2020) DE - S04E06 - Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv` (Redundantes Duplikat von `... - Vorsicht beim Springen!.mkv`)
+- `/media/yash/INTENSO/Serien/Ted Lasso/Staffel 04/Ted Lasso (2020) DE - S04E07 - Ted Lasso (2020) DE - S04E07 - Ja und, Baby.mkv` (Enthält doppelte Benennung)
+- `/media/yash/INTENSO/Serien/Widow's Bay/Staffel 01/Widow's Bay (2026) DE - S01E06 - Widow's Bay (2026) DE - S01E06 - Unsere Geschichte.mkv`
+- `/media/yash/INTENSO/Serien/True Detective/Staffel 03/True Detective (2014) DE - S03E04 - True Detective (2014) - S03E04.mkv`
 
 ---
 
-### 2.2 SOLL-Architektur
+## 3. Architektur- & Lösungs-Design
+
+### 3.1 Robuste 4-Stufen-Pfadauflösung in `getSafeFilePath(filename)`
+
+`getSafeFilePath(filename)` wird von einer einfachen String-Verknüpfung zu einer kaskadierten, sicheren Auflösungsfunktion erweitert:
 
 ```mermaid
 flowchart TD
-    subgraph ClientNotebook["Client (Notebook des Benutzers)"]
-        BrowserUI["PulseCast Web-App (React SPA)"]
-        LocalVLC["Lokaler VLC Media Player (Notebook)"]
-        
-        BrowserUI -->|".m3u Playlist Download (Autostart)"| LocalVLC
-        BrowserUI -->|"vlc:// Direktlink"| LocalVLC
-        BrowserUI -->|"Stream-URL kopieren"| LocalVLC
-    end
-
-    subgraph PiServer["Server (Raspberry Pi / PulseCast)"]
-        APIEndpoints["Express REST API"]
-        M3UGen["M3U Generator (/api/media/stream.m3u)"]
-        MediaServer["HTTP Range Server (/api/media/*)"]
-        DLQueue["Download-Warteschlange (/api/media/download-stream)"]
-        LocalDisk[("Lokale Medienbibliothek (HDD/SSD)")]
-        IPTVService["IPTV & VCR Service (Unverändert)"]
-    end
-
-    BrowserUI -->|"Klick Stream Film/Episode"| DLQueue
-    DLQueue -->|"Speichert Datei"| LocalDisk
-    LocalDisk -->|"Scan & Indizierung"| MediaServer
-    M3UGen -->|"Generiert Playlist mit Pi-Stream-URL"| BrowserUI
-    LocalVLC -->|"HTTP Range Stream (High Speed)"| MediaServer
+    Start["Eingabe: filename (Basename oder relativer Pfad)"] --> Sanitize["Path-Traversal Schutz & Decode"]
+    Sanitize --> Step1{"1. Existiert direkt in downloadDir/<filename>?"}
+    Step1 -- Ja --> ReturnDirect["Absoluten Pfad zurückgeben"]
+    Step1 -- Nein --> Step2{"2. In appState.downloadQueue vorhanden?"}
+    Step2 -- Ja (Dateisystem existiert) --> ReturnQueue["downloader.filePath zurückgeben"]
+    Step2 -- Nein --> Step3{"3. In cachedMappedList oder In-Memory Map?"}
+    Step3 -- Ja (Dateisystem existiert) --> ReturnCache["Absoluten Pfad aus Cache zurückgeben"]
+    Step3 -- Nein --> Step4{"4. Schnelle Suche in Subdirs (Serien, Filme, Musik)?"}
+    Step4 -- Ja --> ReturnScan["Gefundenen Pfad cachen & zurückgeben"]
+    Step4 -- Nein --> Fallback["Fallback / null"]
 ```
 
-#### Kernprinzipien der SOLL-Architektur:
-- **Server als reiner Dienst:** Der Pi kümmert sich ausschließlich um Download-Verwaltung, Medienspeicherung, Metadaten-Organisation und HTTP-Range-Streaming.
-- **Client als Abspielgerät:** Sämtliche Medienwiedergabe findet nativ auf dem Notebook in VLC statt. VLC unterstützt alle Codecs (MKV, 10-bit HEVC, DTS, AC3, Subtitles) nativ ohne Transcoding-Last auf dem Pi.
-- **Drei Stream-Optionen:**
-  1. **`.m3u` Playlist:** Durch den passenden MIME-Typ und Dateiendung öffnet der Browser die Datei direkt mit dem verknüpften VLC Player.
-  2. **`vlc://` URI:** Direkter Aufruf des Betriebssystem-Handlers für VLC.
-  3. **Stream-URL:** Kopieren per Klick für freie Nutzung (z.B. Strg+N in VLC, IINA, MPV).
-- **Automatischer Übergang:** VOD-Inhalte aus dem Stream-Bereich werden per Klick heruntergeladen, landen nach Abschluss automatisch in der lokalen Mediathek und können dort direkt gestreamt werden.
+#### Spezifikation der Stufen:
+1. **Stufe 1 — Direkter Pfad:**
+   - Bereinigung von URL-Encodings (`decodeURIComponent`) und Windows-Slashes (`\`).
+   - `candidate = path.resolve(baseDir, filename)`
+   - Sicherstellen, dass `candidate.startsWith(baseDir)` (Schutz vor Path Traversal wie `../../`).
+   - Wenn `fs.existsSync(candidate) && fs.statSync(candidate).isFile()`, sofort zurückgeben.
+2. **Stufe 2 — Download-Queue Abgleich:**
+   - Suche in `appState.downloadQueue.values()`:
+     - Prüfen, ob `item.downloader.filename === targetBase` oder `path.basename(item.downloader.filePath) === targetBase`.
+     - Wenn `item.downloader.filePath` auf der Festplatte existiert und innerhalb von `baseDir` liegt: Pfad zurückgeben.
+3. **Stufe 3 — In-Memory Bibliotheks-Index:**
+   - Abgleich gegen `appState.cachedMappedList`:
+     - Match auf `item.filename === filename` ODER `path.basename(item.filename) === targetBase`.
+     - Bei Treffer: Prüfen von `path.resolve(baseDir, item.filename)`.
+   - Pflegen eines schnellen `Map<string, string>` (Basename -> Relativer Pfad), der bei jedem Bibliotheks-Scan aktualisiert wird (O(1) Zugriff).
+4. **Stufe 4 — Schneller Subdirectory-Fallback:**
+   - Gezielte Prüfung in den Standard-Ordnern:
+     - `Filme/<targetBase>`
+     - `Musik/<targetBase>`
+     - `Musik/Hörbücher/<targetBase>`
+   - Für Serien: Gezielter flacher Scan der Serie/Staffel-Ordner in `Serien/*/*/<targetBase>` mit maximaler Rekursionstiefe 3.
+   - Bei Treffer: Im Basename-Index speichern und Pfad zurückgeben.
 
 ---
 
-## 3. Geplante Änderungen pro Komponente und Datei
+### 3.2 Zuverlässige M3U-Generierung (`stream.m3u` & `season.m3u`)
 
-### 3.1 Backend (Node.js / Express)
+#### 1. Einzeldatei-Playlist: `/api/media/stream.m3u`
+- Parameter: `filename` (kann Basename oder relativer Pfad sein).
+- **Ablauf:**
+  1. Auflösung der echten Datei über `getSafeFilePath(filename)`.
+  2. Wenn die Datei existiert:
+     - Ermittlung des echten relativen Pfads: `relPath = path.relative(downloadDir, resolvedPath)`.
+     - Abruf der Metadaten aus `cachedMappedList` oder `metadataCache[relPath]`.
+     - Stream-URL in der M3U lautet **immer**:
+       `${baseUrl}/api/media/stream/${encodeURIComponent(relPath)}`
+  3. Falls die Datei nicht lokal auflösbar ist (z. B. Stream-URL): Fallback mit sauber kodiertem Pfad.
+- **Ergebnis:** VLC erhält immer die exakte, auf der Platte existierende relative URL.
 
-#### 1. `services/cast-service.js`
-- **Änderungen:**
-  - `launchVlc()` und `playLocalFile()` komplett entfernen (keine `execFile('vlc')`, `execFile('open')`, `execFile('xdg-open')` mehr).
-  - Cast-Intervalle (`setInterval` zur Statusabfrage von Chromecast/DLNA) entfernen.
-  - Discovery- und Cast-Steuerungsmethoden deaktivieren/entfernen.
-- **Export für Rückwärtskompatibilität:** Falls noch Rumpf-Imports existieren, neutrale No-Op-Funktionen oder Auslagerung in ein schlankes Hilfsmodul.
-
-#### 2. `services/discovery.js`
-- **Änderungen:**
-  - Deaktivierung der Initialisierung von `chromecast-api`, `dlnacasts2`, `airplayer`.
-  - `startAllDiscovery()` wird zu einer No-Op-Funktion, wodurch Netzwerk-Sockets und mDNS-Last auf dem Pi eliminiert werden.
-
-#### 3. `services/m3u-service.js`
-- **Bestehend:** `generateM3uPlaylist(baseUrl)` für die Gesamt-Playlist existiert bereits.
-- **Erweiterung:** Neue Hilfsfunktionen hinzufügen:
-  - `generateSingleItemM3u(item, baseUrl)`: Generiert eine Playlist für eine einzelne Datei mit Metadaten (`#EXTINF:-1 tvg-logo="..." , Title`).
-  - `generateSeasonM3u(seriesTitle, seasonNum, episodes, baseUrl)`: Generiert eine Playlist für eine komplette Serienstaffel, sodass VLC alle Folgen der Staffel nacheinander abspielt.
-
-#### 4. `routes/index.js`
-- **Zu entfernende / deaktivierende Routen:**
-  - `POST /api/player/vlc`
-  - `POST /api/media-library/play-vlc`
-  - `POST /api/download/:id/play-local`
-  - `POST /api/download/:id/play-vlc`
-  - `GET /api/chromecast/devices`
-  - `POST /api/download/:id/cast`
-  - `POST /api/cast/control`
-  - `POST /api/cast/stop`
-  - `GET /api/cast/active`
-  - `POST /api/media-library/cast/play`
-  - `POST /api/media-library/cast/control`
-  - `POST /api/media-library/cast/stop`
-- **Neue & optimierte Streaming-Routen:**
-  - `GET /api/media/stream.m3u`:
-    - Query-Parameter: `filename` (Pfad der lokalen Datei).
-    - Ermittelt dynamisch die Basis-URL über `req.headers.host`.
-    - Setzt Response-Header:
-      ```http
-      Content-Type: application/x-mpegurl; charset=utf-8
-      Content-Disposition: attachment; filename="<sauberer_titel>.m3u"
-      Cache-Control: no-cache
-      ```
-    - Liefert `#EXTM3U` mit absolutem Link zu `/api/media/<encoded-filename>`.
-  - `GET /api/media/season.m3u`:
-    - Query-Parameter: `series` (Serientitel oder IMDb-ID), `season` (Staffelnummer).
-    - Generiert eine Multi-Item-Playlist für die gesamte Staffel.
-- **Konsolidierung `/api/media/download-stream`:**
-  - Sicherstellen, dass die Route sowohl Xtream-Filme als auch Xtream-Episoden sauber mit Titel, Staffelinforamtion und bereinigtem Zieldateinamen in die `downloadQueue` einreiht.
-  - Eindeutige Rückmeldung mit `id`, `filename` und `status: 'queued' | 'connecting'`.
-- **Erhalt der IPTV-Routen:**
-  - `/api/iptv/*`, `/api/vcr/*`, `/api/playlist.m3u`, `/api/iptv/epg.xml` bleiben vollständig unberührt.
-
-#### 5. `server.js` & `state.js`
-- **`server.js`:**
-  - Aufruf von `startAllDiscovery()` entfernen.
-  - WebSocket-Initialnachricht `activeCasts` entfernen.
-- **`state.js`:**
-  - Cast-spezifische Maps (`discoveredChromecasts`, `discoveredDlnas`, `discoveredAirplays`, `activeCasts`) bereinigen bzw. als leere Dummys belassen.
+#### 2. Staffel-Playlist: `/api/media/season.m3u`
+- Parameter:
+  - `filenames` (optional, kommaseparierte Liste von Dateipfaden aus dem Frontend).
+  - `series` / `seriesTitle` (Serientitel).
+  - `season` / `seasonNum` (Staffelnummer).
+- **Ablauf:**
+  1. **Pfad A — `filenames` übergeben (bevorzugt):**
+     - Das Frontend weiß beim Rendern der Staffelansicht exakt, welche Episoden zur Staffel gehören.
+     - Jede Datei in `filenames` wird über `getSafeFilePath()` geprüft und mit Metadaten angereichert.
+  2. **Pfad B — Seriensuche via Cache:**
+     - Falls `cachedMappedList` leer ist oder keine Treffer liefert: Sofortiges synchrones `await updateLocalMappedList(true)` ausführen!
+     - Robuste Filterung (Groß-/Kleinschreibung ignorieren, Jahreszahlen wie `(2020)` und Sprachkürzel wie `DE` flexibel matchen).
+  3. **Episoden-Deduplizierung:**
+     - Falls für eine Staffel & Episode mehrere Dateien existieren (z. B. Ted Lasso S04E06 alt vs. neu):
+     - Es wird nur die sauberere bzw. existierende Datei in die Playlist aufgenommen (keine doppelten Einträge in VLC!).
+  4. **Metadaten-Formatierung:**
+     - `#EXTINF` enthält den sauberen Episodentitel (`Ted Lasso - S04E06 - Vorsicht beim Springen!`) anstelle von wiederholten Titeln.
 
 ---
 
-### 3.2 Frontend (React / Vite)
+### 3.3 Intelligente Dateinamen-Generierung (`sanitizeStreamFilename`)
 
-#### 1. Entfernung / Deaktivierung von Playern & Cast-Modals
-- **`VideoPlayerModal.jsx`:** Entfernen aus `App.jsx`.
-- **`CastModal.jsx`:** Entfernen aus `App.jsx`.
-- **`OutputDeviceSelector.jsx`:**
-  - Aus `AppHeader.jsx` und `NetflixBrowse.jsx` entfernen.
-  - Das Konzept eines "Ausgabegeräts" entfällt vollständig, da die Ausgabe immer auf dem Client via VLC erfolgt.
+Um Benennungen wie `Ted Lasso (2020) DE - S04E06 - Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv` dauerhaft zu verhindern, wird eine zentrale Bereinigungsfunktion implementiert:
 
-#### 2. `NetflixBrowse.jsx` (Hauptansicht im Media-Modus)
-- **Header:**
-  - `OutputDeviceSelector` entfernen.
-  - Tabs: `Lokal`, `Stream`, `IPTV` beibehalten.
-- **Tab "Stream" (Xtream VOD):**
-  - **Klick auf Film-Karte:** Kein Player! Ruft direkt die Download-Funktion auf (`POST /api/media/download-stream`).
-  - **Hero-Banner im Stream-Tab:** Button ändert sich von "▶ Abspielen" zu "📥 In Download-Warteschlange".
-  - **Klick auf Serie:** Öffnet wie gewohnt `SeriesDetailView`, jedoch mit Download-Aktionen.
-  - **Toast-Notification:** Bei Klick sofortiges visuelles Feedback: *"Download gestartet: [Titel] wurde zur Warteschlange hinzugefügt."*
-- **Tab "Lokal":**
-  - Übersichtliche Anzeige der lokalen Filme und Serien.
-  - **Klick auf Film-Karte:** Öffnet das neue VLC-Streaming-Aktionsmenü (Standard: Download der `.m3u` Playlist zum direkten Start in VLC).
-  - Zusätzliche Schnellaktionen auf der Karte / im Overlay:
-    - 📥 `.m3u` (Playlist-Download für Autostart in VLC)
-    - 🚀 `vlc://` (Direktlink)
-    - 📋 Link kopieren (Stream-URL in Zwischenablage)
-  - **Klick auf Serie:** Öffnet `SeriesDetailView` der lokalen Episoden.
-- **Tab "IPTV":**
-  - Bleibt unverändert. Senderliste, EPG und VCR-Aufnahmeplanung bleiben vollständig intakt.
+```javascript
+export function sanitizeStreamFilename({ seriesTitle, title, seasonEpisode, extension = '.mp4' }) {
+  // 1. Extension normalisieren
+  let cleanExt = extension.startsWith('.') ? extension.toLowerCase() : `.${extension.toLowerCase()}`;
+  
+  // 2. Roh-Titel von bestehender Dateiendung bereinigen
+  let cleanTitle = (title || '').replace(/\.(mkv|mp4|avi|ts|mov|webm)$/i, '').trim();
+  let cleanSeries = (seriesTitle || '').trim();
 
-#### 3. `SeriesDetailView.jsx` (Serien-Detailansicht)
-- **Unterscheidung nach Quelle (`series.isXtream`):**
-  - **Fall A: Stream-Serie (`series.isXtream === true`):**
-    - Klick auf eine Episode ruft `onDownloadStream(episode)` auf (anstelle von `onPlay`).
-    - Episoden-Icon zeigt "📥" statt "▶".
-    - Neuer Button im Header: *"Ganze Staffel herunterladen"* (nutzt Batch-Download).
-  - **Fall B: Lokale Serie (`series.isXtream === false`):**
-    - Klick auf eine Episode startet das VLC-Client-Streaming (.m3u Download / vlc:// Link / URL kopieren).
-    - Neuer Button: *"Ganze Staffel in VLC abspielen (.m3u)"*.
+  // 3. Staffel-/Episoden-Muster (z.B. S04E06 oder 4x06) erkennen
+  const seRegex = /(?:S(\d{1,2})E(\d{1,2})|(\d{1,2})x(\d{1,2}))/i;
+  let canonicalSE = seasonEpisode;
+  if (!canonicalSE) {
+    const seMatch = cleanTitle.match(seRegex) || cleanSeries.match(seRegex);
+    if (seMatch) {
+      const s = seMatch[1] || seMatch[3];
+      const e = seMatch[2] || seMatch[4];
+      canonicalSE = `S${String(s).padStart(2, '0')}E${String(e).padStart(2, '0')}`;
+    }
+  }
 
-#### 4. `MediaLibrary.jsx` & `MediaCard.jsx`
-- **`MediaCard.jsx`:**
-  - Cast-Button (`<CastIcon />`) und Cast-Status-Container (`activeCastForFile`) komplett entfernen.
-  - Für lokale Medien (`!item.isXtream`):
-    - Haupt-Button: "In VLC abspielen" (lädt `.m3u` herunter).
-    - Zusätzliche Aktionsbuttons: `vlc://` Protokolllink und "Stream-URL kopieren" mit Feedback.
-  - Für Stream-Medien (`item.isXtream`):
-    - Haupt-Aktion: "Herunterladen" (`/api/media/download-stream`).
-- **`MediaLibrary.jsx`:**
-  - Hervorhebung der lokalen Kategorien (*"Lokale Filme"*, *"Lokale Serien"*, *"Musik"*, *"Hörbücher"*).
-  - Vollständige Entfernung aller Cast-Events und Cast-State-Props.
+  // 4. SeriesTitle von evtl. enthaltenem SxxExx bereinigen
+  if (cleanSeries) {
+    cleanSeries = cleanSeries.replace(seRegex, '').replace(/[\s\-_]+$/, '').trim();
+  }
 
-#### 5. `DownloadItem.jsx` & `DownloadsQueue.jsx`
-- Cast-Buttons und Cast-Statusanzeigen entfernen.
-- Bei Status `completed` (Download fertiggestellt):
-  - Button "In VLC abspielen" lädt die `.m3u` Playlist der fertigen Datei herunter oder bietet den `vlc://`-Link an.
+  // 5. Redundante Serien- und Episoden-Präfixe aus cleanTitle iterativ entfernen
+  if (cleanSeries) {
+    let prev;
+    do {
+      prev = cleanTitle;
+      // Entferne Serientitel am Anfang (case-insensitive)
+      const seriesPrefixRegex = new RegExp(`^${escapeRegex(cleanSeries)}[\\s\\-_:]*`, 'i');
+      cleanTitle = cleanTitle.replace(seriesPrefixRegex, '').trim();
+      // Entferne SxxExx am Anfang
+      cleanTitle = cleanTitle.replace(/^(?:S\d{1,2}E\d{1,2}|\d{1,2}x\d{1,2})[\s\-_:]*/i, '').trim();
+    } while (cleanTitle !== prev);
+  }
 
-#### 6. `App.jsx`
-- Entfernen der State-Variablen: `selectedOutputDevice`, `castDevices`, `loadingDevices`, `activeCasts`, `pendingCasts`, `activeVideoItem`, `castingItem`.
-- Entfernen der JSX-Modals `<VideoPlayerModal>` und `<CastModal>`.
-- Bereinigung der WebSocket-Listener (Ignorieren von `activeCasts`).
-- Neugestaltung von `playLocalLibrary(filename, item)`:
-  - Wenn lokale Datei: Startet `.m3u`-Download via Browser bzw. bietet `vlc://` an.
-  - Wenn Xtream-Stream: Leitet automatisch an `triggerStreamDownload` weiter.
-- Bereitstellung einer globalen Toast-/Benachrichtigungsfunktion für *"Stream-URL kopiert"* und *"Download eingereiht"*.
+  // 6. Finale Zusammensetzung
+  let finalBase;
+  if (cleanSeries && canonicalSE) {
+    finalBase = cleanTitle ? `${cleanSeries} - ${canonicalSE} - ${cleanTitle}` : `${cleanSeries} - ${canonicalSE}`;
+  } else if (cleanSeries) {
+    finalBase = cleanTitle ? `${cleanSeries} - ${cleanTitle}` : cleanSeries;
+  } else {
+    finalBase = cleanTitle || 'Stream_Download';
+  }
+
+  // 7. Illegale Zeichen bereinigen
+  finalBase = finalBase.replace(/[\\/:*?"<>|]/g, '_').replace(/\s+/g, ' ').trim();
+  return `${finalBase}${cleanExt}`;
+}
+```
+
+#### Anpassung im Frontend (`client/src/App.jsx`):
+- `title` wird vor dem Senden an `POST /api/media/download-stream` nicht mehr blind mit `${seasonEpisode} - ` konkateniert, wenn `title` bereits `seasonEpisode` enthält.
 
 ---
 
-## 4. Risiken, Fallstricke & Gegenmaßnahmen
+### 3.4 Synchroner Download-Lifecycle: Download -> Organize -> Library Update
 
-| Risiko / Fallstrick | Technische Ursache | Konkrete Gegenmaßnahme |
-| :--- | :--- | :--- |
-| **MIME-Type & Browser-Handling von `.m3u`** | Manche Browser zeigen `.m3u` als Text an, statt sie herunterzuladen oder an VLC zu übergeben. | Response-Header zwingend mit `Content-Type: application/x-mpegurl` (Fallback: `video/x-mpegurl`) und `Content-Disposition: attachment; filename="..."` ausliefern. Dadurch erzwingt der Browser den Download und respektiert die Dateizuordnung des Betriebssystems. |
-| **`vlc://` Protokoll-Handler nicht registriert** | Nicht auf jedem OS / jeder VLC-Installation ist das benutzerdefinierte `vlc://`-Protokoll im Browser registriert. | `vlc://` wird als alternative Schnelloption angeboten. Primäre Standard-Aktion bleibt der `.m3u`-Download, ergänzt durch die "URL kopieren"-Funktion. |
-| **Host- & IP-Adressen in Playlists** | Wenn der Server `localhost:3000` in die M3U schreibt, kann das Client-Notebook den Stream nicht finden. | Dynamische Host-Generierung im Backend via `req.get('host')` (oder `window.location.host` im Frontend). Die M3U enthält immer exakt die IP/Domain, über die der Client mit PulseCast verbunden ist. |
-| **Sonderzeichen & Leerzeichen in Dateinamen** | Umlaute (ä, ö, ü) und Leerzeichen führen bei unvollständigem Encoding zu HTTP 400/404 in VLC. | Konsequente Verwendung von `encodeURIComponent()` auf Pfadebene. Der M3U-Dateiname im Header wird bereinigt (`sanitizeFilename`), während die URL sauber encodiert wird. |
-| **Doppelter Download bei Mehrfachklick** | Nutzer klicken mehrfach ungeduldig auf einen Stream-Titel. | `/api/media/download-stream` prüft, ob die URL/Datei bereits in `downloadQueue` aktiv oder eingereiht ist. UI deaktiviert den Button kurzzeitig und zeigt sofort ein Feedback an. |
-| **Range Requests & Transcoding-Freiheit** | VLC fordert Byte-Ranges an (`bytes=0-`). Würde der Pi transkodieren, stiege die CPU-Last auf 100 %. | Lokale Dateien werden direkt per nativem Node.js `fs.createReadStream` mit HTTP 206 Partial Content ausgeliefert. Da VLC alle Formate (MKV, AVI, etc.) nativ beherrscht, entfällt jedes serverseitige Transcoding für lokale Medien. |
+Die Race Condition zwischen Download-Abschluss, Datei-Verschiebung und Cache-Aktualisierung wird durch eine strikt sequentielle Abarbeitung beseitigt:
+
+```mermaid
+sequenceDiagram
+    participant Downloader as HttpDownloader / DCC
+    participant Route as routes/index.js
+    participant Org as organizeAllFiles()
+    participant Lib as updateLocalMappedList()
+    participant WS as WebSocket / Clients
+
+    Downloader->>Route: progress: completed
+    activate Route
+    Note over Route: id bleibt im Status 'processing' / 'organizing'
+    Route->>Org: await organizeAllFiles()
+    activate Org
+    Org->>Org: Datei in Serien/Staffel verschieben
+    Org->>Org: downloader.filePath & filename aktualisieren
+    Org-->>Route: Fertig verschoben
+    deactivate Org
+    
+    Route->>Lib: await updateLocalMappedList(true)
+    activate Lib
+    Lib->>Lib: Dateisystem neu scannen & cachedMappedList aufbauen
+    Lib-->>Route: Cache ist 100% aktuell
+    deactivate Lib
+
+    Route->>WS: broadcast('media_library_updated')
+    Route->>WS: broadcastStatus(id, 'completed')
+    deactivate Route
+    Note over WS,Clients: Client erhält erst 'completed', wenn M3U sofort funktioniert!
+```
+
+- `organizeAllFiles()` ruft vor Beendigung immer `await updateLocalMappedList(true)` auf.
+- `updateDownloaderFilePath(oldPath, newPath)` aktualisiert nicht nur `downloader.filePath`, sondern synchronisiert auch `downloader.filename`.
+- Der Client erhält das WebSocket-Signal `completed` **erst**, wenn die Datei am Zielort liegt und im Katalog indiziert ist.
 
 ---
 
-## 5. Implementierungs-, Test- und Verifikationsplan
+### 3.5 Bereinigung bestehender Dateileichen auf `/media/yash/INTENSO`
 
-### Phase 1: Backend-Bereinigung & Streaming-API
-1. **Server-Wiedergabe entfernen:**
-   - In `services/cast-service.js`: `launchVlc()` und `playLocalFile()` entfernen.
-   - In `services/discovery.js`: Discovery-Initialisierung deaktivieren.
-   - In `routes/index.js`: Alle Routen `/api/player/vlc`, `/api/media-library/play-vlc`, `/api/download/:id/play-vlc`, `/api/download/:id/play-local` und alle Cast-Routen entfernen.
-2. **M3U Single-Item & Season Endpunkte:**
-   - In `services/m3u-service.js`: Hilfsfunktionen für Einzel- und Staffel-Playlists implementieren.
-   - In `routes/index.js`: Route `GET /api/media/stream.m3u` und `GET /api/media/season.m3u` bereitstellen.
-   - Testen der Header (`application/x-mpegurl`) und M3U-Syntax (`#EXTM3U`, `#EXTINF`).
-3. **Download-Stream Route härten:**
-   - `/api/media/download-stream` überprüfen und absichern (Rückgabe von ID und Status, Verhinderung doppelter Downloads).
+Ein idempotentes Migrations- und Bereinigungsskript (`scripts/cleanup-duplicates.js`) wird erstellt und einmalig ausgeführt:
 
-### Phase 2: Frontend-Bereinigung (Player & Cast entfernen)
-1. **Komponenten entkoppeln:**
-   - `VideoPlayerModal.jsx` und `CastModal.jsx` aus `App.jsx` entfernen.
-   - `OutputDeviceSelector.jsx` aus `AppHeader.jsx` und `NetflixBrowse.jsx` entfernen.
-   - Cast-Buttons und Cast-Statusanzeigen aus `MediaCard.jsx`, `MusicItem.jsx`, `DownloadItem.jsx`, `DownloadsQueue.jsx` entfernen.
-2. **State-Bereinigung:**
-   - Alle ungenutzten Cast- und Player-States in `App.jsx` entfernen.
+1. **Ted Lasso Staffel 4 Folge 6:**
+   - Datei 1: `Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv` (3.966.260.529 Bytes)
+   - Datei 2: `Ted Lasso (2020) DE - S04E06 - Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv` (3.967.008.550 Bytes)
+   - *Aktion:* Datei 2 ist ein redundantes Duplikat. Datei 2 wird gelöscht, Metadaten-Cache-Eintrag bereinigt.
+2. **Ted Lasso Staffel 4 Folge 7:**
+   - Datei: `Ted Lasso (2020) DE - S04E07 - Ted Lasso (2020) DE - S04E07 - Ja und, Baby.mkv`
+   - *Aktion:* Da hier keine saubere Datei existiert, wird die Datei sicher umbenannt in:  
+     `Ted Lasso (2020) DE - S04E07 - Ja und, Baby.mkv`.
+3. **Widow's Bay Staffel 1 Folge 6:**
+   - Datei: `Widow's Bay (2026) DE - S01E06 - Widow's Bay (2026) DE - S01E06 - Unsere Geschichte.mkv`
+   - *Aktion:* Umbenennen in `Widow's Bay (2026) DE - S01E06 - Unsere Geschichte.mkv`.
+4. **True Detective Staffel 3 Folge 4:**
+   - Datei: `True Detective (2014) DE - S03E04 - True Detective (2014) - S03E04.mkv`
+   - *Aktion:* Umbenennen in `True Detective (2014) DE - S03E04.mkv`.
+5. **Cache-Aktualisierung:**
+   - Aufruf von `updateLocalMappedList(true)` und Speichern von `.metadata_cache.json`.
 
-### Phase 3: Stream-Bereich (Xtream VOD) auf Download umstellen
-1. **`NetflixBrowse.jsx`:**
-   - Klick auf Film im Tab "Stream" bindet an `/api/media/download-stream`.
-   - Hero-Banner Play-Button wird zu "Herunterladen".
-2. **`SeriesDetailView.jsx`:**
-   - Klick auf eine Xtream-Episode startet den Download.
-   - Button für "Staffel herunterladen" integrieren.
-3. **Visuelles Feedback:**
-   - Toast-Benachrichtigung beim Hinzufügen zur Download-Warteschlange.
+---
 
-### Phase 4: Lokale Mediathek & VLC Client-Streaming
-1. **Streaming-Aktionen implementieren:**
-   - In `MediaCard.jsx` und `NetflixBrowse.jsx` (Tab "Lokal"):
-     - **Option 1 (.m3u):** Klick auf Play lädt `stream.m3u` herunter.
-     - **Option 2 (vlc://):** Link mit `vlc://http://<host>:<port>/api/media/<file>`.
-     - **Option 3 (URL kopieren):** Button zum Kopieren der Stream-URL mit Zwischenablage-Feedback.
-2. **Lokale Serien & Staffeln:**
-   - In `SeriesDetailView.jsx` für lokale Serien: "Ganze Staffel in VLC abspielen (.m3u)" implementieren.
-3. **Fertiggestellte Downloads:**
-   - In `DownloadItem.jsx`: Button "In VLC abspielen" nutzt ebenfalls den `.m3u`-Stream.
+## 4. Konkreter Implementierungsplan nach Dateien
 
-### Phase 5: Tests & Verifikation
+### 4.1 `services/media-library.js`
+1. **Erweiterung von `getSafeFilePath(filename)`:**
+   - Implementierung der 4-stufigen Auflösung (Direct -> Queue -> Cache -> Subdirectory Search).
+   - Absicherung gegen Directory Traversal (`filePath.startsWith(baseDir)`).
+2. **Pflege des In-Memory Basename-Index:**
+   - `basenameIndex = new Map()`: Bildet `path.basename(relPath)` auf `relPath` ab.
+   - Aktualisierung bei jedem `scanDownloadDir()` und `organizeAllFiles()`.
+3. **Synchronisierung in `organizeAllFiles()`:**
+   - Am Ende von `organizeAllFiles()`: `await updateLocalMappedList(true)`.
+   - `updateDownloaderFilePath(oldPath, newPath)`: Aktualisierung von `filePath` und `filename` in `appState.downloadQueue`.
 
-#### Automatisierte Tests:
-- `tests/m3u-service.test.js`:
-  - Unit-Tests für `generateSingleItemM3u` und `generateSeasonM3u`.
-  - Verifikation korrekter URL-Encodings und Metadaten-Formate.
-- `tests/vlc-player.test.js`:
-  - Ersetzen des alten `launchVlc`-Tests durch Tests für die neuen M3U- und Streaming-Hilfsfunktionen.
-- `vitest run`: Sicherstellen, dass alle Tests grün sind.
-- `npm run build:frontend`: Sicherstellen, dass der Vite-Build fehlerfrei kompiliert.
+### 4.2 `services/m3u-service.js`
+1. **`generateSingleItemM3u(item, baseUrl)`:**
+   - Auflösen des echten relativen Pfads.
+   - Saubere Formatierung des `#EXTINF`-Titels ohne Wiederholungen.
+2. **`generateSeasonM3u(seriesTitle, seasonNum, episodes, baseUrl)`:**
+   - Deduplizierung von Episoden anhand der Episodennummer.
+   - Exakte relative Pfade in den generierten Stream-URLs.
 
-#### Manuelle Verifikation:
-1. **Server-Prozesse prüfen:**
-   - Überprüfen, dass `ps aux | grep vlc` auf dem Server leer bleibt, wenn in der UI Aktionen ausgelöst werden.
-2. **VLC-Start auf dem Client:**
-   - Klick auf lokalen Film -> `.m3u` wird heruntergeladen -> VLC öffnet sich auf dem Notebook und spielt den Film via HTTP Range Stream ab.
-   - Test des `vlc://`-Links.
-   - Test von "Stream-URL kopieren" -> Einfügen in VLC ("Netzwerkstream öffnen") -> Stream startet sofort.
-3. **Stream-Bereich:**
-   - Klick auf einen VOD-Film in `NetflixBrowse` -> Film landet in der Download-Queue -> Download startet.
-   - Klick auf Serien-Episode in `SeriesDetailView` -> Episode landet in der Download-Queue.
-4. **IPTV-Bereich:**
-   - Senderliste, EPG-Anzeige und VCR-Aufnahmeplanung aufrufen und Funktionsfähigkeit sicherstellen.
+### 4.3 `routes/index.js`
+1. **Helper `sanitizeStreamFilename()` einbauen:**
+   - Beseitigung aller doppelten Serien- und Episoden-Präfixe.
+2. **Route `POST /api/media/download-stream` anpassen:**
+   - Erzeugung von `filename` über `sanitizeStreamFilename()`.
+   - Duplikaterkennung in `downloadQueue` mit bereinigtem Namen abgleichen.
+3. **Download-Completion-Pipeline überarbeiten:**
+   - Sequentielles Ausführen von `await organizeAllFiles()` und `await updateLocalMappedList(true)` im Event `'completed'` vor dem Senden von `broadcastStatus(id)`.
+4. **Route `GET /api/media/stream.m3u` härten:**
+   - `getSafeFilePath(filename)` aufrufen, echten relativen Pfad ermitteln und in die Playlist schreiben.
+5. **Route `GET /api/media/season.m3u` erweitern:**
+   - Auswertung von `req.query.filenames` (Kommaseparierte Liste auflösen).
+   - Fallback mit automatischem Cache-Refresh (`updateLocalMappedList(true)`), falls Liste leer ist.
+
+### 4.4 `client/src/App.jsx`
+1. **`triggerStreamDownload` anpassen:**
+   - Nicht mehr doppelt `seasonEpisode` voranstellen, wenn der Titel dies bereits beinhaltet.
+2. **`openInVlc` & `openSeasonInVlc`:**
+   - `openSeasonInVlc` übergibt saubere `filenames` an die Route.
+
+### 4.5 `scripts/cleanup-duplicates.js`
+- Wartungsskript zur Bereinigung der bereits heruntergeladenen doppelten Dateien auf der Festplatte.
+
+---
+
+## 5. Detaillierter Test- und Verifikationsplan
+
+### 5.1 Automatisierte Unit-Tests
+1. **`tests/media-library-path.test.js` (Neu):**
+   - Test: `getSafeFilePath` findet Datei bei Übergabe des relativen Pfads.
+   - Test: `getSafeFilePath` findet Datei bei Übergabe des reinen Basenames (auch wenn sie in `Serien/...` liegt).
+   - Test: `getSafeFilePath` blockiert Path-Traversal-Versuche (`../../etc/shadow`).
+   - Test: `getSafeFilePath` findet aktive Downloads aus `downloadQueue`.
+2. **`tests/filename-sanitizer.test.js` (Neu):**
+   - Test: Bereinigung doppelter Seriennamen (`Ted Lasso ... - Ted Lasso ...`).
+   - Test: Bereinigung doppelter Episoden-Tags (`S04E06 - S04E06`).
+   - Test: Korrektes Verhalten bei Einzelfilmen.
+3. **`tests/m3u-service.test.js`:**
+   - Test: `generateSingleItemM3u` mit relativen Pfaden.
+   - Test: `generateSeasonM3u` mit Deduplizierung.
+4. **Ausführung der Suite:**
+   ```bash
+   npm test
+   ```
+
+### 5.2 Integrationstest & End-to-End Verifikation am Live-System
+1. **Verifikation nach Cleanup:**
+   - Überprüfung des Verzeichnisses `/media/yash/INTENSO/Serien/Ted Lasso/Staffel 04/`.
+   - Sicherstellen, dass keine doppelten `Ted Lasso ... Ted Lasso ...` MKV-Dateien mehr existieren.
+2. **Test des VLC Stream M3U-Endpunkts via curl:**
+   - Aufruf von:
+     ```bash
+     curl -s "http://localhost:3000/api/media/stream.m3u?filename=Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Vorsicht%20beim%20Springen!.mkv"
+     ```
+   - Stream-URL aus der M3U per `curl -I` abrufen -> **Muss HTTP 200 OK liefern!**
+3. **Test der Staffel-M3U:**
+   - Aufruf von:
+     ```bash
+     curl -s "http://localhost:3000/api/media/season.m3u?series=Ted%20Lasso&season=4"
+     ```
+   - Verifizieren, dass alle Folgen (Folge 6, Folge 7) sauber und ohne Duplikate enthalten sind.
+4. **Test eines Neu-Downloads (End-to-End):**
+   - Test-Download einer beliebigen Episode über `POST /api/media/download-stream`.
+   - Überprüfen des generierten Dateinamens (keine doppelten Präfixe).
+   - Nach Fertigstellung: Klick auf "In VLC öffnen" -> M3U lädt herunter -> VLC öffnet sich und spielt ohne 404 ab.

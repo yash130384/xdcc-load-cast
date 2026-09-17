@@ -105,9 +105,9 @@ describe('Media Stream Endpoints', () => {
 
     const text = await res.text();
     expect(text).toContain('#EXTM3U');
-    expect(text).toContain('tvg-name="Dark - S01E01 - Dark"');
+    expect(text).toContain('tvg-name="Dark - S01E01"');
     expect(text).toContain(`${baseUrl}/api/media/stream/Dark_S01E01.mp4`);
-    expect(text).toContain('tvg-name="Dark - S01E02 - Dark"');
+    expect(text).toContain('tvg-name="Dark - S01E02"');
     expect(text).toContain(`${baseUrl}/api/media/stream/Dark_S01E02.mp4`);
   });
 

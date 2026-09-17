@@ -105,6 +105,51 @@ describe('m3u-service', () => {
     expect(m3u).toContain('http://192.168.1.100:3000/api/media/stream/Dark%20S01E02.mkv');
   });
 
+  it('deduplicates episodes in generateSeasonM3u and picks the cleaner file', () => {
+    const baseUrl = 'http://192.168.1.100:3000';
+    const episodes = [
+      {
+        filename: 'Serien/Ted Lasso/Staffel 04/Ted Lasso (2020) DE - S04E06 - Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv',
+        metadata: { title: 'Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!', seasonEpisode: 'S04E06' }
+      },
+      {
+        filename: 'Serien/Ted Lasso/Staffel 04/Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!.mkv',
+        metadata: { title: 'Vorsicht beim Springen!', seasonEpisode: 'S04E06' }
+      },
+      {
+        filename: 'Serien/Ted Lasso/Staffel 04/Ted Lasso (2020) DE - S04E07 - Ja und, Baby.mkv',
+        metadata: { title: 'Ja und, Baby', seasonEpisode: 'S04E07' }
+      }
+    ];
+
+    const m3u = generateSeasonM3u('Ted Lasso (2020) DE', 4, episodes, baseUrl);
+
+    // Should only have 2 EXTINF entries, not 3!
+    const extinfMatches = m3u.match(/#EXTINF/g);
+    expect(extinfMatches?.length).toBe(2);
+
+    // It should pick the clean S04E06 filename
+    expect(m3u).toContain('http://192.168.1.100:3000/api/media/stream/Serien%2FTed%20Lasso%2FStaffel%2004%2FTed%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Vorsicht%20beim%20Springen!.mkv');
+    expect(m3u).not.toContain('Ted%20Lasso%20(2020)%20DE%20-%20S04E06%20-%20Ted%20Lasso');
+
+    // Display title should be cleanly formatted
+    expect(m3u).toContain('tvg-name="Ted Lasso (2020) DE - S04E06 - Vorsicht beim Springen!"');
+    expect(m3u).toContain('tvg-name="Ted Lasso (2020) DE - S04E07 - Ja und, Baby"');
+  });
+
+  it('converts absolute downloadDir paths into clean relative stream URLs', () => {
+    appState.appConfig = { downloadDir: '/media/yash/INTENSO' };
+    const baseUrl = 'http://192.168.1.100:3000';
+    const item = {
+      filename: '/media/yash/INTENSO/Filme/Dune.mp4',
+      metadata: { title: 'Dune' }
+    };
+
+    const m3u = generateSingleItemM3u(item, baseUrl);
+    expect(m3u).toContain('http://192.168.1.100:3000/api/media/stream/Filme%2FDune.mp4');
+    expect(m3u).not.toContain('/media/yash/INTENSO');
+  });
+
   it('generates valid XMLTV EPG', () => {
     const baseUrl = 'http://192.168.1.100:3000';
     const xml = generateXmltvEpg(baseUrl);

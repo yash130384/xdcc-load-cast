@@ -71,6 +71,16 @@ export async function generateM3uPlaylist(baseUrl) {
   return lines.join('\n') + '\n';
 }
 
+function toRelativePath(filePath) {
+  if (!filePath) return '';
+  const baseDir = path.resolve(appState.appConfig?.downloadDir || '');
+  let p = filePath;
+  if (baseDir && p.startsWith(baseDir)) {
+    p = path.relative(baseDir, p);
+  }
+  return p.replace(/\\/g, '/').replace(/^\/+/, '');
+}
+
 /**
  * Generates an M3U playlist for a single media item targeting client VLC streaming
  * @param {object} item - Media item with filename and optional metadata
@@ -80,12 +90,19 @@ export async function generateM3uPlaylist(baseUrl) {
 export function generateSingleItemM3u(item, baseUrl) {
   const cleanBaseUrl = (baseUrl || '').replace(/\/$/, '');
   const meta = item?.metadata || {};
-  const filename = item?.filename || 'media';
-  const baseTitle = meta.title || path.parse(filename).name;
-  const tvgName = meta.seasonEpisode ? `${baseTitle} (${meta.seasonEpisode})` : baseTitle;
+  const rawFilename = item?.filename || 'media';
+  const relPath = toRelativePath(rawFilename);
+  const baseTitle = meta.title || path.parse(relPath).name;
+
+  // Avoid duplicate (SxxExx) if baseTitle already contains seasonEpisode
+  let tvgName = baseTitle;
+  if (meta.seasonEpisode && !baseTitle.toLowerCase().includes(meta.seasonEpisode.toLowerCase())) {
+    tvgName = `${baseTitle} (${meta.seasonEpisode})`;
+  }
+
   const logo = meta.posterUrl ? (meta.posterUrl.startsWith('http') ? meta.posterUrl : `${cleanBaseUrl}/api/media/${encodeURIComponent(meta.posterUrl)}`) : '';
   const groupTitle = meta.originalCategory || meta.category || 'Media';
-  const streamUrl = `${cleanBaseUrl}/api/media/stream/${encodeURIComponent(filename)}`;
+  const streamUrl = `${cleanBaseUrl}/api/media/stream/${encodeURIComponent(relPath)}`;
 
   const lines = [
     '#EXTM3U',
@@ -107,19 +124,96 @@ export function generateSeasonM3u(seriesTitle, seasonNum, episodes, baseUrl) {
   const cleanBaseUrl = (baseUrl || '').replace(/\/$/, '');
   const sNum = parseInt(seasonNum, 10) || 1;
   const sTag = `S${String(sNum).padStart(2, '0')}`;
-  const lines = [
-    '#EXTM3U'
-  ];
+
+  const parseEpisodeNum = (ep) => {
+    if (typeof ep?.episodeNum === 'number') return ep.episodeNum;
+    if (typeof ep?.metadata?.episodeNum === 'number') return ep.metadata.episodeNum;
+    const str = `${ep?.metadata?.seasonEpisode || ''} ${ep?.title || ''} ${ep?.metadata?.title || ''} ${ep?.filename || ''}`;
+    const m = str.match(/(?:S\d{1,2}E(\d{1,2})|\d{1,2}x(\d{1,2})|Episode\s*(\d{1,2}))/i);
+    return m ? parseInt(m[1] || m[2] || m[3], 10) : null;
+  };
+
+  const scoreCandidate = (ep) => {
+    const fn = ep?.filename || '';
+    let score = 0;
+    // Prefer filenames that do NOT repeat the series title
+    if (seriesTitle) {
+      const escaped = seriesTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const matches = fn.match(new RegExp(escaped, 'gi'));
+      if (matches && matches.length > 1) {
+        score -= 100 * (matches.length - 1);
+      }
+    }
+    // Prefer filenames that do NOT repeat SxxExx
+    const seMatches = fn.match(/S\d{1,2}E\d{1,2}/gi);
+    if (seMatches && seMatches.length > 1) {
+      score -= 50 * (seMatches.length - 1);
+    }
+    // Penalize duplicate suffixes like _1, _2
+    if (/_\d+\.[a-z0-9]+$/i.test(fn)) {
+      score -= 20;
+    }
+    // Prefer shorter filenames
+    score -= fn.length * 0.05;
+    return score;
+  };
+
+  // Group and deduplicate by episode number
+  const epMap = new Map();
+  const unnumbered = [];
 
   for (const ep of episodes || []) {
+    const epNum = parseEpisodeNum(ep);
+    if (epNum !== null) {
+      if (!epMap.has(epNum)) {
+        epMap.set(epNum, ep);
+      } else {
+        const current = epMap.get(epNum);
+        if (scoreCandidate(ep) > scoreCandidate(current)) {
+          epMap.set(epNum, ep);
+        }
+      }
+    } else {
+      unnumbered.push(ep);
+    }
+  }
+
+  // Sort deduplicated episodes by episode number
+  const sortedEpisodes = Array.from(epMap.entries())
+    .sort((a, b) => a[0] - b[0])
+    .map(entry => ({ ...entry[1], detectedEpNum: entry[0] }))
+    .concat(unnumbered);
+
+  const lines = ['#EXTM3U'];
+
+  for (const ep of sortedEpisodes) {
     const meta = ep?.metadata || {};
-    const filename = ep?.filename || '';
-    const epTitle = meta.title || ep.title || path.parse(filename || 'episode').name;
-    const sEp = meta.seasonEpisode || sTag;
-    const displayTitle = `${seriesTitle} - ${sEp} - ${epTitle}`;
+    const rawFilename = ep?.filename || '';
+    const relPath = toRelativePath(rawFilename);
+
+    let epTitle = (meta.title || ep.title || path.parse(relPath || 'episode').name || '').trim();
+    // Strip redundant series title prefix if present in epTitle
+    if (seriesTitle) {
+      const escaped = seriesTitle.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const seriesBase = seriesTitle.replace(/\s*\(\d{4}\).*$/, '').trim();
+      const escapedBase = seriesBase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      const prefixRegex = new RegExp(`^(?:${escaped}|${escapedBase})(?:[\\s_]*\\(\\d{4}\\))?(?:[\\s_]*(?:DE|EN|US|GERMAN|GER))?[\\s\\-_:]*`, 'i');
+      let prev;
+      do {
+        prev = epTitle;
+        epTitle = epTitle.replace(prefixRegex, '').trim();
+        epTitle = epTitle.replace(/^(?:S\d{1,2}E\d{1,2}|\d{1,2}x\d{1,2})[\s\-_:]*/i, '').trim();
+      } while (epTitle !== prev && epTitle.length > 0);
+    }
+
+    const epNum = ep.detectedEpNum || parseEpisodeNum(ep) || 1;
+    const eTag = `E${String(epNum).padStart(2, '0')}`;
+    const sEp = `${sTag}${eTag}`;
+
+    const displayTitle = epTitle ? `${seriesTitle} - ${sEp} - ${epTitle}` : `${seriesTitle} - ${sEp}`;
     const logo = meta.posterUrl ? (meta.posterUrl.startsWith('http') ? meta.posterUrl : `${cleanBaseUrl}/api/media/${encodeURIComponent(meta.posterUrl)}`) : '';
     const groupTitle = `${seriesTitle} - Staffel ${sNum}`;
-    const streamUrl = `${cleanBaseUrl}/api/media/stream/${encodeURIComponent(filename)}`;
+    const streamUrl = `${cleanBaseUrl}/api/media/stream/${encodeURIComponent(relPath)}`;
 
     lines.push(`#EXTINF:-1 tvg-name="${displayTitle}" tvg-logo="${logo}" group-title="${groupTitle}",${displayTitle}`);
     lines.push(streamUrl);

@@ -4,10 +4,10 @@ import { searchMoviegodsIRC, searchXdccEu, runStartupTests } from '../services/s
 import { fetchXtreamData, updateMappedXtreamData, recreateXtreamSyncInterval, loadXtreamCache } from '../services/xtream-client.js';
 import { getDownloadDetails, broadcastStatus, broadcastDeletion, handleDownloadPostProcessing } from '../services/download-manager.js';
 import { decodeBase64Safe, loadRecordings, saveRecordings, startVcrRecording, stopVcrRecordingJob, checkVcrRecordings, broadcastVcrStatus } from '../services/vcr.js';
-import { getLocalFiles, updateLocalMappedList, getSafeFilePath, scanDownloadDir, getOrFetchMetadata, saveFavorites, isItemFavorite, deleteMediaFileAndCleanDirs, loadMetadataCache, checkAudioTranscodeNeeded, savePlayProgress, organizeAllFiles, fetchImdbMetadata, parseFilename, findBestMatch, isImageFile, getImageCachePath, MEDIA_EXTENSIONS, MUSIC_EXTENSIONS } from '../services/media-library.js';
+import { getLocalFiles, updateLocalMappedList, getSafeFilePath, scanDownloadDir, getOrFetchMetadata, saveFavorites, isItemFavorite, deleteMediaFileAndCleanDirs, loadMetadataCache, checkAudioTranscodeNeeded, savePlayProgress, organizeAllFiles, fetchImdbMetadata, parseFilename, findBestMatch, isImageFile, getImageCachePath, MEDIA_EXTENSIONS, MUSIC_EXTENSIONS, sanitizeStreamFilename } from '../services/media-library.js';
 import { loadAutoDownloads, saveAutoDownloads, broadcastAutoDownloads, checkAllAutoDownloads, checkDownloadsTimeout, recreateCheckInterval, checkSingleShow } from '../services/auto-download.js';
 import { updateAllDiscovery } from '../services/discovery.js';
-import { saveConfig } from '../services/config.js';
+import { saveConfig, defaultDownloadDir } from '../services/config.js';
 import { parseSizeToBytes, parseTimeStringToSeconds } from '../services/file-utils.js';
 import { IrcDccDownloader } from '../irc-dcc-client.js';
 import { HttpDownloader, resolveStreamUrl } from '../http-downloader.js';
@@ -630,15 +630,30 @@ export function registerAllRoutes(app) {
       initialStatus: shouldQueue ? 'queued' : 'connecting'
     });
 
-    downloader.on('progress', (data) => {
+    let isCompleting = false;
+    downloader.on('progress', async (data) => {
       if (data.status === 'completed') {
-        appState.cachedLocalFiles = null;
-        organizeAllFiles().catch(err => console.error('[Xtream Download] Organize error:', err));
-        processNextHttpDownload();
+        if (isCompleting) return;
+        isCompleting = true;
+        const queueEntry = appState.downloadQueue.get(id);
+        if (queueEntry) queueEntry.statusOverride = 'extracting';
+        try {
+          await organizeAllFiles();
+          await updateLocalMappedList(true);
+          broadcastToClients(JSON.stringify({ type: 'media_library_updated' }));
+        } catch (err) {
+          console.error('[Xtream Download] Post-completion error:', err);
+        } finally {
+          if (queueEntry) queueEntry.statusOverride = null;
+          processNextHttpDownload();
+          broadcastStatus(id);
+        }
       } else if (data.status === 'error' || data.status === 'cancelled') {
         processNextHttpDownload();
+        broadcastStatus(id);
+      } else {
+        broadcastStatus(id);
       }
-      broadcastStatus(id);
     });
 
     downloader.on('message', (data) => {
@@ -1308,13 +1323,16 @@ export function registerAllRoutes(app) {
         customFilename.startsWith('https___')
       );
       let validCustomFilename = !isCustomFilenameAUrl ? customFilename : null;
-      let filename = validCustomFilename || (seriesTitle ? `${seriesTitle} - ${title}${extension}` : `${title || 'Stream_Download'}${extension}`);
-      filename = filename.replace(/[\\/:*?"<>|]/g, '_');
+      let filename = sanitizeStreamFilename({
+        seriesTitle,
+        title: validCustomFilename || title,
+        extension
+      });
 
       // Prevent duplicate downloads if already queued or active
       const existing = Array.from(appState.downloadQueue.values()).find(
         item => item.downloader && (item.downloader.url === url || item.downloader.filename === filename) &&
-        ['queued', 'connecting', 'downloading'].includes(item.downloader.status)
+        ['queued', 'connecting', 'downloading', 'dcc_downloading'].includes(item.downloader.status)
       );
       if (existing) {
         return res.json({ success: true, id: existing.downloader.id, filename: existing.downloader.filename, status: existing.downloader.status, duplicate: true });
@@ -1326,20 +1344,35 @@ export function registerAllRoutes(app) {
         id,
         url,
         filename,
-        downloadDir: appState.appConfig.downloadDir,
+        downloadDir: appState.appConfig?.downloadDir || defaultDownloadDir,
         initialStatus: shouldQueue ? 'queued' : 'connecting',
         xtreamConfig: appState.appConfig
       });
 
-      downloader.on('progress', (data) => {
+      let isCompleting = false;
+      downloader.on('progress', async (data) => {
         if (data.status === 'completed') {
-          appState.cachedLocalFiles = null;
-          organizeAllFiles().catch(err => console.error('[Stream Download] Organize error:', err));
-          processNextHttpDownload();
+          if (isCompleting) return;
+          isCompleting = true;
+          const queueEntry = appState.downloadQueue.get(id);
+          if (queueEntry) queueEntry.statusOverride = 'extracting';
+          try {
+            await organizeAllFiles();
+            await updateLocalMappedList(true);
+            broadcastToClients(JSON.stringify({ type: 'media_library_updated' }));
+          } catch (err) {
+            console.error('[Stream Download] Post-completion error:', err);
+          } finally {
+            if (queueEntry) queueEntry.statusOverride = null;
+            processNextHttpDownload();
+            broadcastStatus(id);
+          }
         } else if (data.status === 'error' || data.status === 'cancelled') {
           processNextHttpDownload();
+          broadcastStatus(id);
+        } else {
+          broadcastStatus(id);
         }
-        broadcastStatus(id);
       });
 
       appState.downloadQueue.set(id, { downloader });
@@ -1381,15 +1414,29 @@ export function registerAllRoutes(app) {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
     const host = req.headers['x-forwarded-host'] || req.headers.host || req.get('host') || `localhost:${PORT}`;
     const baseUrl = `${protocol}://${host}`;
+    const downloadDir = path.resolve(appState.appConfig?.downloadDir || defaultDownloadDir);
+
+    // Resolve real file using getSafeFilePath
+    const resolvedPath = getSafeFilePath(filename);
+    let relPath = filename;
+    if (resolvedPath && resolvedPath.startsWith(downloadDir)) {
+      relPath = path.relative(downloadDir, resolvedPath);
+    }
+    relPath = relPath.replace(/\\/g, '/').replace(/^\/+/, '');
 
     // Find item in library or create fallback
-    const item = (appState.cachedMappedList || []).find(i => i.filename === filename) || {
-      filename,
-      metadata: { title: path.parse(filename).name }
-    };
+    let item = (appState.cachedMappedList || []).find(i => i.filename === relPath || i.filename === filename || path.basename(i.filename) === path.basename(filename));
+    if (!item) {
+      item = {
+        filename: relPath,
+        metadata: { title: path.parse(relPath).name }
+      };
+    } else {
+      item = { ...item, filename: relPath };
+    }
 
     const m3u = generateSingleItemM3u(item, baseUrl);
-    const title = item.metadata?.title || path.parse(filename).name;
+    const title = item.metadata?.title || path.parse(relPath).name;
     const cleanTitle = title.replace(/[^a-zA-Z0-9._\-]/g, '_');
 
     res.setHeader('Content-Type', 'application/x-mpegurl; charset=utf-8');
@@ -1399,7 +1446,7 @@ export function registerAllRoutes(app) {
   });
 
   // 2. Season M3U Playlist Generator for VLC
-  app.get('/api/media/season.m3u', (req, res) => {
+  app.get('/api/media/season.m3u', async (req, res) => {
     const series = req.query.series || req.query.seriesTitle || req.query.title;
     const season = req.query.season || req.query.seasonNum || req.query.seasonNumber;
 
@@ -1411,6 +1458,7 @@ export function registerAllRoutes(app) {
     const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
     const host = req.headers['x-forwarded-host'] || req.headers.host || req.get('host') || `localhost:${PORT}`;
     const baseUrl = `${protocol}://${host}`;
+    const downloadDir = path.resolve(appState.appConfig?.downloadDir || defaultDownloadDir);
 
     const parseEpisodeInfo = (item) => {
       if (item.season && typeof item.season === 'number') {
@@ -1428,31 +1476,80 @@ export function registerAllRoutes(app) {
       return { season: 1, episode: 1 };
     };
 
-    const searchLower = String(series).toLowerCase();
-    const matchingEpisodes = (appState.cachedMappedList || []).filter(item => {
-      const meta = item.metadata || {};
-      const titleMatch = (meta.title && meta.title.toLowerCase().includes(searchLower)) ||
-                         (item.filename && item.filename.toLowerCase().includes(searchLower)) ||
-                         (meta.imdbId && meta.imdbId === series);
-      if (!titleMatch) return false;
+    let episodes = [];
 
-      const epInfo = parseEpisodeInfo(item);
-      return epInfo.season === seasonNum;
-    });
+    // Path A: Frontend provided specific filenames
+    if (req.query.filenames) {
+      const rawFilenames = Array.isArray(req.query.filenames) ? req.query.filenames.join(',') : String(req.query.filenames);
+      const filenameList = rawFilenames.split(',').map(f => f.trim()).filter(Boolean);
+      for (const fn of filenameList) {
+        const resolved = getSafeFilePath(fn);
+        let rel = fn;
+        if (resolved && resolved.startsWith(downloadDir)) {
+          rel = path.relative(downloadDir, resolved);
+        }
+        rel = rel.replace(/\\/g, '/').replace(/^\/+/, '');
+        const existingItem = (appState.cachedMappedList || []).find(i => i.filename === rel || i.filename === fn || path.basename(i.filename) === path.basename(fn));
+        if (existingItem) {
+          episodes.push({ ...existingItem, filename: rel });
+        } else {
+          episodes.push({
+            filename: rel,
+            metadata: { title: path.parse(rel).name }
+          });
+        }
+      }
+    }
 
-    if (matchingEpisodes.length === 0) {
+    // Path B: Look up in cachedMappedList with auto-refresh fallback
+    if (episodes.length === 0) {
+      if (!appState.cachedMappedList || appState.cachedMappedList.length === 0) {
+        try {
+          await updateLocalMappedList(true);
+        } catch (e) {
+          console.error('[Season M3U] Auto-refresh library error:', e);
+        }
+      }
+
+      const findMatching = () => {
+        const searchLower = String(series).toLowerCase();
+        return (appState.cachedMappedList || []).filter(item => {
+          const meta = item.metadata || {};
+          const titleMatch = (meta.title && meta.title.toLowerCase().includes(searchLower)) ||
+                             (item.filename && item.filename.toLowerCase().includes(searchLower)) ||
+                             (meta.imdbId && meta.imdbId === series);
+          if (!titleMatch) return false;
+
+          const epInfo = parseEpisodeInfo(item);
+          return epInfo.season === seasonNum;
+        });
+      };
+
+      episodes = findMatching();
+
+      if (episodes.length === 0) {
+        try {
+          await updateLocalMappedList(true);
+          episodes = findMatching();
+        } catch (e) {
+          console.error('[Season M3U] Second refresh error:', e);
+        }
+      }
+    }
+
+    if (episodes.length === 0) {
       return res.status(404).json({ error: 'Keine Episoden für diese Staffel gefunden' });
     }
 
-    matchingEpisodes.sort((a, b) => {
+    episodes.sort((a, b) => {
       const epA = parseEpisodeInfo(a).episode;
       const epB = parseEpisodeInfo(b).episode;
       return epA - epB;
     });
 
-    const seriesTitle = matchingEpisodes[0].metadata?.title || series;
-    const m3u = generateSeasonM3u(seriesTitle, seasonNum, matchingEpisodes, baseUrl);
-    const cleanTitle = seriesTitle.replace(/[^a-zA-Z0-9._\-]/g, '_');
+    const seriesTitle = episodes[0]?.metadata?.title || series;
+    const m3u = generateSeasonM3u(seriesTitle, seasonNum, episodes, baseUrl);
+    const cleanTitle = String(seriesTitle).replace(/[^a-zA-Z0-9._\-]/g, '_');
 
     res.setHeader('Content-Type', 'application/x-mpegurl; charset=utf-8');
     res.setHeader('Content-Disposition', `attachment; filename="${cleanTitle}_Staffel_${seasonNum}.m3u"`);
@@ -1528,6 +1625,9 @@ export function registerAllRoutes(app) {
         'Cache-Control': 'no-cache'
       };
       res.writeHead(206, head);
+      if (req.method === 'HEAD') {
+        return res.end();
+      }
       const stream = fs.createReadStream(filePath, { start, end });
       stream.on('error', (err) => {
         console.error(`[Stream Error] ${filePath}:`, err.message);
@@ -1545,6 +1645,9 @@ export function registerAllRoutes(app) {
         'Cache-Control': 'no-cache'
       };
       res.writeHead(200, head);
+      if (req.method === 'HEAD') {
+        return res.end();
+      }
       const stream = fs.createReadStream(filePath);
       stream.on('error', (err) => {
         console.error(`[Stream Error] ${filePath}:`, err.message);
@@ -1558,7 +1661,9 @@ export function registerAllRoutes(app) {
   };
 
   app.get('/api/media/stream/*', handleRangeStreaming);
+  app.head('/api/media/stream/*', handleRangeStreaming);
   app.get('/api/media/stream/:filename', handleRangeStreaming);
+  app.head('/api/media/stream/:filename', handleRangeStreaming);
 
   app.get('/api/media/*', async (req, res) => {
     const filename = req.params[0];

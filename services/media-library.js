@@ -5,6 +5,10 @@ import crypto from 'crypto';
 import { execFile } from 'child_process';
 import { parseFile } from 'music-metadata';
 import { appState, broadcastToClients } from '../state.js';
+import { defaultDownloadDir } from './config.js';
+import { sanitizeStreamFilename } from './filename-sanitizer.js';
+
+export const basenameIndex = new Map();
 
 const MEDIA_EXTENSIONS = new Set([
   '.mp4', '.mkv', '.avi', '.mp3', '.wav', '.m4a', '.mov', '.flac', '.mpeg', '.mpg', '.webm', '.ogg', '.ts', '.m4b'
@@ -47,13 +51,141 @@ function checkAudioTranscodeNeeded(filePath) {
 }
 
 function getSafeFilePath(filename) {
-  if (!filename) return null;
-  const baseDir = path.resolve(appState.appConfig.downloadDir);
-  const filePath = path.resolve(baseDir, filename);
-  if (!filePath.startsWith(baseDir)) {
+  if (!filename || typeof filename !== 'string') return null;
+  const baseDir = path.resolve(appState.appConfig?.downloadDir || defaultDownloadDir);
+
+  let decoded = filename;
+  try {
+    decoded = decodeURIComponent(filename);
+  } catch (e) {
+    decoded = filename;
+  }
+  const normalized = decoded.replace(/\\/g, '/');
+
+  // Strict path traversal defense: reject any attempt with '..'
+  if (normalized.includes('..')) {
     return null;
   }
-  return filePath;
+
+  const cleanInput = normalized.replace(/^\/+/, '');
+  const targetBase = path.basename(cleanInput);
+
+  // Level 1: Direct path
+  const directPath = path.resolve(baseDir, cleanInput);
+  if (!directPath.startsWith(baseDir + path.sep) && directPath !== baseDir) {
+    return null;
+  }
+  try {
+    if (fs.existsSync(directPath) && fs.statSync(directPath).isFile()) {
+      return directPath;
+    }
+  } catch (e) {}
+
+  // Level 2: Download queue check
+  if (appState.downloadQueue && appState.downloadQueue.size > 0) {
+    for (const item of appState.downloadQueue.values()) {
+      const dl = item?.downloader;
+      if (dl) {
+        const matchName = dl.filename === cleanInput ||
+                          dl.filename === targetBase ||
+                          (dl.filePath && (dl.filePath === cleanInput || path.basename(dl.filePath) === targetBase));
+        if (matchName && dl.filePath) {
+          const resolvedDlPath = path.resolve(dl.filePath);
+          if (resolvedDlPath.startsWith(baseDir + path.sep) || resolvedDlPath === baseDir) {
+            try {
+              if (fs.existsSync(resolvedDlPath) && fs.statSync(resolvedDlPath).isFile()) {
+                return resolvedDlPath;
+              }
+            } catch (e) {}
+          }
+        }
+      }
+    }
+  }
+
+  // Level 3: In-Memory Library Index (basenameIndex & cachedMappedList)
+  if (basenameIndex.has(cleanInput)) {
+    const rel = basenameIndex.get(cleanInput);
+    const candidate = path.resolve(baseDir, rel);
+    if ((candidate.startsWith(baseDir + path.sep) || candidate === baseDir) && fs.existsSync(candidate)) {
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch (e) {}
+    }
+  }
+  if (basenameIndex.has(targetBase)) {
+    const rel = basenameIndex.get(targetBase);
+    const candidate = path.resolve(baseDir, rel);
+    if ((candidate.startsWith(baseDir + path.sep) || candidate === baseDir) && fs.existsSync(candidate)) {
+      try {
+        if (fs.statSync(candidate).isFile()) return candidate;
+      } catch (e) {}
+    }
+  }
+
+  const cachedItems = appState.cachedMappedList || appState.cachedLocalFiles || [];
+  for (const item of cachedItems) {
+    if (item.filename === cleanInput || path.basename(item.filename) === targetBase) {
+      const candidate = path.resolve(baseDir, item.filename);
+      if ((candidate.startsWith(baseDir + path.sep) || candidate === baseDir) && fs.existsSync(candidate)) {
+        try {
+          if (fs.statSync(candidate).isFile()) {
+            basenameIndex.set(targetBase, item.filename);
+            basenameIndex.set(item.filename, item.filename);
+            return candidate;
+          }
+        } catch (e) {}
+      }
+    }
+  }
+
+  // Level 4: Subdirectory search in standard directories (Filme, Musik, Musik/Hörbücher, and Serien/*/*)
+  const standardCandidates = [
+    path.join(baseDir, 'Filme', targetBase),
+    path.join(baseDir, 'Musik', targetBase),
+    path.join(baseDir, 'Musik', 'Hörbücher', targetBase)
+  ];
+  for (const cand of standardCandidates) {
+    try {
+      if (fs.existsSync(cand) && fs.statSync(cand).isFile()) {
+        const relPath = path.relative(baseDir, cand);
+        basenameIndex.set(targetBase, relPath);
+        return cand;
+      }
+    } catch (e) {}
+  }
+
+  const serienDir = path.join(baseDir, 'Serien');
+  if (fs.existsSync(serienDir)) {
+    try {
+      const seriesFolders = fs.readdirSync(serienDir, { withFileTypes: true });
+      for (const sf of seriesFolders) {
+        if (sf.isDirectory()) {
+          const seriesPath = path.join(serienDir, sf.name);
+          const directInSeries = path.join(seriesPath, targetBase);
+          if (fs.existsSync(directInSeries) && fs.statSync(directInSeries).isFile()) {
+            const relPath = path.relative(baseDir, directInSeries);
+            basenameIndex.set(targetBase, relPath);
+            return directInSeries;
+          }
+          const seasonFolders = fs.readdirSync(seriesPath, { withFileTypes: true });
+          for (const sef of seasonFolders) {
+            if (sef.isDirectory()) {
+              const seasonPath = path.join(seriesPath, sef.name);
+              const inSeason = path.join(seasonPath, targetBase);
+              if (fs.existsSync(inSeason) && fs.statSync(inSeason).isFile()) {
+                const relPath = path.relative(baseDir, inSeason);
+                basenameIndex.set(targetBase, relPath);
+                return inSeason;
+              }
+            }
+          }
+        }
+      }
+    } catch (e) {}
+  }
+
+  return null;
 }
 
 async function deleteMediaFileAndCleanDirs(filename) {
@@ -179,7 +311,12 @@ function rebuildCachedRawItems() {
 
 async function updateLocalMappedList(force = false) {
   const list = await getLocalFiles(force);
+  basenameIndex.clear();
   appState.cachedMappedList = list.map(item => {
+    if (item.filename) {
+      basenameIndex.set(item.filename, item.filename);
+      basenameIndex.set(path.basename(item.filename), item.filename);
+    }
     const ext = path.extname(item.filename).toLowerCase();
     const cloned = { ...item, isXtream: false };
     
@@ -235,11 +372,14 @@ function isFileDownloading(filePath) {
 }
 
 function updateDownloaderFilePath(oldPath, newPath) {
+  const oldBase = path.basename(oldPath);
+  const newBase = path.basename(newPath);
   for (const [id, item] of appState.downloadQueue.entries()) {
-    if (item.downloader && item.downloader.filePath === oldPath) {
-      item.downloader.filePath = newPath;
-      item.downloader.filename = path.basename(newPath);
-      console.log(`[Organize] Updated downloader ${id} filePath to ${newPath}`);
+    const dl = item?.downloader;
+    if (dl && (dl.filePath === oldPath || dl.filename === oldBase)) {
+      dl.filePath = newPath;
+      dl.filename = newBase;
+      console.log(`[Organize] Updated downloader ${id} filePath to ${newPath}, filename to ${newBase}`);
     }
   }
 }
@@ -272,8 +412,8 @@ async function cleanEmptyDirsInDownloadDir(currentDir) {
   }
 }
 
-async function organizeAllFiles() {
-  const dir = appState.appConfig.downloadDir;
+async function organizeAllFiles(triggerUpdate = true) {
+  const dir = appState.appConfig?.downloadDir || defaultDownloadDir;
   if (!fs.existsSync(dir)) return;
   if (isOrganizing) return;
   isOrganizing = true;
@@ -439,6 +579,14 @@ async function organizeAllFiles() {
     console.error('[Organize] Error during file organization:', err);
   } finally {
     isOrganizing = false;
+  }
+
+  if (triggerUpdate) {
+    try {
+      await updateLocalMappedList(true);
+    } catch (err) {
+      console.error('[Organize] Error updating local mapped list:', err);
+    }
   }
 }
 
@@ -722,13 +870,13 @@ async function getOrFetchMetadata(filename, ext) {
 }
 
 async function scanDownloadDir() {
-  const dir = appState.appConfig.downloadDir;
+  const dir = appState.appConfig?.downloadDir || defaultDownloadDir;
   try {
     if (!fs.existsSync(dir)) {
       return [];
     }
 
-    await organizeAllFiles();
+    await organizeAllFiles(false);
 
     const mediaFiles = [];
 
@@ -832,6 +980,8 @@ export {
   parseFilename,
   findBestMatch,
   updateLocalMappedList,
+  updateDownloaderFilePath,
+  sanitizeStreamFilename,
   isImageFile,
   getImageCachePath,
   isItemFavorite,
