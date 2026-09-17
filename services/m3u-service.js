@@ -72,6 +72,63 @@ export async function generateM3uPlaylist(baseUrl) {
 }
 
 /**
+ * Generates an M3U playlist for a single media item targeting client VLC streaming
+ * @param {object} item - Media item with filename and optional metadata
+ * @param {string} baseUrl - Base URL of PulseCast server e.g. "http://192.168.1.50:3000"
+ * @returns {string} M3U content
+ */
+export function generateSingleItemM3u(item, baseUrl) {
+  const cleanBaseUrl = (baseUrl || '').replace(/\/$/, '');
+  const meta = item?.metadata || {};
+  const filename = item?.filename || 'media';
+  const baseTitle = meta.title || path.parse(filename).name;
+  const tvgName = meta.seasonEpisode ? `${baseTitle} (${meta.seasonEpisode})` : baseTitle;
+  const logo = meta.posterUrl ? (meta.posterUrl.startsWith('http') ? meta.posterUrl : `${cleanBaseUrl}/api/media/${encodeURIComponent(meta.posterUrl)}`) : '';
+  const groupTitle = meta.originalCategory || meta.category || 'Media';
+  const streamUrl = `${cleanBaseUrl}/api/media/stream/${encodeURIComponent(filename)}`;
+
+  const lines = [
+    '#EXTM3U',
+    `#EXTINF:-1 tvg-name="${tvgName}" tvg-logo="${logo}" group-title="${groupTitle}",${tvgName}`,
+    streamUrl
+  ];
+  return lines.join('\n') + '\n';
+}
+
+/**
+ * Generates an M3U playlist for a full TV series season targeting client VLC streaming
+ * @param {string} seriesTitle - Title of the series
+ * @param {number|string} seasonNum - Season number
+ * @param {Array} episodes - List of episode media items
+ * @param {string} baseUrl - Base URL of PulseCast server
+ * @returns {string} M3U content
+ */
+export function generateSeasonM3u(seriesTitle, seasonNum, episodes, baseUrl) {
+  const cleanBaseUrl = (baseUrl || '').replace(/\/$/, '');
+  const sNum = parseInt(seasonNum, 10) || 1;
+  const sTag = `S${String(sNum).padStart(2, '0')}`;
+  const lines = [
+    '#EXTM3U'
+  ];
+
+  for (const ep of episodes || []) {
+    const meta = ep?.metadata || {};
+    const filename = ep?.filename || '';
+    const epTitle = meta.title || ep.title || path.parse(filename || 'episode').name;
+    const sEp = meta.seasonEpisode || sTag;
+    const displayTitle = `${seriesTitle} - ${sEp} - ${epTitle}`;
+    const logo = meta.posterUrl ? (meta.posterUrl.startsWith('http') ? meta.posterUrl : `${cleanBaseUrl}/api/media/${encodeURIComponent(meta.posterUrl)}`) : '';
+    const groupTitle = `${seriesTitle} - Staffel ${sNum}`;
+    const streamUrl = `${cleanBaseUrl}/api/media/stream/${encodeURIComponent(filename)}`;
+
+    lines.push(`#EXTINF:-1 tvg-name="${displayTitle}" tvg-logo="${logo}" group-title="${groupTitle}",${displayTitle}`);
+    lines.push(streamUrl);
+  }
+
+  return lines.join('\n') + '\n';
+}
+
+/**
  * Generates an XMLTV EPG for available Live TV channels
  * @param {string} baseUrl
  * @returns {string} XMLTV content

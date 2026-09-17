@@ -12,13 +12,12 @@ import { parseSizeToBytes, parseTimeStringToSeconds } from '../services/file-uti
 import { IrcDccDownloader } from '../irc-dcc-client.js';
 import { HttpDownloader, resolveStreamUrl } from '../http-downloader.js';
 import { configureSambaShare } from '../services/samba.js';
-import { attachDeviceStatusListeners, attachDlnaDeviceStatusListeners, attachAirplayDeviceStatusListeners, broadcastActiveCasts, getActiveCasts, playLocalFile, launchVlc, startCasting, stopCasting } from '../services/cast-service.js';
-import { generateM3uPlaylist, generateXmltvEpg } from '../services/m3u-service.js';
+import { generateM3uPlaylist, generateSingleItemM3u, generateSeasonM3u, generateXmltvEpg } from '../services/m3u-service.js';
 import fs from 'fs';
 import path from 'path';
 import os from 'os';
 import crypto from 'crypto';
-import { execFile, spawn } from 'child_process';
+import { spawn } from 'child_process';
 import { Readable } from 'stream';
 
 const LOG_FILE = path.join(os.homedir(), '.xdcc_downloader_logs.txt');
@@ -1312,6 +1311,15 @@ export function registerAllRoutes(app) {
       let filename = validCustomFilename || (seriesTitle ? `${seriesTitle} - ${title}${extension}` : `${title || 'Stream_Download'}${extension}`);
       filename = filename.replace(/[\\/:*?"<>|]/g, '_');
 
+      // Prevent duplicate downloads if already queued or active
+      const existing = Array.from(appState.downloadQueue.values()).find(
+        item => item.downloader && (item.downloader.url === url || item.downloader.filename === filename) &&
+        ['queued', 'connecting', 'downloading'].includes(item.downloader.status)
+      );
+      if (existing) {
+        return res.json({ success: true, id: existing.downloader.id, filename: existing.downloader.filename, status: existing.downloader.status, duplicate: true });
+      }
+
       const id = Date.now().toString();
       const shouldQueue = isHttpDownloadActive();
       const downloader = new HttpDownloader({
@@ -1361,578 +1369,196 @@ export function registerAllRoutes(app) {
     return res.json({ success: true, isFavorite: appState.favorites.has(String(id)) });
   });
 
-  app.post('/api/media-library/play-local', (req, res) => {
-    const { filename } = req.body;
-    if (!filename) return res.status(400).json({ error: 'Parameter filename fehlt' });
-    const isUrl = filename.startsWith('http://') || filename.startsWith('https://');
-    const filePath = isUrl ? filename : getSafeFilePath(filename);
-    if (!isUrl && (!filePath || !fs.existsSync(filePath))) {
-      return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
+  // --- Client-Side VLC Streaming & M3U Routes ---
+
+  // 1. Single Item M3U Playlist Generator for VLC
+  app.get('/api/media/stream.m3u', (req, res) => {
+    const filename = req.query.filename;
+    if (!filename) {
+      return res.status(400).json({ error: 'Parameter filename fehlt' });
     }
-    execFile('open', [filePath], (error) => {
-      if (error) {
-        console.error('[Playback] Fehler beim lokalen Öffnen der Library-Datei:', error);
-        return res.status(500).json({ error: `Konnte die Datei nicht lokal abspielen: ${error.message}` });
-      }
-      return res.json({ success: true });
-    });
+
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || req.get('host') || `localhost:${PORT}`;
+    const baseUrl = `${protocol}://${host}`;
+
+    // Find item in library or create fallback
+    const item = (appState.cachedMappedList || []).find(i => i.filename === filename) || {
+      filename,
+      metadata: { title: path.parse(filename).name }
+    };
+
+    const m3u = generateSingleItemM3u(item, baseUrl);
+    const title = item.metadata?.title || path.parse(filename).name;
+    const cleanTitle = title.replace(/[^a-zA-Z0-9._\-]/g, '_');
+
+    res.setHeader('Content-Type', 'application/x-mpegurl; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${cleanTitle}.m3u"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(m3u);
   });
 
-  const handleVlcPlay = async (req, res) => {
-    const { filename, streamUrl, downloadId } = req.body || {};
-    let target = null;
+  // 2. Season M3U Playlist Generator for VLC
+  app.get('/api/media/season.m3u', (req, res) => {
+    const series = req.query.series || req.query.seriesTitle || req.query.title;
+    const season = req.query.season || req.query.seasonNum || req.query.seasonNumber;
 
-    if (downloadId) {
-      const item = appState.downloadQueue.get(downloadId);
-      if (item && item.downloader && item.downloader.filePath && fs.existsSync(item.downloader.filePath)) {
-        target = item.downloader.filePath;
+    if (!series || season === undefined) {
+      return res.status(400).json({ error: 'Parameter series und season fehlen' });
+    }
+
+    const seasonNum = parseInt(season, 10) || 1;
+    const protocol = req.headers['x-forwarded-proto'] || req.protocol || 'http';
+    const host = req.headers['x-forwarded-host'] || req.headers.host || req.get('host') || `localhost:${PORT}`;
+    const baseUrl = `${protocol}://${host}`;
+
+    const parseEpisodeInfo = (item) => {
+      if (item.season && typeof item.season === 'number') {
+        return { season: item.season, episode: item.episodeNum || 1 };
       }
-    }
-
-    if (!target) {
-      if (streamUrl && (streamUrl.startsWith('http://') || streamUrl.startsWith('https://'))) {
-        target = streamUrl;
-      } else if (filename && (filename.startsWith('http://') || filename.startsWith('https://'))) {
-        target = filename;
-      } else if (filename) {
-        const filePath = getSafeFilePath(filename);
-        if (filePath && fs.existsSync(filePath)) {
-          target = filePath;
-        } else {
-          const resolvedUrl = resolveStreamUrl(filename, appState.appConfig);
-          if (resolvedUrl && (resolvedUrl.startsWith('http://') || resolvedUrl.startsWith('https://'))) {
-            target = resolvedUrl;
-          } else {
-            target = `http://${getLocalIp(appState.appConfig)}:${PORT}/api/media/${encodeURIComponent(filename)}`;
-          }
-        }
+      const sEp = item.metadata?.seasonEpisode || item.filename || '';
+      const match = sEp.match(/S(\d+)E(\d+)/i) || sEp.match(/(\d+)x(\d+)/i);
+      if (match) {
+        return { season: parseInt(match[1], 10), episode: parseInt(match[2], 10) };
       }
+      const sOnly = sEp.match(/Staffel\s*(\d+)/i) || sEp.match(/Season\s*(\d+)/i) || sEp.match(/S(\d+)/i);
+      if (sOnly) {
+        return { season: parseInt(sOnly[1], 10), episode: 1 };
+      }
+      return { season: 1, episode: 1 };
+    };
+
+    const searchLower = String(series).toLowerCase();
+    const matchingEpisodes = (appState.cachedMappedList || []).filter(item => {
+      const meta = item.metadata || {};
+      const titleMatch = (meta.title && meta.title.toLowerCase().includes(searchLower)) ||
+                         (item.filename && item.filename.toLowerCase().includes(searchLower)) ||
+                         (meta.imdbId && meta.imdbId === series);
+      if (!titleMatch) return false;
+
+      const epInfo = parseEpisodeInfo(item);
+      return epInfo.season === seasonNum;
+    });
+
+    if (matchingEpisodes.length === 0) {
+      return res.status(404).json({ error: 'Keine Episoden für diese Staffel gefunden' });
     }
 
-    if (!target) {
-      return res.status(400).json({ error: 'Kein gültiges Ziel für VLC angegeben (Datei oder URL fehlt)' });
+    matchingEpisodes.sort((a, b) => {
+      const epA = parseEpisodeInfo(a).episode;
+      const epB = parseEpisodeInfo(b).episode;
+      return epA - epB;
+    });
+
+    const seriesTitle = matchingEpisodes[0].metadata?.title || series;
+    const m3u = generateSeasonM3u(seriesTitle, seasonNum, matchingEpisodes, baseUrl);
+    const cleanTitle = seriesTitle.replace(/[^a-zA-Z0-9._\-]/g, '_');
+
+    res.setHeader('Content-Type', 'application/x-mpegurl; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${cleanTitle}_Staffel_${seasonNum}.m3u"`);
+    res.setHeader('Cache-Control', 'no-cache');
+    return res.send(m3u);
+  });
+
+  // 3. Reliable Native HTTP Range Streaming for /api/media/stream/:filename
+  const handleRangeStreaming = (req, res) => {
+    let rawFilename = req.params[0] !== undefined ? req.params[0] : (req.params.filename || '');
+    if (!rawFilename) {
+      return res.status(400).send('Dateiname fehlt');
     }
 
+    let filename;
     try {
-      await launchVlc(target);
-      return res.json({ success: true, target });
-    } catch (err) {
-      console.error('[VLC] Fehler beim Starten von VLC:', err);
-      return res.status(500).json({ error: `Konnte VLC nicht starten: ${err.message}` });
+      filename = decodeURIComponent(rawFilename);
+    } catch (e) {
+      filename = rawFilename;
+    }
+
+    const filePath = getSafeFilePath(filename);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).send('Datei nicht gefunden');
+    }
+
+    let stat;
+    try {
+      stat = fs.statSync(filePath);
+    } catch (e) {
+      return res.status(404).send('Datei konnte nicht gelesen werden');
+    }
+
+    if (!stat.isFile()) {
+      return res.status(404).send('Keine reguläre Datei');
+    }
+
+    const fileSize = stat.size;
+    const ext = path.extname(filePath.split('?')[0]).toLowerCase();
+
+    let contentType = 'video/mp4';
+    if (ext === '.mkv') contentType = 'video/x-matroska';
+    else if (ext === '.avi') contentType = 'video/x-msvideo';
+    else if (ext === '.webm') contentType = 'video/webm';
+    else if (ext === '.mov') contentType = 'video/quicktime';
+    else if (ext === '.ts') contentType = 'video/mp2t';
+    else if (ext === '.mp3') contentType = 'audio/mpeg';
+    else if (ext === '.wav') contentType = 'audio/wav';
+    else if (ext === '.flac') contentType = 'audio/flac';
+    else if (ext === '.m4a' || ext === '.m4b') contentType = 'audio/mp4';
+    else if (ext === '.ogg') contentType = 'audio/ogg';
+
+    const range = req.headers.range;
+    if (range) {
+      const parts = range.replace(/bytes=/, '').split('-');
+      const start = parseInt(parts[0], 10);
+      const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+
+      if (isNaN(start) || isNaN(end) || start >= fileSize || end >= fileSize || start > end) {
+        res.writeHead(416, {
+          'Content-Range': `bytes */${fileSize}`,
+          'Accept-Ranges': 'bytes'
+        });
+        return res.end();
+      }
+
+      const chunkSize = (end - start) + 1;
+      const head = {
+        'Content-Range': `bytes ${start}-${end}/${fileSize}`,
+        'Accept-Ranges': 'bytes',
+        'Content-Length': chunkSize,
+        'Content-Type': contentType,
+        'Cache-Control': 'no-cache'
+      };
+      res.writeHead(206, head);
+      const stream = fs.createReadStream(filePath, { start, end });
+      stream.on('error', (err) => {
+        console.error(`[Stream Error] ${filePath}:`, err.message);
+        if (!res.headersSent) res.status(500).end();
+      });
+      req.on('close', () => {
+        stream.destroy();
+      });
+      stream.pipe(res);
+    } else {
+      const head = {
+        'Content-Length': fileSize,
+        'Content-Type': contentType,
+        'Accept-Ranges': 'bytes',
+        'Cache-Control': 'no-cache'
+      };
+      res.writeHead(200, head);
+      const stream = fs.createReadStream(filePath);
+      stream.on('error', (err) => {
+        console.error(`[Stream Error] ${filePath}:`, err.message);
+        if (!res.headersSent) res.status(500).end();
+      });
+      req.on('close', () => {
+        stream.destroy();
+      });
+      stream.pipe(res);
     }
   };
 
-  app.post('/api/player/vlc', handleVlcPlay);
-  app.post('/api/media-library/play-vlc', handleVlcPlay);
-
-  app.post('/api/media-library/cast/play', async (req, res) => {
-    const { filename, deviceName } = req.body;
-    if (!filename || !deviceName) {
-      return res.status(400).json({ error: 'Parameter filename und deviceName fehlen' });
-    }
-    const isUrl = filename.startsWith('http://') || filename.startsWith('https://');
-    const filePath = isUrl ? filename : getSafeFilePath(filename);
-    if (!isUrl && (!filePath || !fs.existsSync(filePath))) {
-      return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
-    }
-    let device = appState.discoveredChromecasts.get(deviceName);
-    let isDlna = false;
-    let isAirplay = false;
-    if (!device) {
-      device = appState.discoveredDlnas.get(deviceName);
-      if (device) {
-        isDlna = true;
-      } else {
-        device = appState.discoveredAirplays.get(deviceName);
-        if (device) {
-          isAirplay = true;
-        } else {
-          return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden.` });
-        }
-      }
-    }
-    const mediaUrl = `http://${getLocalIp(appState.appConfig)}:${PORT}/api/media/${encodeURIComponent(filename)}`;
-    console.log(`[Cast] Casting Library file "${filename}" to "${deviceName}" via ${mediaUrl} (isDlna: ${isDlna}, isAirplay: ${isAirplay})`);
-    let contentType = 'video/mp4';
-    const ext = path.extname(filename.split('?')[0]).toLowerCase();
-    if (ext === '.mkv') {
-      const needsTranscode = await checkAudioTranscodeNeeded(filePath);
-      contentType = needsTranscode ? 'video/mp4' : 'video/x-matroska';
-    } else if (ext === '.avi') contentType = 'video/mp4';
-    else if (ext === '.mp3') contentType = 'audio/mpeg';
-    else if (ext === '.wav') contentType = 'audio/wav';
-    let responded = false;
-    if (isDlna) {
-      const performPlay = () => {
-        device.play(mediaUrl, {
-          title: filename,
-          type: contentType,
-          autoPlay: false
-        }, (err) => {
-          if (responded) return;
-          if (err) {
-            responded = true;
-            console.error(`[DLNA] Fehler beim Laden der Library-Datei auf ${deviceName}:`, err);
-            return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
-          }
-          setTimeout(() => {
-            device.resume((resumeErr) => {
-              if (resumeErr) {
-                console.error(`[DLNA] Fehler beim Starten (Resume) auf ${deviceName}:`, resumeErr);
-              }
-            });
-          }, 1500);
-          responded = true;
-          appState.activeCasts.set(deviceName, {
-            downloadId: null,
-            filename: filename,
-            deviceType: 'dlna',
-            playerState: 'PLAYING',
-            currentTime: 0,
-            duration: 0,
-            volume: 1,
-            muted: false
-          });
-          attachDlnaDeviceStatusListeners(device, deviceName);
-          broadcastActiveCasts();
-          return res.json({ success: true, deviceName, filename: filename });
-        });
-      };
-      if (device.client) {
-        device.stop(() => {
-          setTimeout(performPlay, 1000);
-        });
-      } else {
-        performPlay();
-      }
-    } else if (isAirplay) {
-      device.play(mediaUrl, (err) => {
-        if (responded) return;
-        responded = true;
-        if (err) {
-          console.error(`[AirPlay] Fehler beim Laden der Library-Datei auf ${deviceName}:`, err);
-          return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
-        }
-        appState.activeCasts.set(deviceName, {
-          downloadId: null,
-          filename: filename,
-          deviceType: 'airplay',
-          playerState: 'PLAYING',
-          currentTime: 0,
-          duration: 0,
-          volume: 1,
-          muted: false
-        });
-        attachAirplayDeviceStatusListeners(device, deviceName);
-        broadcastActiveCasts();
-        return res.json({ success: true, deviceName, filename: filename });
-      });
-    } else {
-      device.play(mediaUrl, { contentType }, (err) => {
-        if (responded) return;
-        responded = true;
-        if (err) {
-          console.error(`[Chromecast] Fehler beim Abspielen der Library-Datei auf ${deviceName}:`, err);
-          return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
-        }
-        appState.activeCasts.set(deviceName, {
-          downloadId: null,
-          filename: filename,
-          deviceType: 'chromecast',
-          playerState: 'BUFFERING',
-          currentTime: 0,
-          duration: 0,
-          volume: 1,
-          muted: false
-        });
-        attachDeviceStatusListeners(device, deviceName);
-        broadcastActiveCasts();
-        return res.json({ success: true, deviceName, filename: filename });
-      });
-    }
-  });
-
-  app.post('/api/download/:id/play-local', (req, res) => {
-    const { id } = req.params;
-    const item = appState.downloadQueue.get(id);
-    if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
-    if (item.downloader.status !== 'completed') {
-      return res.status(400).json({ error: 'Download ist noch nicht abgeschlossen' });
-    }
-    const filePath = item.downloader.filePath;
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
-    }
-    execFile('open', [filePath], (error) => {
-      if (error) {
-        console.error('[Playback] Fehler beim lokalen Öffnen der Datei:', error);
-        return res.status(500).json({ error: `Konnte die Datei nicht lokal abspielen: ${error.message}` });
-      }
-      return res.json({ success: true });
-    });
-  });
-
-  app.post('/api/download/:id/play-vlc', async (req, res) => {
-    const { id } = req.params;
-    const item = appState.downloadQueue.get(id);
-    if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
-    if (item.downloader.status !== 'completed') {
-      return res.status(400).json({ error: 'Download ist noch nicht abgeschlossen' });
-    }
-    const filePath = item.downloader.filePath;
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Datei existiert nicht auf dem Datenträger' });
-    }
-    try {
-      await launchVlc(filePath);
-      return res.json({ success: true, target: filePath });
-    } catch (error) {
-      console.error('[Playback] Fehler beim Öffnen in VLC:', error);
-      return res.status(500).json({ error: `Konnte die Datei nicht in VLC abspielen: ${error.message}` });
-    }
-  });
-
-  app.get('/api/chromecast/devices', (req, res) => {
-    if (appState.castBrowser) {
-      try {
-        appState.castBrowser.update();
-      } catch (e) {
-        console.error('[Chromecast] Fehler beim Aktualisieren des Browsers:', e);
-      }
-    }
-    if (appState.dlnaBrowser) {
-      try {
-        appState.dlnaBrowser.update();
-      } catch (e) {
-        console.error('[DLNA] Fehler beim Aktualisieren des Browsers:', e);
-      }
-    }
-    if (appState.airplayBrowser) {
-      try {
-        appState.airplayBrowser.update();
-      } catch (e) {
-        console.error('[AirPlay] Fehler beim Aktualisieren des Browsers:', e);
-      }
-    }
-    const chromecasts = Array.from(appState.discoveredChromecasts.values()).map(d => ({
-      name: d.friendlyName,
-      host: d.host,
-      type: 'chromecast'
-    }));
-    const dlnas = Array.from(appState.discoveredDlnas.values()).map(d => ({
-      name: d.name,
-      host: d.host || 'DLNA',
-      type: 'dlna'
-    }));
-    const airplays = Array.from(appState.discoveredAirplays.values()).map(d => ({
-      name: d.name,
-      host: d.host || 'AirPlay',
-      type: 'airplay'
-    }));
-    return res.json([...chromecasts, ...dlnas, ...airplays]);
-  });
-
-  app.post('/api/chromecast/play', async (req, res) => {
-    const { downloadId, deviceName } = req.body;
-    if (!downloadId || !deviceName) {
-      return res.status(400).json({ error: 'Parameter downloadId und deviceName fehlen' });
-    }
-    const item = appState.downloadQueue.get(downloadId);
-    if (!item) return res.status(404).json({ error: 'Download nicht gefunden' });
-    if (item.downloader.status !== 'completed') {
-      return res.status(400).json({ error: 'Download ist noch nicht abgeschlossen' });
-    }
-    let device = appState.discoveredChromecasts.get(deviceName);
-    let isDlna = false;
-    let isAirplay = false;
-    if (!device) {
-      device = appState.discoveredDlnas.get(deviceName);
-      if (device) {
-        isDlna = true;
-      } else {
-        device = appState.discoveredAirplays.get(deviceName);
-        if (device) {
-          isAirplay = true;
-        } else {
-          return res.status(404).json({ error: `Gerät "${deviceName}" nicht im Netzwerk gefunden. Bitte Suche aktualisieren.` });
-        }
-      }
-    }
-    const filename = item.downloader.filename;
-    const localIp = getLocalIp(appState.appConfig);
-    const mediaUrl = `http://${localIp}:${PORT}/api/media/${encodeURIComponent(filename)}`;
-    console.log(`[Cast] Casting "${filename}" to "${deviceName}" via ${mediaUrl} (isDlna: ${isDlna}, isAirplay: ${isAirplay})`);
-    let contentType = 'video/mp4';
-    const ext = path.extname(filename).toLowerCase();
-    if (ext === '.mkv') {
-      const needsTranscode = await checkAudioTranscodeNeeded(item.downloader.filePath);
-      contentType = needsTranscode ? 'video/mp4' : 'video/x-matroska';
-    } else if (ext === '.avi') contentType = 'video/mp4';
-    else if (ext === '.mp3') contentType = 'audio/mpeg';
-    else if (ext === '.wav') contentType = 'audio/wav';
-    let responded = false;
-    if (isDlna) {
-      const performPlay = () => {
-        device.play(mediaUrl, {
-          title: filename,
-          type: contentType,
-          autoPlay: false
-        }, (err) => {
-          if (responded) return;
-          if (err) {
-            responded = true;
-            console.error(`[DLNA] Fehler beim Laden auf ${deviceName}:`, err);
-            return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
-          }
-          setTimeout(() => {
-            device.resume((resumeErr) => {
-              if (resumeErr) {
-                console.error(`[DLNA] Fehler beim Starten (Resume) auf ${deviceName}:`, resumeErr);
-              }
-            });
-          }, 1500);
-          responded = true;
-          appState.activeCasts.set(deviceName, {
-            downloadId,
-            filename,
-            deviceType: 'dlna',
-            playerState: 'PLAYING',
-            currentTime: 0,
-            duration: 0,
-            volume: 1,
-            muted: false
-          });
-          attachDlnaDeviceStatusListeners(device, deviceName);
-          broadcastActiveCasts();
-          return res.json({ success: true, deviceName, filename });
-        });
-      };
-      if (device.client) {
-        device.stop(() => {
-          setTimeout(performPlay, 1000);
-        });
-      } else {
-        performPlay();
-      }
-    } else if (isAirplay) {
-      device.play(mediaUrl, (err) => {
-        if (responded) return;
-        responded = true;
-        if (err) {
-          console.error(`[AirPlay] Fehler beim Abspielen auf ${deviceName}:`, err);
-          return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
-        }
-        appState.activeCasts.set(deviceName, {
-          downloadId,
-          filename,
-          deviceType: 'airplay',
-          playerState: 'PLAYING',
-          currentTime: 0,
-          duration: 0,
-          volume: 1,
-          muted: false
-        });
-        attachAirplayDeviceStatusListeners(device, deviceName);
-        broadcastActiveCasts();
-        return res.json({ success: true, deviceName, filename });
-      });
-    } else {
-      device.play(mediaUrl, { contentType }, (err) => {
-        if (responded) return;
-        responded = true;
-        if (err) {
-          console.error(`[Chromecast] Fehler beim Abspielen auf ${deviceName}:`, err);
-          return res.status(500).json({ error: `Streaming-Fehler: ${err.message}` });
-        }
-        appState.activeCasts.set(deviceName, {
-          downloadId,
-          filename,
-          deviceType: 'chromecast',
-          playerState: 'BUFFERING',
-          currentTime: 0,
-          duration: 0,
-          volume: 1,
-          muted: false
-        });
-        attachDeviceStatusListeners(device, deviceName);
-        broadcastActiveCasts();
-        return res.json({ success: true, deviceName, filename });
-      });
-    }
-  });
-
-  app.post('/api/chromecast/stop', (req, res) => {
-    const { deviceName } = req.body;
-    if (!deviceName) {
-      return res.status(400).json({ error: 'Parameter deviceName fehlt' });
-    }
-    appState.activeCasts.delete(deviceName);
-    broadcastActiveCasts();
-    const device = appState.discoveredChromecasts.get(deviceName);
-    if (device && typeof device.stop === 'function') {
-      device.stop((err) => {
-        if (err) {
-          console.error(`[Chromecast] Fehler beim Hintergrund-Stoppen auf ${deviceName}:`, err.message);
-        }
-      });
-    } else {
-      const dlnaDevice = appState.discoveredDlnas.get(deviceName);
-      if (dlnaDevice && dlnaDevice.client && typeof dlnaDevice.stop === 'function') {
-        dlnaDevice.stop((err) => {
-          if (err) {
-            console.error(`[DLNA] Fehler beim Hintergrund-Stoppen auf ${deviceName}:`, err.message);
-          }
-        });
-      } else {
-        const airplayDevice = appState.discoveredAirplays.get(deviceName);
-        if (airplayDevice && typeof airplayDevice.stop === 'function') {
-          airplayDevice.stop((err) => {
-            if (err) {
-              console.error(`[AirPlay] Fehler beim Hintergrund-Stoppen auf ${deviceName}:`, err.message);
-            }
-          });
-        } else {
-          console.log(`[Cast] Gerät "${deviceName}" für Stop nicht in Entdeckungsliste oder nicht aktiv.`);
-        }
-      }
-    }
-    return res.json({ success: true });
-  });
-
-  app.post('/api/chromecast/control', (req, res) => {
-    const { deviceName, action, value } = req.body;
-    if (!deviceName || !action) {
-      return res.status(400).json({ error: 'Parameter deviceName und action fehlen' });
-    }
-    let device = appState.discoveredChromecasts.get(deviceName);
-    let isDlna = false;
-    let isAirplay = false;
-    if (!device) {
-      device = appState.discoveredDlnas.get(deviceName);
-      if (device) {
-        isDlna = true;
-      } else {
-        device = appState.discoveredAirplays.get(deviceName);
-        if (device) {
-          isAirplay = true;
-        } else {
-          return res.status(404).json({ error: 'Gerät nicht gefunden' });
-        }
-      }
-    }
-    if (isAirplay) {
-      const callback = (err) => {
-        if (err) {
-          console.error(`[AirPlay Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
-          return res.status(500).json({ error: `Steuerung fehlgeschlagen: ${err.message}` });
-        }
-        device.playbackInfo((statusErr, resObj, body) => {
-          if (!statusErr && body) {
-            const castInfo = appState.activeCasts.get(deviceName);
-            if (castInfo) {
-              if (body.rate !== undefined) {
-                castInfo.playerState = body.rate === 0 ? 'PAUSED' : 'PLAYING';
-              }
-              if (body.duration !== undefined) {
-                castInfo.duration = body.duration;
-              }
-              if (body.position !== undefined) {
-                castInfo.currentTime = body.position;
-              }
-              appState.activeCasts.set(deviceName, castInfo);
-              broadcastActiveCasts();
-            }
-          }
-        });
-        return res.json({ success: true });
-      };
-      switch (action) {
-        case 'pause': device.pause(callback); break;
-        case 'resume': device.resume(callback); break;
-        case 'seek': device.scrub(parseFloat(value), callback); break;
-        case 'volume': return res.json({ success: true });
-        default: return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
-      }
-      return;
-    }
-    if (isDlna) {
-      if (!device.client) {
-        return res.status(400).json({ error: 'Wiedergabe ist nicht aktiv.' });
-      }
-      const callback = (err) => {
-        if (err) {
-          console.error(`[DLNA Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
-          return res.status(500).json({ error: `Steuerung fehlgeschlagen: ${err.message}` });
-        }
-        device.status((statusErr, status) => {
-          if (!statusErr && status) {
-            const castInfo = appState.activeCasts.get(deviceName);
-            if (castInfo) {
-              let playerState = 'PLAYING';
-              if (status.transportState === 'PAUSED_PLAYBACK') playerState = 'PAUSED';
-              else if (status.transportState === 'STOPPED') playerState = 'IDLE';
-              castInfo.playerState = playerState;
-              if (status.relTime) castInfo.currentTime = parseTimeStringToSeconds(status.relTime);
-              if (status.trackDuration) castInfo.duration = parseTimeStringToSeconds(status.trackDuration);
-              if (status.volume !== undefined) castInfo.volume = status.volume / 100;
-              appState.activeCasts.set(deviceName, castInfo);
-              broadcastActiveCasts();
-            }
-          }
-        });
-        return res.json({ success: true });
-      };
-      switch (action) {
-        case 'pause': device.pause(callback); break;
-        case 'resume':
-          if (typeof device.resume === 'function') device.resume(callback);
-          else device.play(callback);
-          break;
-        case 'seek': device.seek(parseFloat(value), callback); break;
-        case 'volume': device.volume(Math.round(parseFloat(value) * 100), callback); break;
-        default: return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
-      }
-      return;
-    }
-    const callback = (err) => {
-      if (err) {
-        console.error(`[Chromecast Control] Fehler bei Action ${action} auf ${deviceName}:`, err);
-        return res.status(500).json({ error: `Steuerung fehlgeschlagen: ${err.message}` });
-      }
-      device.getStatus((statusErr, status) => {
-        if (!statusErr && status) {
-          const castInfo = appState.activeCasts.get(deviceName);
-          if (castInfo) {
-            castInfo.playerState = status.playerState;
-            castInfo.currentTime = status.currentTime || 0;
-            castInfo.duration = status.media?.duration || 0;
-            castInfo.volume = status.volume?.level || 1;
-            castInfo.muted = !!status.volume?.muted;
-            appState.activeCasts.set(deviceName, castInfo);
-            broadcastActiveCasts();
-          }
-        }
-      });
-      return res.json({ success: true });
-    };
-    switch (action) {
-      case 'pause': device.pause(callback); break;
-      case 'resume':
-        if (typeof device.resume === 'function') device.resume(callback);
-        else device.play(callback);
-        break;
-      case 'seek': device.seek(parseFloat(value), callback); break;
-      case 'volume': device.setVolume(parseFloat(value), callback); break;
-      default: return res.status(400).json({ error: `Unbekannte Aktion: ${action}` });
-    }
-  });
-
-  app.get('/api/chromecast/active', (req, res) => {
-    return res.json(Array.from(appState.activeCasts.entries()).map(([device, info]) => ({
-      device,
-      ...info
-    })));
-  });
+  app.get('/api/media/stream/*', handleRangeStreaming);
+  app.get('/api/media/stream/:filename', handleRangeStreaming);
 
   app.get('/api/media/*', async (req, res) => {
     const filename = req.params[0];
@@ -1987,64 +1613,6 @@ export function registerAllRoutes(app) {
       }
     }
     const ext = path.extname(filePath.split('?')[0]).toLowerCase();
-    if (ext === '.avi') {
-      console.log(`[Playback] Transcodierung läuft (on-the-fly) für AVI-Datei: ${filePath}`);
-      res.writeHead(200, {
-        'Content-Type': 'video/mp4',
-        'Transfer-Encoding': 'chunked'
-      });
-      const ffmpeg = spawn('ffmpeg', [
-        '-i', filePath,
-        '-vcodec', 'libx264',
-        '-preset', 'ultrafast',
-        '-acodec', 'aac',
-        '-f', 'mp4',
-        '-movflags', 'frag_keyframe+empty_moov',
-        'pipe:1'
-      ]);
-      ffmpeg.stdout.pipe(res);
-      req.on('close', () => {
-        console.log(`[Playback] Client-Verbindung geschlossen, beende ffmpeg für: ${filePath}`);
-        ffmpeg.kill('SIGKILL');
-      });
-      ffmpeg.on('error', (err) => {
-        console.error(`[Playback] ffmpeg-Fehler für ${filePath}:`, err);
-        if (!res.headersSent) {
-          res.status(500).send('Fehler bei der Transkodierung');
-        }
-      });
-      return;
-    }
-    if (ext === '.mkv') {
-      const needsTranscode = await checkAudioTranscodeNeeded(filePath);
-      if (needsTranscode) {
-        console.log(`[Playback] Audio-Transcodierung läuft (on-the-fly) für MKV-Datei: ${filePath}`);
-        res.writeHead(200, {
-          'Content-Type': 'video/mp4',
-          'Transfer-Encoding': 'chunked'
-        });
-        const ffmpeg = spawn('ffmpeg', [
-          '-i', filePath,
-          '-vcodec', 'copy',
-          '-acodec', 'aac',
-          '-f', 'mp4',
-          '-movflags', 'frag_keyframe+empty_moov',
-          'pipe:1'
-        ]);
-        ffmpeg.stdout.pipe(res);
-        req.on('close', () => {
-          console.log(`[Playback] Client-Verbindung geschlossen, beende ffmpeg für: ${filePath}`);
-          ffmpeg.kill('SIGKILL');
-        });
-        ffmpeg.on('error', (err) => {
-          console.error(`[Playback] ffmpeg-Fehler für ${filePath}:`, err);
-          if (!res.headersSent) {
-            res.status(500).send('Fehler bei der Audio-Transkodierung');
-          }
-        });
-        return;
-      }
-    }
     const isTs = ext === '.ts' || filePath.includes('/live/');
     if (isTs) {
       console.log(`[Playback] Remuxing TS stream on-the-fly to MP4 for: ${filePath}`);

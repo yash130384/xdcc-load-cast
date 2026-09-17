@@ -1,5 +1,5 @@
-import React from 'react';
-import { PauseIcon, PlayIcon, CancelIcon, TrashIcon, CastIcon, TerminalIcon, ChevronUpIcon, ChevronDownIcon } from './icons.jsx';
+import React, { useState } from 'react';
+import { PauseIcon, PlayIcon, CancelIcon, TrashIcon, TerminalIcon, ChevronUpIcon, ChevronDownIcon } from './icons.jsx';
 import { formatBytes, formatDuration } from './utils.js';
 import SpeedChart from './SpeedChart.jsx';
 
@@ -24,7 +24,22 @@ const statusText = (status) => {
 
 const statusClass = (status) => `download-status-badge status-${status}`;
 
-const DownloadItem = ({ item, downloadLogs, expandedLogs, activeCasts, pendingCasts, onPause, onResume, onCancel, onDelete, onDeleteFile, onConfirmFilename, onPlayLocal, onStartCast, onToggleLogs, onCastControl, onStopCast }) => {
+const DownloadItem = ({
+  item,
+  downloadLogs,
+  expandedLogs,
+  onPause,
+  onResume,
+  onCancel,
+  onDelete,
+  onDeleteFile,
+  onConfirmFilename,
+  onPlayLocal,
+  onCopyUrl,
+  onToggleLogs
+}) => {
+  const [copied, setCopied] = useState(false);
+
   const progressPct = item.expectedSize
     ? Math.min(100, Math.round((item.bytesReceived / item.expectedSize) * 100))
     : 0;
@@ -39,8 +54,18 @@ const DownloadItem = ({ item, downloadLogs, expandedLogs, activeCasts, pendingCa
   const showProgress = ['dcc_negotiating', 'dcc_downloading', 'completed', 'paused', 'extracting'].includes(item.status);
   const logs = downloadLogs[item.id] || [];
   const isExpanded = !!expandedLogs[item.id];
-  const activeCastForFile = activeCasts.find(c => c.downloadId === item.id);
-  const isPending = !!pendingCasts[item.filename];
+
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    if (onCopyUrl) {
+      onCopyUrl(item.filename, item);
+    } else {
+      const streamUrl = `${window.location.protocol}//${window.location.host}/api/media/stream/${encodeURIComponent(item.filename)}`;
+      navigator.clipboard?.writeText(streamUrl);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div key={item.id} className={`download-item ${item.status}`}>
@@ -141,100 +166,6 @@ const DownloadItem = ({ item, downloadLogs, expandedLogs, activeCasts, pendingCa
         </div>
       )}
 
-      {activeCastForFile && (
-        <div style={{
-          background: 'rgba(0, 242, 254, 0.08)',
-          border: '1px solid rgba(0, 242, 254, 0.25)',
-          borderRadius: '10px',
-          padding: '0.75rem 1rem',
-          marginTop: '0.5rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.5rem',
-          color: 'var(--text-primary)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifycontent: 'space-between' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-              📺 Streamt auf {activeCastForFile.device}
-            </span>
-            <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-              {activeCastForFile.playerState || 'Verbinden'}
-            </span>
-          </div>
-
-          {activeCastForFile.duration > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-              <input
-                type="range"
-                min={0}
-                max={activeCastForFile.duration}
-                value={activeCastForFile.currentTime || 0}
-                onChange={(e) => onCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                style={{
-                  width: '100%',
-                  accentColor: 'var(--accent-cyan)',
-                  cursor: 'pointer',
-                  height: '4px'
-                }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-            {activeCastForFile.playerState === 'PAUSED' ? (
-              <button
-                className="btn btn-secondary btn-icon-only"
-                style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                onClick={() => onCastControl(activeCastForFile.device, 'resume')}
-                title="Wiedergabe fortsetzen"
-              >
-                <PlayIcon />
-              </button>
-            ) : (
-              <button
-                className="btn btn-secondary btn-icon-only"
-                style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                onClick={() => onCastControl(activeCastForFile.device, 'pause')}
-                title="Wiedergabe pausieren"
-              >
-                <PauseIcon />
-              </button>
-            )}
-
-            <button
-              className="btn btn-danger"
-              style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-              onClick={() => onStopCast(activeCastForFile.device)}
-            >
-              Stoppen
-            </button>
-          </div>
-        </div>
-      )}
-
-      {isPending && !activeCastForFile && (
-        <div style={{
-          background: 'rgba(0, 242, 254, 0.05)',
-          border: '1px solid rgba(0, 242, 254, 0.2)',
-          borderRadius: '8px',
-          padding: '0.6rem 0.85rem',
-          fontSize: '0.8rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          marginTop: '0.5rem',
-          color: 'var(--text-secondary)'
-        }}>
-          <span style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-            <span className="spinner">⏳</span> Verbindung wird aufgebaut...
-          </span>
-        </div>
-      )}
-
       <div className="log-accordion">
         <div className="log-accordion-header" onClick={() => onToggleLogs(item.id)}>
           <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -295,21 +226,23 @@ const DownloadItem = ({ item, downloadLogs, expandedLogs, activeCasts, pendingCa
               <TrashIcon />
             </button>
             <button
-              className="btn btn-primary btn-icon-only"
-              style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-              title="Lokal abspielen"
-              onClick={() => onPlayLocal(item.id)}
+              className="btn btn-secondary btn-icon-only"
+              title={copied ? "Kopiert!" : "Stream-URL kopieren"}
+              onClick={handleCopy}
+              style={{
+                color: copied ? 'var(--accent-green, #10b981)' : 'var(--text-secondary)',
+                borderColor: copied ? 'var(--accent-green, #10b981)' : 'rgba(255, 255, 255, 0.1)'
+              }}
             >
-              <PlayIcon />
+              {copied ? '✓' : '🔗'}
             </button>
             <button
-              className="btn btn-secondary btn-icon-only"
-              style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-              title="Auf TV streamen (Cast)"
-              disabled={isPending}
-              onClick={() => onStartCast(item)}
+              className="btn btn-primary btn-icon-only"
+              style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+              title="In VLC öffnen"
+              onClick={() => onPlayLocal(item.filename || item.id, item)}
             >
-              {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
+              <PlayIcon />
             </button>
           </>
         )}

@@ -1,7 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { getPosterSrc, getDisplayTitle } from './utils.js';
 import { SettingsIcon } from './icons.jsx';
-import OutputDeviceSelector from './OutputDeviceSelector.jsx';
 
 const PulseCastLogo = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="url(#logoGrad)" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ filter: 'drop-shadow(0 0 5px rgba(6, 182, 212, 0.4))' }}>
@@ -302,16 +301,12 @@ const NetflixBrowse = ({
   showLocalFiles = false,
   toggleLocalFiles,
   onPlay,
+  onDownloadStream,
+  onCopyUrl,
   onSeriesClick,
   onToggleFavorite,
   settings,
-  onOpenAdvanced,
-  selectedOutputDevice = 'local',
-  onSelectOutputDevice,
-  castDevices = [],
-  loadingDevices = false,
-  onRefreshDevices,
-  activeCasts = []
+  onOpenAdvanced
 }) => {
   const [activeTab, setActiveTab] = useState(() => (showLocalFiles ? 'Lokal' : 'Stream'));
   const [activeSubTab, setActiveSubTab] = useState('Filme'); // Filme, Serien
@@ -509,14 +504,6 @@ const NetflixBrowse = ({
           </button>
         </div>
         <div className="nb-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
-          <OutputDeviceSelector
-            selectedDevice={selectedOutputDevice}
-            onSelectDevice={onSelectOutputDevice}
-            castDevices={castDevices}
-            loadingDevices={loadingDevices}
-            onRefreshDevices={onRefreshDevices}
-            activeCasts={activeCasts}
-          />
           {!showLocalFiles && (
             <button
               className="nb-pin-trigger-btn"
@@ -599,7 +586,15 @@ const NetflixBrowse = ({
         </div>
       ) : (
         <>
-          {heroItem && <HeroBanner item={heroItem} onPlay={onPlay} onSeriesClick={onSeriesClick} />}
+          {heroItem && (
+            <HeroBanner 
+              item={heroItem} 
+              onPlay={onPlay} 
+              onSeriesClick={onSeriesClick} 
+              onDownloadStream={onDownloadStream}
+              activeTab={activeTab}
+            />
+          )}
           
           <div className="nb-content">
             {continueWatching.length > 0 && (
@@ -608,8 +603,11 @@ const NetflixBrowse = ({
                 items={continueWatching} 
                 isContinueWatching={true}
                 onPlay={onPlay}
+                onDownloadStream={onDownloadStream}
+                onCopyUrl={onCopyUrl}
                 onSeriesClick={onSeriesClick}
                 onToggleFavorite={onToggleFavorite}
+                activeTab={activeTab}
               />
             )}
 
@@ -620,8 +618,11 @@ const NetflixBrowse = ({
                   title={row.title} 
                   items={row.items} 
                   onPlay={onPlay} 
+                  onDownloadStream={onDownloadStream}
+                  onCopyUrl={onCopyUrl}
                   onSeriesClick={onSeriesClick} 
                   onToggleFavorite={onToggleFavorite} 
+                  activeTab={activeTab}
                 />
               ))
             ) : (
@@ -637,14 +638,19 @@ const NetflixBrowse = ({
   );
 };
 
-const HeroBanner = ({ item, onPlay, onSeriesClick }) => {
+const HeroBanner = ({ item, onPlay, onSeriesClick, onDownloadStream, activeTab }) => {
   const metadata = item.metadata || {};
   const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || item.coverUrl || item.posterUrl || '');
   const title = getDisplayTitle(item);
+  const isStream = activeTab === 'Stream' || item.isXtream;
   
-  const handlePlayClick = () => {
+  const handleActionClick = () => {
     if (item.isGroup) {
       onSeriesClick(item);
+    } else if (isStream) {
+      if (onDownloadStream) {
+        onDownloadStream(item);
+      }
     } else {
       onPlay(item.filename, item);
     }
@@ -673,8 +679,13 @@ const HeroBanner = ({ item, onPlay, onSeriesClick }) => {
           ) : ''}
         </p>
         <div className="nb-hero-buttons">
-          <button className="nb-hero-btn nb-hero-play" onClick={handlePlayClick}>
-            <span className="nb-hero-btn-icon">▶</span> Abspielen
+          <button 
+            className={`nb-hero-btn ${isStream && !item.isGroup ? 'nb-hero-download' : 'nb-hero-play'}`} 
+            onClick={handleActionClick}
+            style={isStream && !item.isGroup ? { background: 'var(--accent-pink, #ec4899)', color: '#fff', boxShadow: '0 4px 15px rgba(236, 72, 153, 0.4)' } : undefined}
+          >
+            <span className="nb-hero-btn-icon">{item.isGroup ? '📺' : isStream ? '📥' : '▶'}</span>{' '}
+            {item.isGroup ? 'Episoden ansehen' : isStream ? 'In Download-Warteschlange' : 'In VLC abspielen'}
           </button>
         </div>
       </div>
@@ -682,7 +693,7 @@ const HeroBanner = ({ item, onPlay, onSeriesClick }) => {
   );
 };
 
-const MediaRow = ({ title, items, isContinueWatching = false, onPlay, onSeriesClick, onToggleFavorite }) => {
+const MediaRow = ({ title, items, isContinueWatching = false, onPlay, onDownloadStream, onCopyUrl, onSeriesClick, onToggleFavorite, activeTab }) => {
   const rowRef = useRef(null);
 
   const scrollLeft = () => {
@@ -714,9 +725,12 @@ const MediaRow = ({ title, items, isContinueWatching = false, onPlay, onSeriesCl
               key={item.filename || index} 
               item={item} 
               isContinueWatching={isContinueWatching}
-              onPlay={onPlay}
-              onSeriesClick={onSeriesClick}
-              onToggleFavorite={onToggleFavorite}
+              onPlay={onPlay} 
+              onDownloadStream={onDownloadStream}
+              onCopyUrl={onCopyUrl}
+              onSeriesClick={onSeriesClick} 
+              onToggleFavorite={onToggleFavorite} 
+              activeTab={activeTab}
             />
           ))}
         </div>
@@ -729,9 +743,12 @@ const MediaRow = ({ title, items, isContinueWatching = false, onPlay, onSeriesCl
   );
 };
 
-const MediaCard = ({ item, isContinueWatching, onPlay, onSeriesClick, onToggleFavorite }) => {
+const MediaCard = ({ item, isContinueWatching, onPlay, onDownloadStream, onCopyUrl, onSeriesClick, onToggleFavorite, activeTab }) => {
+  const [copied, setCopied] = useState(false);
   const metadata = item.metadata || {};
   const displayTitle = getDisplayTitle(item, isContinueWatching);
+  const isStream = activeTab === 'Stream' || item.isXtream;
+  const isLocal = activeTab === 'Lokal' || (!item.isXtream && !item.isLive);
 
   const posterUrl = getPosterSrc(metadata.posterUrl || metadata.backdrop || metadata.coverUrl || item.posterUrl || item.coverUrl || '');
   const progressPercentage = item.progress?.percentage || 0;
@@ -739,6 +756,10 @@ const MediaCard = ({ item, isContinueWatching, onPlay, onSeriesClick, onToggleFa
   const handleClick = () => {
     if (item.isGroup) {
       onSeriesClick(item);
+    } else if (isStream) {
+      if (onDownloadStream) {
+        onDownloadStream(item);
+      }
     } else {
       onPlay(item.filename, item);
     }
@@ -751,22 +772,37 @@ const MediaCard = ({ item, isContinueWatching, onPlay, onSeriesClick, onToggleFa
     }
   };
 
+  const handleCopyClick = (e) => {
+    e.stopPropagation();
+    if (onCopyUrl) {
+      onCopyUrl(item.filename, item);
+    } else {
+      const url = `${window.location.protocol}//${window.location.host}/api/media/stream/${encodeURIComponent(item.filename)}`;
+      navigator.clipboard?.writeText(url);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div 
       className={`nb-card ${isContinueWatching ? 'nb-card-wide' : 'nb-card-tall'}`}
       onClick={handleClick}
+      title={item.isGroup ? 'Serie öffnen' : isStream ? 'Zu Downloads hinzufügen' : 'In VLC öffnen'}
     >
       <div className="nb-card-image-wrapper">
         {posterUrl ? (
           <img src={posterUrl} alt={displayTitle} className="nb-card-image" loading="lazy" />
         ) : (
           <div className="nb-card-fallback">
-            <span className="nb-card-emoji">{item.isGroup ? '📺' : '🎬'}</span>
+            <span className="nb-card-emoji">{item.isGroup ? '📺' : isStream ? '📥' : '🎬'}</span>
           </div>
         )}
         
         <div className="nb-card-overlay">
-          <div className="nb-card-play-icon">▶</div>
+          <div className="nb-card-play-icon">
+            {item.isGroup ? '📺' : isStream ? '📥' : '▶'}
+          </div>
         </div>
 
         {onToggleFavorite && !isContinueWatching && (
@@ -776,6 +812,33 @@ const MediaCard = ({ item, isContinueWatching, onPlay, onSeriesClick, onToggleFa
             title={item.favorite ? "Aus Favoriten entfernen" : "Zu Favoriten hinzufügen"}
           >
             {item.favorite ? '♥' : '♡'}
+          </button>
+        )}
+
+        {isLocal && !item.isGroup && (
+          <button 
+            className="nb-card-copy-btn"
+            onClick={handleCopyClick}
+            title={copied ? "Stream-URL kopiert!" : "Stream-URL kopieren"}
+            style={{
+              position: 'absolute',
+              bottom: '10px',
+              right: '10px',
+              zIndex: 5,
+              background: 'rgba(0,0,0,0.7)',
+              border: '1px solid rgba(255,255,255,0.2)',
+              borderRadius: '50%',
+              width: '28px',
+              height: '28px',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+              color: copied ? 'var(--accent-green, #10b981)' : '#fff',
+              fontSize: '0.8rem'
+            }}
+          >
+            {copied ? '✓' : '📋'}
           </button>
         )}
 

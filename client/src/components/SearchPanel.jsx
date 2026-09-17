@@ -3,7 +3,7 @@ import { SearchIcon, DownloadIcon } from './icons.jsx';
 import { formatBytes } from './utils.js';
 
 const SearchPanel = ({ query, results, loading, error, searchSource, searchHistory, topDlResults, topDlLoading, topDlError,
-  onQueryChange, onSearch, onSearchSourceChange, onDownload, onPlayLocal, onStartCast,
+  onQueryChange, onSearch, onSearchSourceChange, onDownload, onPlayLocal,
   fetchTopDl, highlightMatch, onClearHistory }) => {
   return (
     <div className="card">

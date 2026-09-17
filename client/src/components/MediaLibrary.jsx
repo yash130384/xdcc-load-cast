@@ -4,15 +4,15 @@ import MusicItem from './MusicItem.jsx';
 import SeasonDownloadModal from './SeasonDownloadModal.jsx';
 import NetflixHero from './NetflixHero.jsx';
 import ContinueWatchingRow from './ContinueWatchingRow.jsx';
-import { SearchIcon, CloseIcon, HeartIcon, CastIcon, PlayIcon, PauseIcon, DownloadIcon, TrashIcon, CalendarIcon } from './icons.jsx';
+import { SearchIcon, CloseIcon, HeartIcon, PlayIcon, DownloadIcon, TrashIcon, CalendarIcon } from './icons.jsx';
 import { getPosterSrc, formatDuration, formatBytes } from './utils.js';
 
 const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loadingLibrary, totalPages, totalItems, currentPage,
   counts, serverSubcategories, activeSeries, activeSeriesItem, librarySearchQuery, debouncedSearchQuery,
-  favoritesFilter, activeCasts, pendingCasts, wsConnected, xtreamEpisodes, loadingXtreamEpisodes,
+  favoritesFilter, wsConnected, xtreamEpisodes, loadingXtreamEpisodes,
   continueWatchingItems, onToggleWatched,
   onSelectCategory, onSelectSubcategory, onSearchChange, onPageChange, onToggleFavorite,
-  onDelete, onDeleteFile, onPlay, onCast, onCastControl, onStopCast, onScroll, onSeriesClick, onCheckNow,
+  onDelete, onDeleteFile, onPlay, onPlaySeason, onCopyUrl, onScroll, onSeriesClick, onCheckNow,
   onToggleAutoDownload, onRefresh, onClearFilters, onXtreamDownload, onXtreamBatchDownload, autoDownloads, checkingShowId, renderFavoritesOverview,
   settings }) => {
 
@@ -284,7 +284,7 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                                 </span>
                               </div>
 
-                              {activeSeries.isXtream && (
+                              {activeSeries.isXtream ? (
                                 <button
                                   className="btn btn-secondary"
                                   style={{
@@ -305,50 +305,75 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                                   <DownloadIcon />
                                   <span>Staffel herunterladen</span>
                                 </button>
-                              )}
+                              ) : onPlaySeason ? (
+                                <button
+                                  className="btn btn-secondary"
+                                  style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '0.4rem',
+                                    padding: '0.35rem 0.85rem',
+                                    fontSize: '0.8rem',
+                                    color: 'var(--accent-cyan)',
+                                    borderColor: 'rgba(0, 242, 254, 0.35)',
+                                    background: 'rgba(0, 242, 254, 0.08)',
+                                    borderRadius: '20px',
+                                    cursor: 'pointer'
+                                  }}
+                                  title={`Alle Folgen von Staffel ${seasonNum} in VLC abspielen`}
+                                  onClick={() => onPlaySeason(activeSeries.title, seasonNum, seasonEpisodes)}
+                                >
+                                  <PlayIcon />
+                                  <span>Ganze Staffel in VLC abspielen</span>
+                                </button>
+                              ) : null}
                             </div>
 
                             <div className="episodes-list" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-                              {seasonEpisodes.map((item, idx) => {
-                                const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
-                                const isPending = !!pendingCasts[item.filename];
-
-                                return (
-                                  <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
-                                    <div className="music-item" style={{ background: 'rgba(255, 255, 255, 0.015)' }}>
-                                      <div className="music-info">
-                                        <div className="music-icon" style={{ background: 'rgba(255, 0, 127, 0.08)', color: 'var(--accent-pink)' }}>
-                                          {item.metadata?.seasonEpisode ? '🎬' : '📹'}
+                              {seasonEpisodes.map((item, idx) => (
+                                <div key={idx} style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                                  <div className="music-item" style={{ background: 'rgba(255, 255, 255, 0.015)' }}>
+                                    <div className="music-info">
+                                      <div className="music-icon" style={{ background: 'rgba(255, 0, 127, 0.08)', color: 'var(--accent-pink)' }}>
+                                        {item.metadata?.seasonEpisode ? '🎬' : '📹'}
+                                      </div>
+                                      <div className="music-details">
+                                        <div className="music-title" title={item.filename} style={{ fontWeight: '500' }}>
+                                          {item.metadata?.seasonEpisode ? <strong style={{ color: 'var(--accent-pink)', marginRight: '0.4rem' }}>{item.metadata.seasonEpisode}</strong> : null}
+                                          {item.isXtream ? (item.metadata?.title || item.filename) : item.filename}
                                         </div>
-                                        <div className="music-details">
-                                          <div className="music-title" title={item.filename} style={{ fontWeight: '500' }}>
-                                            {item.metadata?.seasonEpisode ? <strong style={{ color: 'var(--accent-pink)', marginRight: '0.4rem' }}>{item.metadata.seasonEpisode}</strong> : null}
-                                            {item.isXtream ? (item.metadata?.title || item.filename) : item.filename}
-                                          </div>
-                                          <div className="music-meta">
-                                            {item.sizeBytes > 0 && (
-                                              <>
-                                                <span className="music-size">{formatBytes(item.sizeBytes)}</span>
-                                                <span>•</span>
-                                              </>
-                                            )}
-                                            <span>{item.isXtream ? 'Xtream Codes Stream' : new Date(item.mtime).toLocaleDateString()}</span>
-                                          </div>
+                                        <div className="music-meta">
+                                          {item.sizeBytes > 0 && (
+                                            <>
+                                              <span className="music-size">{formatBytes(item.sizeBytes)}</span>
+                                              <span>•</span>
+                                            </>
+                                          )}
+                                          <span>{item.isXtream ? 'Xtream Codes Stream' : new Date(item.mtime).toLocaleDateString()}</span>
                                         </div>
                                       </div>
+                                    </div>
 
-                                      <div className="music-actions">
-                                        {item.isXtream && (
+                                    <div className="music-actions">
+                                      {item.isXtream && (
+                                        <button
+                                          className="btn btn-secondary btn-icon-only"
+                                          style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
+                                          title="Folge herunterladen"
+                                          onClick={() => onXtreamDownload(item, activeSeries)}
+                                        >
+                                          <DownloadIcon />
+                                        </button>
+                                      )}
+                                      {!item.isXtream && (
+                                        <>
                                           <button
                                             className="btn btn-secondary btn-icon-only"
-                                            style={{ color: 'var(--accent-orange)', borderColor: 'rgba(255, 153, 0, 0.2)' }}
-                                            title="Folge herunterladen"
-                                            onClick={() => onXtreamDownload(item, activeSeries)}
+                                            title="Stream-URL kopieren"
+                                            onClick={() => onCopyUrl && onCopyUrl(item.filename, item)}
                                           >
-                                            <DownloadIcon />
+                                            🔗
                                           </button>
-                                        )}
-                                        {!item.isXtream && (
                                           <button
                                             className="btn btn-danger btn-icon-only"
                                             title="Datei von Festplatte löschen"
@@ -356,116 +381,26 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                                           >
                                             <TrashIcon />
                                           </button>
-                                        )}
-                                        <button
-                                          className="btn btn-primary btn-icon-only"
-                                          style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-                                          title="Lokal abspielen"
-                                          onClick={() => onPlay(item.filename, item)}
-                                        >
-                                          <PlayIcon />
-                                        </button>
-                                        <button
-                                          className="btn btn-secondary btn-icon-only"
-                                          style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-                                          title="Auf TV streamen (Cast)"
-                                          disabled={isPending}
-                                          onClick={() => onCast(item)}
-                                        >
-                                          {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-                                        </button>
-                                      </div>
+                                        </>
+                                      )}
+                                      <button
+                                        className="btn btn-primary btn-icon-only"
+                                        style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                                        title={item.isXtream ? "Folge herunterladen" : "In VLC öffnen"}
+                                        onClick={() => {
+                                          if (item.isXtream) {
+                                            onXtreamDownload(item, activeSeries);
+                                          } else {
+                                            onPlay(item.filename, item);
+                                          }
+                                        }}
+                                      >
+                                        {item.isXtream ? <DownloadIcon /> : <PlayIcon />}
+                                      </button>
                                     </div>
-
-                                    {activeCastForFile && (
-                                      <div style={{
-                                        background: 'rgba(0, 242, 254, 0.08)',
-                                        border: '1px solid rgba(0, 242, 254, 0.25)',
-                                        borderRadius: '10px',
-                                        padding: '0.75rem 1rem',
-                                        display: 'flex',
-                                        flexDirection: 'column',
-                                        gap: '0.5rem',
-                                        color: 'var(--text-primary)'
-                                      }}>
-                                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-                                          <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-                                            📺 Streamt auf {activeCastForFile.device}
-                                          </span>
-                                          <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-                                            {activeCastForFile.playerState || 'Verbinden'}
-                                          </span>
-                                        </div>
-
-                                        {activeCastForFile.duration > 0 && (
-                                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-                                            <input
-                                              type="range"
-                                              min={0}
-                                              max={activeCastForFile.duration}
-                                              value={activeCastForFile.currentTime || 0}
-                                              onChange={(e) => onCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                                              style={{
-                                                width: '100%',
-                                                accentColor: 'var(--accent-cyan)',
-                                                cursor: 'pointer',
-                                                height: '4px'
-                                              }}
-                                            />
-                                            <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                                              <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                                              <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-                                            </div>
-                                          </div>
-                                        )}
-
-                                        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-                                          {activeCastForFile.playerState === 'PAUSED' ? (
-                                            <button
-                                              className="btn btn-secondary btn-icon-only"
-                                              style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                              onClick={() => onCastControl(activeCastForFile.device, 'resume')}
-                                            >
-                                              <PlayIcon />
-                                            </button>
-                                          ) : (
-                                            <button
-                                              className="btn btn-secondary btn-icon-only"
-                                              style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                              onClick={() => onCastControl(activeCastForFile.device, 'pause')}
-                                            >
-                                              <PauseIcon />
-                                            </button>
-                                          )}
-                                          <button
-                                            className="btn btn-danger btn-icon-only"
-                                            style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                                            onClick={() => onStopCast(activeCastForFile.device)}
-                                          >
-                                            🛑
-                                          </button>
-                                        </div>
-                                      </div>
-                                    )}
-
-                                    {isPending && !activeCastForFile && (
-                                      <div style={{
-                                        background: 'rgba(0, 242, 254, 0.05)',
-                                        border: '1px solid rgba(0, 242, 254, 0.2)',
-                                        borderRadius: '8px',
-                                        padding: '0.5rem 0.75rem',
-                                        fontSize: '0.8rem',
-                                        display: 'flex',
-                                        alignItems: 'center',
-                                        justifyContent: 'space-between',
-                                        color: 'var(--text-secondary)'
-                                      }}>
-                                        <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
-                                      </div>
-                                    )}
                                   </div>
-                                );
-                              })}
+                                </div>
+                              ))}
                             </div>
                           </div>
                         ))}
@@ -674,14 +609,10 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                   key={idx}
                   item={item}
                   idx={idx}
-                  activeCasts={activeCasts}
-                  pendingCasts={pendingCasts}
                   onToggleFavorite={onToggleFavorite}
                   onDelete={onDelete}
                   onPlay={onPlay}
-                  onCast={onCast}
-                  onCastControl={onCastControl}
-                  onStopCast={onStopCast}
+                  onCopyUrl={onCopyUrl}
                 />
               ))}
               {loadingLibrary && currentPage > 1 && (
@@ -706,14 +637,10 @@ const MediaLibrary = ({ mediaLibrary, selectedCategory, selectedSubcategory, loa
                   key={idx}
                   item={item}
                   idx={idx}
-                  activeCasts={activeCasts}
-                  pendingCasts={pendingCasts}
                   onToggleFavorite={onToggleFavorite}
                   onDelete={onDelete}
                   onPlay={onPlay}
-                  onCast={onCast}
-                  onCastControl={onCastControl}
-                  onStopCast={onStopCast}
+                  onCopyUrl={onCopyUrl}
                   onXtreamDownload={onXtreamDownload}
                   onSeriesClick={onSeriesClick}
                 />

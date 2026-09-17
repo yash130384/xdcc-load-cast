@@ -5,6 +5,10 @@ const SeriesDetailView = ({
   series,
   onClose,
   onPlay,
+  onDownloadStream,
+  onBatchDownload,
+  onPlaySeasonVlc,
+  onCopyUrl,
   onCheckNow,
   autoDownloads,
   checkingShowId,
@@ -15,6 +19,7 @@ const SeriesDetailView = ({
   const [selectedSeason, setSelectedSeason] = useState(1);
   const [episodesList, setEpisodesList] = useState([]);
   const [loading, setLoading] = useState(false);
+  const [copiedEp, setCopiedEp] = useState(null);
 
   const metadata = series.metadata || {};
   const backgroundUrl = getPosterSrc(metadata.backdrop || metadata.posterUrl || metadata.coverUrl || series.coverUrl || series.posterUrl || '');
@@ -90,6 +95,47 @@ const SeriesDetailView = ({
   const isAutoDlActive = autoDownloads && autoDownloads[series.imdbId]?.enabled;
   const isLoading = loading || loadingXtreamEpisodes;
 
+  const handleEpisodeClick = (ep) => {
+    if (series.isXtream) {
+      if (onDownloadStream) {
+        onDownloadStream(ep, series);
+      }
+    } else {
+      if (onPlay) {
+        onPlay(ep.filename, ep);
+      }
+    }
+  };
+
+  const handleCopy = (e, ep) => {
+    e.stopPropagation();
+    if (onCopyUrl) {
+      onCopyUrl(ep.filename, ep);
+    } else {
+      const url = `${window.location.protocol}//${window.location.host}/api/media/stream/${encodeURIComponent(ep.filename)}`;
+      navigator.clipboard?.writeText(url);
+    }
+    setCopiedEp(ep.filename);
+    setTimeout(() => setCopiedEp(null), 2000);
+  };
+
+  const handleSeasonPlay = () => {
+    if (onPlaySeasonVlc) {
+      onPlaySeasonVlc(series.title || metadata.title || title, selectedSeason, episodes);
+    } else {
+      const seriesQuery = encodeURIComponent(series.imdbId || series.title || metadata.title || title);
+      window.location.href = `/api/media/season.m3u?series=${seriesQuery}&season=${selectedSeason}`;
+    }
+  };
+
+  const handleBatchDownloadSeason = () => {
+    if (onBatchDownload) {
+      onBatchDownload(selectedSeason, episodes, series);
+    } else if (onDownloadStream) {
+      episodes.forEach(ep => onDownloadStream(ep, series));
+    }
+  };
+
   return (
     <div className="sdv-container">
       {/* Background Banner */}
@@ -115,14 +161,16 @@ const SeriesDetailView = ({
               {metadata.year && <span>{metadata.year}</span>}
               {metadata.genre && <span>{metadata.genre}</span>}
               {sortedSeasons.length > 0 && <span>{sortedSeasons.length} {sortedSeasons.length === 1 ? 'Staffel' : 'Staffeln'}</span>}
-              <span className="sdv-badge">{series.isXtream ? 'STREAM' : 'LOKAL'}</span>
+              <span className="sdv-badge" style={{ background: series.isXtream ? 'var(--accent-pink, #ec4899)' : 'var(--accent-cyan, #06b6d4)', color: '#fff' }}>
+                {series.isXtream ? 'STREAM VOD' : 'LOKALE MEDIATHEK'}
+              </span>
             </div>
             <p className="sdv-description">
               {metadata.description || 'Keine Beschreibung verfügbar.'}
             </p>
             
             {/* Download / Auto-DL Status */}
-            <div className="sdv-actions">
+            <div className="sdv-actions" style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'center' }}>
               {isAutoDlActive ? (
                 <div className="sdv-auto-dl active">
                   <span className="sdv-indicator"></span>
@@ -153,19 +201,48 @@ const SeriesDetailView = ({
           </div>
         ) : (
           <div className="sdv-episodes-section">
-            {/* Season Selector */}
-            {sortedSeasons.length > 1 && (
-              <div className="sdv-season-selector">
-                <select 
-                  value={selectedSeason} 
-                  onChange={(e) => setSelectedSeason(Number(e.target.value))}
-                >
-                  {sortedSeasons.map(s => (
-                    <option key={s} value={s}>Staffel {s}</option>
-                  ))}
-                </select>
+            {/* Season Selector & Actions */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem', marginBottom: '1.25rem' }}>
+              {sortedSeasons.length > 1 ? (
+                <div className="sdv-season-selector">
+                  <select 
+                    value={selectedSeason} 
+                    onChange={(e) => setSelectedSeason(Number(e.target.value))}
+                  >
+                    {sortedSeasons.map(s => (
+                      <option key={s} value={s}>Staffel {s} ({seasonMap.get(s)?.length || 0} Folgen)</option>
+                    ))}
+                  </select>
+                </div>
+              ) : (
+                <h3 style={{ margin: 0, color: 'var(--text-primary)' }}>
+                  Staffel {selectedSeason} ({episodes.length} Folgen)
+                </h3>
+              )}
+
+              {/* Season Header Actions */}
+              <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                {series.isXtream ? (
+                  <button
+                    className="btn btn-primary"
+                    style={{ background: 'var(--grad-pink-purple, #ec4899)', border: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.5rem 1rem', fontSize: '0.85rem' }}
+                    onClick={handleBatchDownloadSeason}
+                    title="Alle Folgen dieser Staffel herunterladen"
+                  >
+                    <span>📥 Ganze Staffel herunterladen</span>
+                  </button>
+                ) : (
+                  <button
+                    className="btn btn-primary"
+                    style={{ background: 'var(--grad-cyan-blue)', border: 'none', display: 'flex', alignItems: 'center', gap: '0.4rem', padding: '0.5rem 1rem', fontSize: '0.85rem', fontWeight: '600' }}
+                    onClick={handleSeasonPlay}
+                    title="Ganze Staffel als Playlist in VLC öffnen (.m3u)"
+                  >
+                    <span>🎬 Ganze Staffel in VLC abspielen (.m3u)</span>
+                  </button>
+                )}
               </div>
-            )}
+            </div>
             
             {/* Episode List */}
             <div className="sdv-episodes-list">
@@ -173,24 +250,66 @@ const SeriesDetailView = ({
                 const epInfo = parseEpisodeInfo(ep);
                 const epTitle = ep.metadata?.title || ep.title ? (ep.metadata?.title || ep.title) : formatMediaTitle(ep.filename);
                 const pct = ep.progress?.percentage || 0;
+                const isCopied = copiedEp === ep.filename;
                 
                 return (
-                  <div key={idx} className="sdv-episode-item" onClick={() => onPlay(ep.filename, ep)}>
+                  <div key={idx} className="sdv-episode-item" onClick={() => handleEpisodeClick(ep)} style={{ cursor: 'pointer' }}>
                     <div className="sdv-ep-number">{epInfo.episode}</div>
                     <div className="sdv-ep-thumb">
                       <img src={getPosterSrc(ep.metadata?.backdrop || ep.metadata?.posterUrl || metadata.backdrop || posterUrl)} alt={epTitle} />
-                      <div className="sdv-ep-play">▶</div>
+                      <div className="sdv-ep-play">
+                        {series.isXtream ? '📥' : '▶'}
+                      </div>
                       {pct > 0 && pct < 100 && (
                         <div className="sdv-ep-progress"><div className="sdv-ep-progress-fill" style={{ width: `${pct}%` }}></div></div>
                       )}
                     </div>
                     <div className="sdv-ep-details">
-                      <h4 className="sdv-ep-title">{epTitle}</h4>
+                      <h4 className="sdv-ep-title">
+                        <span style={{ color: series.isXtream ? 'var(--accent-pink)' : 'var(--accent-cyan)', marginRight: '0.4rem' }}>
+                          S{String(selectedSeason).padStart(2, '0')}E{String(epInfo.episode).padStart(2, '0')}
+                        </span>
+                        {epTitle}
+                      </h4>
                       <p className="sdv-ep-desc">{ep.metadata?.description || ''}</p>
                     </div>
-                    <div className="sdv-ep-meta">
+                    <div className="sdv-ep-meta" style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
                       {ep.metadata?.duration && <span className="sdv-ep-duration">{Math.floor(ep.metadata.duration/60)} Min.</span>}
-                      {ep.size && <span className="sdv-ep-size">{formatBytes(ep.size)}</span>}
+                      {ep.sizeBytes > 0 && <span className="sdv-ep-size">{formatBytes(ep.sizeBytes)}</span>}
+
+                      {/* Episode Action Buttons */}
+                      {series.isXtream ? (
+                        <button
+                          className="btn btn-secondary btn-icon-only"
+                          style={{ color: 'var(--accent-pink)', borderColor: 'rgba(255, 0, 127, 0.3)' }}
+                          title="Folge herunterladen"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleEpisodeClick(ep);
+                          }}
+                        >
+                          📥
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', gap: '0.35rem' }} onClick={(e) => e.stopPropagation()}>
+                          <button
+                            className="btn btn-secondary btn-icon-only"
+                            style={{ color: isCopied ? 'var(--accent-green, #10b981)' : 'var(--text-secondary)' }}
+                            title={isCopied ? "URL kopiert!" : "Stream-URL kopieren"}
+                            onClick={(e) => handleCopy(e, ep)}
+                          >
+                            {isCopied ? '✓' : '📋'}
+                          </button>
+                          <button
+                            className="btn btn-primary btn-icon-only"
+                            style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
+                            title="In VLC abspielen (.m3u & vlc://)"
+                            onClick={() => onPlay(ep.filename, ep)}
+                          >
+                            ▶
+                          </button>
+                        </div>
+                      )}
                     </div>
                   </div>
                 );

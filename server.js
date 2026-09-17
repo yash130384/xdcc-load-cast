@@ -7,7 +7,6 @@ import fs from 'fs';
 import { appState, setWss, setApp } from './state.js';
 import { interceptConsole } from './services/logger.js';
 import { getDefaultConfig, loadConfig } from './services/config.js';
-import { startAllDiscovery } from './services/discovery.js';
 import { loadXtreamCache, recreateXtreamSyncInterval } from './services/xtream-client.js';
 import { loadRecordings, checkVcrRecordings } from './services/vcr.js';
 import { updateLocalMappedList, loadFavorites, loadPlayProgress, loadMetadataCache } from './services/media-library.js';
@@ -49,9 +48,6 @@ if (fs.existsSync(distPath)) {
   app.use(express.static(distPath));
 }
 
-// Start device discovery
-startAllDiscovery(appState);
-
 // Load persisted caches
 loadXtreamCache();
 loadRecordings();
@@ -91,7 +87,6 @@ server.on('upgrade', (request, socket, head) => {
 wss.on('connection', (ws) => {
   console.log('WS Frontend Client connected.');
   ws.send(JSON.stringify({ type: 'init', data: Array.from(appState.downloadQueue.keys()).map(id => getDownloadDetails(id)) }));
-  ws.send(JSON.stringify({ type: 'activeCasts', data: Array.from(appState.activeCasts.entries()).map(([device, info]) => ({ device, ...info })) }));
   ws.send(JSON.stringify({ type: 'auto-downloads', data: appState.autoDownloads }));
   ws.send(JSON.stringify({ type: 'vcr-status', data: appState.recordings.map(r => ({ ...r, bytesReceived: appState.activeVcrJobs.get(r.id)?.bytesReceived || r.bytesReceived || 0, speed: appState.activeVcrJobs.get(r.id)?.speed || 0 })) }));
   ws.on('close', () => console.log('WS Client disconnected.'));

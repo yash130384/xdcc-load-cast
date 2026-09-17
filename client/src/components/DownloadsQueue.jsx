@@ -1,9 +1,24 @@
 import React from 'react';
 import DownloadItem from './DownloadItem.jsx';
 
-const DownloadsQueue = ({ downloads, downloadLogs, expandedLogs, activeCasts, pendingCasts, autoDownloads, checkingShowId,
-  onPause, onResume, onCancel, onDelete, onDeleteFile, onConfirmFilename,
-  onPlayLocal, onStartCast, onToggleLogs, onToggleAutoDownload, onCheckNow }) => {
+const DownloadsQueue = ({
+  downloads,
+  downloadLogs,
+  expandedLogs,
+  autoDownloads,
+  checkingShowId,
+  onPause,
+  onResume,
+  onCancel,
+  onDelete,
+  onDeleteFile,
+  onConfirmFilename,
+  onPlayLocal,
+  onCopyUrl,
+  onToggleLogs,
+  onToggleAutoDownload,
+  onCheckNow
+}) => {
   return (
     <>
       <div style={{ marginBottom: '0.75rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -23,8 +38,6 @@ const DownloadsQueue = ({ downloads, downloadLogs, expandedLogs, activeCasts, pe
               item={item}
               downloadLogs={downloadLogs}
               expandedLogs={expandedLogs}
-              activeCasts={activeCasts}
-              pendingCasts={pendingCasts}
               onPause={onPause}
               onResume={onResume}
               onCancel={onCancel}
@@ -32,7 +45,7 @@ const DownloadsQueue = ({ downloads, downloadLogs, expandedLogs, activeCasts, pe
               onDeleteFile={onDeleteFile}
               onConfirmFilename={onConfirmFilename}
               onPlayLocal={onPlayLocal}
-              onStartCast={onStartCast}
+              onCopyUrl={onCopyUrl}
               onToggleLogs={onToggleLogs}
             />
           ))}
@@ -56,8 +69,6 @@ const DownloadsQueue = ({ downloads, downloadLogs, expandedLogs, activeCasts, pe
               item={item}
               downloadLogs={downloadLogs}
               expandedLogs={expandedLogs}
-              activeCasts={activeCasts}
-              pendingCasts={pendingCasts}
               onPause={onPause}
               onResume={onResume}
               onCancel={onCancel}
@@ -65,7 +76,7 @@ const DownloadsQueue = ({ downloads, downloadLogs, expandedLogs, activeCasts, pe
               onDeleteFile={onDeleteFile}
               onConfirmFilename={onConfirmFilename}
               onPlayLocal={onPlayLocal}
-              onStartCast={onStartCast}
+              onCopyUrl={onCopyUrl}
               onToggleLogs={onToggleLogs}
             />
           ))}

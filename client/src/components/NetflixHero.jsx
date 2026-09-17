@@ -45,7 +45,7 @@ const NetflixHero = ({ item, onPlay, onSeriesClick, onToggleFavorite, onDownload
             {item.isGroup ? 'Serie' : category}
           </span>
           {year && <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: '0.85rem' }}>{year}</span>}
-          {item.isXtream && <span style={{ color: 'var(--accent-cyan, #06b6d4)', fontSize: '0.85rem', fontWeight: '500' }}>• IPTV Stream</span>}
+          {item.isXtream && <span style={{ color: 'var(--accent-pink, #ec4899)', fontSize: '0.85rem', fontWeight: '500' }}>• Stream VOD</span>}
         </div>
 
         <h1 style={{
@@ -74,37 +74,76 @@ const NetflixHero = ({ item, onPlay, onSeriesClick, onToggleFavorite, onDownload
         )}
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.5rem', flexWrap: 'wrap' }}>
-          <button
-            onClick={() => {
-              if (item.isGroup && onSeriesClick) {
-                onSeriesClick(item.xtreamSeriesId || item.filename);
-              } else {
-                onPlay(item.filename, item);
-              }
-            }}
-            className="btn"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '0.5rem',
-              backgroundColor: '#fff',
-              color: '#000',
-              fontWeight: '700',
-              fontSize: '1rem',
-              padding: '0.65rem 1.5rem',
-              borderRadius: '8px',
-              border: 'none',
-              cursor: 'pointer',
-              boxShadow: '0 4px 15px rgba(255,255,255,0.3)'
-            }}
-          >
-            <PlayIcon />
-            <span>{item.isGroup ? 'Episoden ansehen' : 'Abspielen'}</span>
-          </button>
+          {item.isGroup ? (
+            <button
+              onClick={() => onSeriesClick && onSeriesClick(item.xtreamSeriesId || item.filename || item)}
+              className="btn"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: '#fff',
+                color: '#000',
+                fontWeight: '700',
+                fontSize: '1rem',
+                padding: '0.65rem 1.5rem',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 15px rgba(255,255,255,0.3)'
+              }}
+            >
+              <span>📺 Episoden ansehen</span>
+            </button>
+          ) : item.isXtream ? (
+            <button
+              onClick={() => onDownload && onDownload(item)}
+              className="btn"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: 'var(--accent-pink, #ec4899)',
+                color: '#fff',
+                fontWeight: '700',
+                fontSize: '1rem',
+                padding: '0.65rem 1.5rem',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 15px rgba(236, 72, 153, 0.4)'
+              }}
+            >
+              <DownloadIcon />
+              <span>In Download-Warteschlange</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => onPlay && onPlay(item.filename, item)}
+              className="btn"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '0.5rem',
+                backgroundColor: '#fff',
+                color: '#000',
+                fontWeight: '700',
+                fontSize: '1rem',
+                padding: '0.65rem 1.5rem',
+                borderRadius: '8px',
+                border: 'none',
+                cursor: 'pointer',
+                boxShadow: '0 4px 15px rgba(255,255,255,0.3)'
+              }}
+            >
+              <PlayIcon />
+              <span>In VLC abspielen</span>
+            </button>
+          )}
 
           {item.isGroup && onSeriesClick && (
             <button
-              onClick={() => onSeriesClick(item.xtreamSeriesId || item.filename)}
+              onClick={() => onSeriesClick(item.xtreamSeriesId || item.filename || item)}
               className="btn btn-secondary"
               style={{
                 display: 'flex',
@@ -120,27 +159,6 @@ const NetflixHero = ({ item, onPlay, onSeriesClick, onToggleFavorite, onDownload
               }}
             >
               <span>ℹ Weitere Infos</span>
-            </button>
-          )}
-
-          {item.isXtream && onDownload && !item.isGroup && (
-            <button
-              onClick={() => onDownload(item)}
-              className="btn btn-secondary"
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '0.4rem',
-                backgroundColor: 'rgba(255,255,255,0.15)',
-                color: '#fff',
-                padding: '0.65rem 1rem',
-                borderRadius: '8px',
-                border: 'none'
-              }}
-              title="Auf Server herunterladen"
-            >
-              <DownloadIcon />
-              <span>Offline laden</span>
             </button>
           )}
 

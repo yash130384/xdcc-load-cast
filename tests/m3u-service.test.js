@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach } from 'vitest';
-import { generateM3uPlaylist, generateXmltvEpg } from '../services/m3u-service.js';
+import { generateM3uPlaylist, generateSingleItemM3u, generateSeasonM3u, generateXmltvEpg } from '../services/m3u-service.js';
 import { appState } from '../state.js';
 
 describe('m3u-service', () => {
@@ -69,6 +69,40 @@ describe('m3u-service', () => {
     // VOD IPTV
     expect(m3u).toContain('group-title="Filme - DE | Sci-Fi"');
     expect(m3u).toContain('Dune: Part Two');
+  });
+
+  it('generates valid single-item M3U with stream URL', () => {
+    const baseUrl = 'http://192.168.1.100:3000';
+    const item = appState.cachedMappedList[0];
+    const m3u = generateSingleItemM3u(item, baseUrl);
+
+    expect(m3u).toContain('#EXTM3U');
+    expect(m3u).toContain('tvg-name="Inception"');
+    expect(m3u).toContain('group-title="Filme"');
+    expect(m3u).toContain('http://192.168.1.100:3000/api/media/stream/Inception.2010.1080p.mp4');
+  });
+
+  it('generates valid season M3U with multiple episode entries', () => {
+    const baseUrl = 'http://192.168.1.100:3000';
+    const episodes = [
+      {
+        filename: 'Dark S01E01.mkv',
+        metadata: { title: 'Geheimnisse', seasonEpisode: 'S01E01' }
+      },
+      {
+        filename: 'Dark S01E02.mkv',
+        metadata: { title: 'Lügen', seasonEpisode: 'S01E02' }
+      }
+    ];
+
+    const m3u = generateSeasonM3u('Dark', 1, episodes, baseUrl);
+
+    expect(m3u).toContain('#EXTM3U');
+    expect(m3u).toContain('group-title="Dark - Staffel 1"');
+    expect(m3u).toContain('tvg-name="Dark - S01E01 - Geheimnisse"');
+    expect(m3u).toContain('http://192.168.1.100:3000/api/media/stream/Dark%20S01E01.mkv');
+    expect(m3u).toContain('tvg-name="Dark - S01E02 - Lügen"');
+    expect(m3u).toContain('http://192.168.1.100:3000/api/media/stream/Dark%20S01E02.mkv');
   });
 
   it('generates valid XMLTV EPG', () => {

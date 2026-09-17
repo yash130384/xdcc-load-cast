@@ -1,10 +1,21 @@
-import React from 'react';
-import { HeartIcon, TrashIcon, PlayIcon, CastIcon, PauseIcon } from './icons.jsx';
-import { formatBytes, formatDuration, getPosterSrc } from './utils.js';
+import React, { useState } from 'react';
+import { HeartIcon, TrashIcon, PlayIcon } from './icons.jsx';
+import { formatBytes, getPosterSrc } from './utils.js';
 
-const MusicItem = ({ item, idx, activeCasts, pendingCasts, onToggleFavorite, onDelete, onPlay, onCast, onCastControl, onStopCast }) => {
-  const activeCastForFile = activeCasts.find(c => c.filename === item.filename && c.downloadId === null);
-  const isPending = !!pendingCasts[item.filename];
+const MusicItem = ({ item, idx, onToggleFavorite, onDelete, onPlay, onCopyUrl }) => {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = (e) => {
+    e.stopPropagation();
+    if (onCopyUrl) {
+      onCopyUrl(item.filename, item);
+    } else {
+      const streamUrl = `${window.location.protocol}//${window.location.host}/api/media/stream/${encodeURIComponent(item.filename)}`;
+      navigator.clipboard?.writeText(streamUrl);
+    }
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
@@ -70,6 +81,17 @@ const MusicItem = ({ item, idx, activeCasts, pendingCasts, onToggleFavorite, onD
           >
             <HeartIcon filled={item.favorite} />
           </button>
+          <button
+            className="btn btn-secondary btn-icon-only"
+            title={copied ? "Kopiert!" : "Stream-URL kopieren"}
+            onClick={handleCopy}
+            style={{
+              color: copied ? 'var(--accent-green, #10b981)' : 'var(--text-secondary)',
+              borderColor: copied ? 'var(--accent-green, #10b981)' : 'rgba(255, 255, 255, 0.1)'
+            }}
+          >
+            {copied ? '✓' : '🔗'}
+          </button>
           {!item.isXtream && (
             <button 
               className="btn btn-danger btn-icon-only" 
@@ -82,112 +104,13 @@ const MusicItem = ({ item, idx, activeCasts, pendingCasts, onToggleFavorite, onD
           <button 
             className="btn btn-primary btn-icon-only" 
             style={{ background: 'var(--grad-cyan-blue)', border: 'none' }}
-            title="Lokal abspielen"
+            title="In VLC öffnen"
             onClick={() => onPlay(item.filename, item)}
           >
             <PlayIcon />
           </button>
-          <button 
-            className="btn btn-secondary btn-icon-only" 
-            style={{ color: 'var(--accent-cyan)', borderColor: 'rgba(0, 242, 254, 0.2)' }}
-            title="Auf TV streamen (Cast)"
-            disabled={isPending}
-            onClick={() => onCast(item)}
-          >
-            {isPending ? <span className="spinner">⏳</span> : <CastIcon />}
-          </button>
         </div>
       </div>
-
-      {activeCastForFile && (
-        <div style={{
-          background: 'rgba(0, 242, 254, 0.08)',
-          border: '1px solid rgba(0, 242, 254, 0.25)',
-          borderRadius: '10px',
-          padding: '0.75rem 1rem',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '0.5rem',
-          color: 'var(--text-primary)'
-        }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-            <span style={{ fontSize: '0.8rem', color: 'var(--accent-cyan)', fontWeight: 'bold' }}>
-              📺 Streamt auf {activeCastForFile.device}
-            </span>
-            <span style={{ fontSize: '0.75rem', opacity: 0.8 }}>
-              {activeCastForFile.playerState || 'Verbinden'}
-            </span>
-          </div>
-
-          {activeCastForFile.duration > 0 && (
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.2rem' }}>
-              <input 
-                type="range"
-                min={0}
-                max={activeCastForFile.duration}
-                value={activeCastForFile.currentTime || 0}
-                onChange={(e) => onCastControl(activeCastForFile.device, 'seek', e.target.value)}
-                style={{
-                  width: '100%',
-                  accentColor: 'var(--accent-cyan)',
-                  cursor: 'pointer',
-                  height: '4px'
-                }}
-              />
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                <span>{formatDuration(Math.round(activeCastForFile.currentTime || 0))}</span>
-                <span>{formatDuration(Math.round(activeCastForFile.duration))}</span>
-              </div>
-            </div>
-          )}
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginTop: '0.1rem' }}>
-            {activeCastForFile.playerState === 'PAUSED' ? (
-              <button 
-                className="btn btn-secondary btn-icon-only" 
-                style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                onClick={() => onCastControl(activeCastForFile.device, 'resume')}
-                title="Wiedergabe fortsetzen"
-              >
-                <PlayIcon />
-              </button>
-            ) : (
-              <button 
-                className="btn btn-secondary btn-icon-only" 
-                style={{ padding: '0.3rem', height: 'auto', minWidth: '30px' }}
-                onClick={() => onCastControl(activeCastForFile.device, 'pause')}
-                title="Wiedergabe pausieren"
-              >
-                <PauseIcon />
-              </button>
-            )}
-            
-            <button 
-              className="btn btn-danger" 
-              style={{ padding: '0.25rem 0.75rem', fontSize: '0.75rem', marginLeft: 'auto' }}
-              onClick={() => onStopCast(activeCastForFile.device)}
-            >
-              Stoppen
-            </button>
-          </div>
-        </div>
-      )}
-
-      {isPending && !activeCastForFile && (
-        <div style={{
-          background: 'rgba(0, 242, 254, 0.05)',
-          border: '1px solid rgba(0, 242, 254, 0.2)',
-          borderRadius: '8px',
-          padding: '0.5rem 0.75rem',
-          fontSize: '0.8rem',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          color: 'var(--text-secondary)'
-        }}>
-          <span><span className="spinner">⏳</span> Verbindung wird aufgebaut...</span>
-        </div>
-      )}
     </div>
   );
 };

@@ -4,7 +4,7 @@ import { formatBytes } from './utils.js';
 
 export default function VcrModal({
   showVcrModal, recordings, vcrChannels, vcrActiveTab, vcrChannelId, vcrTitle, vcrStartTime, vcrEndTime,
-  vcrError, vcrSaving, activeCasts,
+  vcrError, vcrSaving,
   onClose, onTabChange, onStopRecording, onDeleteRecording, onShowEpg,
   onVcrFieldChange, onAddRecording, onOpenManualFromEpg
 }) {
