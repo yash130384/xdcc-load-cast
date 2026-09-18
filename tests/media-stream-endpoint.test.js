@@ -158,4 +158,17 @@ describe('Media Stream Endpoints', () => {
     const res = await fetch(`${baseUrl}/api/media/stream/does_not_exist.mp4`);
     expect(res.status).toBe(404);
   });
+
+  it('GET /api/media/categories returns structured categories and counts', async () => {
+    const res = await fetch(`${baseUrl}/api/media/categories`);
+    expect(res.status).toBe(200);
+    const data = await res.json();
+    expect(data.success).toBe(true);
+    expect(data.counts).toBeDefined();
+    expect(data.movies).toBeDefined();
+    expect(Array.isArray(data.movies.categories)).toBe(true);
+    expect(data.series).toBeDefined();
+    expect(Array.isArray(data.series.categories)).toBe(true);
+  });
 });
+

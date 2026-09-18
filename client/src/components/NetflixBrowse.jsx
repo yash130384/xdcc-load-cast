@@ -468,22 +468,9 @@ const NetflixBrowse = ({
     <div className="nb-container">
       <style>{pinStyles}</style>
 
-      {/* Navbar */}
+      {/* Sub-Filterbar für Entdecken */}
       <div className="nb-navbar">
         <div className="nb-nav-left">
-          <div className="nb-brand">
-            <PulseCastLogo />
-            <span>PulseCast</span>
-          </div>
-          <button
-            className={`nb-nav-link ${activeTab === 'Lokal' ? 'active' : ''}`}
-            onClick={() => {
-              setActiveTab('Lokal');
-              setPinError('');
-            }}
-          >
-            Lokal {!showLocalFiles && <span style={{ display: 'inline-flex', verticalAlign: 'middle', opacity: 0.6, marginLeft: '4px' }}><LockIcon size={12} /></span>}
-          </button>
           <button
             className={`nb-nav-link ${activeTab === 'Stream' ? 'active' : ''}`}
             onClick={() => {
@@ -491,19 +478,68 @@ const NetflixBrowse = ({
               setShowPinModal(false);
             }}
           >
-            Stream
+            ☁️ Stream
           </button>
           <button
-            className={`nb-nav-link ${activeTab === 'IPTV' ? 'active' : ''}`}
+            className={`nb-nav-link ${activeTab === 'Lokal' ? 'active' : ''}`}
             onClick={() => {
-              setActiveTab('IPTV');
-              setShowPinModal(false);
+              setActiveTab('Lokal');
+              setPinError('');
             }}
           >
-            IPTV
+            💾 Lokal {!showLocalFiles && <span style={{ display: 'inline-flex', verticalAlign: 'middle', opacity: 0.6, marginLeft: '4px' }}><LockIcon size={12} /></span>}
           </button>
+          {isXtreamEnabled && (
+            <button
+              className={`nb-nav-link ${activeTab === 'IPTV' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('IPTV');
+                setShowPinModal(false);
+              }}
+            >
+              📡 IPTV
+            </button>
+          )}
         </div>
-        <div className="nb-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '0.85rem' }}>
+        <div className="nb-nav-right" style={{ display: 'flex', alignItems: 'center', gap: '0.6rem' }}>
+          {((activeTab === 'Lokal' && showLocalFiles) || activeTab === 'Stream') && (
+            <div style={{ display: 'inline-flex', background: 'rgba(0,0,0,0.3)', borderRadius: '20px', padding: '0.2rem', border: '1px solid rgba(255,255,255,0.08)' }}>
+              <button
+                className={`nb-subnav-pill ${activeSubTab === 'Filme' ? 'active' : ''}`}
+                onClick={() => setActiveSubTab('Filme')}
+                style={{
+                  background: activeSubTab === 'Filme' ? 'var(--grad-cyan-blue)' : 'transparent',
+                  color: activeSubTab === 'Filme' ? '#fff' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: '16px',
+                  padding: '0.25rem 0.75rem',
+                  fontSize: '0.78rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Filme
+              </button>
+              <button
+                className={`nb-subnav-pill ${activeSubTab === 'Serien' ? 'active' : ''}`}
+                onClick={() => setActiveSubTab('Serien')}
+                style={{
+                  background: activeSubTab === 'Serien' ? 'var(--grad-cyan-blue)' : 'transparent',
+                  color: activeSubTab === 'Serien' ? '#fff' : '#94a3b8',
+                  border: 'none',
+                  borderRadius: '16px',
+                  padding: '0.25rem 0.75rem',
+                  fontSize: '0.78rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.2s'
+                }}
+              >
+                Serien
+              </button>
+            </div>
+          )}
           {!showLocalFiles && (
             <button
               className="nb-pin-trigger-btn"
@@ -517,9 +553,6 @@ const NetflixBrowse = ({
               <LockIcon size={16} />
             </button>
           )}
-          <button className="nb-settings-btn" onClick={onOpenAdvanced} title="System & Einstellungen">
-            <SettingsIcon />
-          </button>
         </div>
       </div>
 
@@ -555,14 +588,6 @@ const NetflixBrowse = ({
               subtitle="Gib die 6-stellige PIN ein, um lokale Inhalte freizuschalten."
             />
           </div>
-        </div>
-      )}
-
-      {/* Sub Navbar for Filme/Serien */}
-      {((activeTab === 'Lokal' && showLocalFiles) || activeTab === 'Stream') && (
-        <div className="nb-subnav">
-          <button className={`nb-subnav-link ${activeSubTab === 'Filme' ? 'active' : ''}`} onClick={() => setActiveSubTab('Filme')}>Filme</button>
-          <button className={`nb-subnav-link ${activeSubTab === 'Serien' ? 'active' : ''}`} onClick={() => setActiveSubTab('Serien')}>Serien</button>
         </div>
       )}
 

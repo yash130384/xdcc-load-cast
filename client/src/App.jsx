@@ -253,11 +253,13 @@ function App() {
   });
   const [serverSubcategories, setServerSubcategories] = useState(['all']);
   const [rightPanelTab, setRightPanelTab] = useState('queue');
-  const [appMode, setAppMode] = useState('media'); // 'media' (Netflix default) or 'advanced' (profi)
-  const [currentView, setCurrentView] = useState('library');
+  const [currentView, setCurrentView] = useState('browse');
   const [continueWatchingItems, setContinueWatchingItems] = useState([]);
   const [mobileDownloadsTab, setMobileDownloadsTab] = useState('search');
   const [activeSeriesItem, setActiveSeriesItem] = useState(null);
+  const [showGlobalPinModal, setShowGlobalPinModal] = useState(false);
+  const [globalPinInput, setGlobalPinInput] = useState('');
+  const [globalPinError, setGlobalPinError] = useState('');
   const [settings, setSettings] = useState({ downloadDir: '', useSSLByDefault: true, keepDays: 0, xxxHideEnabled: false });
   
   const [tempDownloadDir, setTempDownloadDir] = useState('');
@@ -1984,21 +1986,49 @@ function App() {
     }
   };
 
-  const handleLibraryView = () => {
-    const isAtTopLevel = selectedCategory === 'all' &&
-                         selectedSubcategory === 'all' &&
-                         librarySearchQuery === '' &&
-                         currentPage === 1;
-    
-    setCurrentView('library');
+  const handleNavigate = (view) => {
     setActiveSeriesItem(null);
-    setSelectedCategory('all');
-    setSelectedSubcategory('all');
-    setLibrarySearchQuery('');
-    setCurrentPage(1);
-    
-    if (isAtTopLevel) {
-      fetchMediaLibrary();
+    setCurrentView(view);
+    if (view === 'movies') {
+      setSelectedCategory(settings?.xtreamEnabled ? 'Filme_all' : 'Filme');
+      setSelectedSubcategory('all');
+      setLibrarySearchQuery('');
+      setCurrentPage(1);
+    } else if (view === 'series') {
+      setSelectedCategory(settings?.xtreamEnabled ? 'Serien_all' : 'Serien');
+      setSelectedSubcategory('all');
+      setLibrarySearchQuery('');
+      setCurrentPage(1);
+    } else if (view === 'livetv') {
+      setSelectedCategory('Live TV');
+      setSelectedSubcategory('all');
+      setLibrarySearchQuery('');
+      setCurrentPage(1);
+    } else if (view === 'explorer') {
+      fetchExplorerFiles('');
+    }
+  };
+
+  const handleGlobalPinToggle = () => {
+    if (showLocalFiles) {
+      toggleLocalFiles(false);
+    } else {
+      setGlobalPinInput('');
+      setGlobalPinError('');
+      setShowGlobalPinModal(true);
+    }
+  };
+
+  const handleGlobalPinSubmit = (e) => {
+    if (e) e.preventDefault();
+    const correctPin = settings?.xxxPin || '009981';
+    if (globalPinInput.trim() === correctPin) {
+      toggleLocalFiles(true);
+      setShowGlobalPinModal(false);
+      setGlobalPinInput('');
+      setGlobalPinError('');
+    } else {
+      setGlobalPinError('Falsche PIN. Bitte erneut versuchen.');
     }
   };
 
@@ -2006,198 +2036,230 @@ function App() {
     <div className="app-layout">
       <div className="app-container">
         
-        {appMode === 'advanced' && (
         <AppHeader
-          appMode={appMode}
           currentView={currentView}
-          selectedCategory={selectedCategory}
-          onToggleAppMode={(mode) => {
-            setAppMode(mode);
-            if (mode === 'media') setCurrentView('library');
-          }}
-          onSelectCategory={handleSelectCategory}
-          onDownloadsClick={() => setCurrentView('downloads')}
-          onLibraryClick={handleLibraryView}
-          onExplorerClick={() => { setCurrentView('explorer'); fetchExplorerFiles(''); }}
+          onNavigate={handleNavigate}
+          downloads={downloads}
           settings={settings}
+          showLocalFiles={showLocalFiles}
+          onOpenPinModal={handleGlobalPinToggle}
           onOpenVcr={openVcrModalAndLoad}
           onOpenSettings={handleOpenSettings}
+          activeSeriesItem={activeSeriesItem}
+          onCloseSeriesDetail={() => setActiveSeriesItem(null)}
         />
-      )}
 
-        <div className={`card queue-panel-col ${appMode === 'advanced' && currentView === 'downloads' && mobileDownloadsTab !== 'queue' ? 'mobile-hidden' : ''}`} style={appMode !== 'advanced' || currentView !== 'downloads' ? { width: '100%' } : {}}>
-            {appMode === 'advanced' && currentView === 'downloads' ? (
-              <DownloadsQueue
-                downloads={downloads}
-                downloadLogs={downloadLogs}
-                expandedLogs={expandedLogs}
-                autoDownloads={autoDownloads}
-                checkingShowId={checkingShowId}
-                onPause={handlePause}
-                onResume={handleResume}
-                onCancel={handleCancel}
-                onDelete={handleDelete}
-                onDeleteFile={handleDeleteFile}
-                onConfirmFilename={confirmFilename}
-                onPlayLocal={playLocal}
-                onCopyUrl={copyStreamUrl}
-                onToggleLogs={toggleLogs}
-                onToggleAutoDownload={handleToggleAutoDownload}
-                onCheckNow={handleCheckNow}
-              />
-            ) : appMode === 'media' && !activeSeriesItem ? (
-              <NetflixBrowse
-                showLocalFiles={showLocalFiles}
-                toggleLocalFiles={toggleLocalFiles}
-                onPlay={playLocalLibrary}
-                onDownloadStream={triggerStreamDownload}
-                onCopyUrl={copyStreamUrl}
-                onSeriesClick={setActiveSeriesItem}
-                onToggleFavorite={toggleFavorite}
-                settings={settings}
-                onOpenAdvanced={() => {
-                  setAppMode('advanced');
-                  setCurrentView('downloads');
+        {/* Global PIN Modal */}
+        {showGlobalPinModal && !showLocalFiles && (
+          <div
+            className="nb-pin-modal-overlay"
+            onClick={() => {
+              setShowGlobalPinModal(false);
+              setGlobalPinInput('');
+              setGlobalPinError('');
+            }}
+          >
+            <div
+              className="nb-pin-modal-card"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="nb-pin-modal-close"
+                onClick={() => {
+                  setShowGlobalPinModal(false);
+                  setGlobalPinInput('');
+                  setGlobalPinError('');
                 }}
-              />
-            ) : appMode === 'media' && activeSeriesItem ? (
-              <SeriesDetailView
-                series={activeSeriesItem}
-                onClose={() => setActiveSeriesItem(null)}
-                onPlay={playLocalLibrary}
-                onDownloadStream={triggerStreamDownload}
-                onBatchDownload={triggerStreamBatchDownload}
-                onPlaySeasonVlc={openSeasonInVlc}
-                onCopyUrl={copyStreamUrl}
-                onCheckNow={handleCheckNow}
-                autoDownloads={autoDownloads}
-                checkingShowId={checkingShowId}
-                xtreamEpisodes={xtreamEpisodes}
-                loadingXtreamEpisodes={loadingXtreamEpisodes}
-                settings={settings}
-              />
-            ) : currentView === 'library' ? (
-              <MediaLibrary
-                mediaLibrary={mediaLibrary}
-                selectedCategory={selectedCategory}
-                selectedSubcategory={selectedSubcategory}
-                loadingLibrary={loadingLibrary}
-                totalPages={totalPages}
-                totalItems={totalItems}
-                currentPage={currentPage}
-                counts={categoryCounts}
-                serverSubcategories={serverSubcategories}
-                activeSeriesItem={activeSeriesItem}
-                activeSeries={activeSeries}
-                librarySearchQuery={librarySearchQuery}
-                debouncedSearchQuery={debouncedSearchQuery}
-                favoritesFilter={favoritesFilter}
-                wsConnected={wsConnected}
-                xtreamEpisodes={xtreamEpisodes}
-                loadingXtreamEpisodes={loadingXtreamEpisodes}
-                continueWatchingItems={continueWatchingItems}
-                onToggleWatched={toggleWatched}
-                settings={settings}
-                onSelectCategory={handleSelectCategory}
-                onSelectSubcategory={handleSelectSubcategory}
-                onSearchChange={setLibrarySearchQuery}
-                onPageChange={setCurrentPage}
-                onToggleFavorite={toggleFavorite}
-                onDelete={handleDeleteMediaFile}
-                onDeleteFile={handleDeleteMediaFile}
-                onPlay={playLocalLibrary}
-                onPlaySeason={openSeasonInVlc}
-                onCopyUrl={copyStreamUrl}
-                onScroll={handleScroll}
-                onSeriesClick={setActiveSeriesItem}
-                onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
-                onClearFilters={() => { setSelectedCategory('all'); setSelectedSubcategory('all'); setLibrarySearchQuery(''); }}
-                onXtreamDownload={triggerStreamDownload}
-                onXtreamBatchDownload={triggerStreamBatchDownload}
-                renderFavoritesOverview={renderFavoritesOverview}
-                autoDownloads={autoDownloads}
-                checkingShowId={checkingShowId}
-                onCheckNow={handleCheckNow}
-                onToggleAutoDownload={handleToggleAutoDownload}
-              />
-            ) : (
-              <FileExplorer
-                explorerPath={explorerPath}
-                explorerFiles={explorerFiles}
-                explorerLoading={explorerLoading}
-                explorerError={explorerError}
-                showNewFolderModal={showNewFolderModal}
-                newFolderName={newFolderName}
-                showMoveModal={showMoveModal}
-                movingItem={movingItem}
-                moveDestination={moveDestination}
-                onNavigate={fetchExplorerFiles}
-                onCreateFolder={handleCreateFolder}
-                onDelete={handleDeleteExplorerItem}
-                onMove={handleMoveExplorerItem}
-                onCloseNewFolder={() => setShowNewFolderModal(false)}
-                onCloseMove={() => setShowMoveModal(false)}
-                onNewFolderNameChange={setNewFolderName}
-                onMoveDestinationChange={setMoveDestination}
-                onOpenNewFolder={() => setShowNewFolderModal(true)}
-                onOpenMove={(item) => { setMovingItem(item); setShowMoveModal(true); setMoveDestination(item.name); }}
-              />
-            )}
-          </div>
-
-          {appMode === 'advanced' && currentView === 'downloads' && (
-          <div className="mobile-downloads-toggle">
-            <button
-              type="button"
-              className={`mobile-tab-btn ${mobileDownloadsTab === 'search' ? 'active' : ''}`}
-              onClick={() => setMobileDownloadsTab('search')}
-            >
-              <SearchIcon />
-              <span>Suche</span>
-            </button>
-            <button
-              type="button"
-              className={`mobile-tab-btn ${mobileDownloadsTab === 'queue' ? 'active' : ''}`}
-              onClick={() => setMobileDownloadsTab('queue')}
-            >
-              <DownloadIcon />
-              <span>Warteschlange</span>
-              {downloads.length > 0 && (
-                <span className="mobile-tab-badge">{downloads.length}</span>
-              )}
-            </button>
+              >
+                ✕
+              </button>
+              <div className="nb-pin-lock-badge">
+                <LockIcon size={24} />
+              </div>
+              <h3 className="nb-pin-title">Lokale Medien freischalten</h3>
+              <p className="nb-pin-subtitle">Gib die PIN ein, um den Zugriff auf lokale Dateien zu aktivieren.</p>
+              <form onSubmit={handleGlobalPinSubmit}>
+                <input
+                  type="password"
+                  className="nb-pin-input"
+                  placeholder="PIN eingeben..."
+                  autoFocus
+                  maxLength={12}
+                  value={globalPinInput}
+                  onChange={(e) => {
+                    setGlobalPinInput(e.target.value);
+                    setGlobalPinError('');
+                  }}
+                />
+                {globalPinError && <div className="nb-pin-error">{globalPinError}</div>}
+                <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', marginTop: '1rem' }}>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setShowGlobalPinModal(false);
+                      setGlobalPinInput('');
+                      setGlobalPinError('');
+                    }}
+                  >
+                    Abbrechen
+                  </button>
+                  <button type="submit" className="btn btn-primary">
+                    Entsperren
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
         )}
 
-        <div className={appMode === 'advanced' && currentView === 'downloads' ? "dashboard-grid" : "library-view-container"}>
-          
-          {appMode === 'advanced' && currentView === 'downloads' && (
-            <div className={`search-panel-col ${mobileDownloadsTab !== 'search' ? 'mobile-hidden' : ''}`}>
-              <SearchPanel
-                query={query}
-                results={results}
-                loading={loading}
-                error={error}
-                searchSource={searchSource}
-                searchHistory={searchHistory}
-                topDlResults={topDlResults}
-                topDlLoading={topDlLoading}
-                topDlError={topDlError}
-                onQueryChange={setQuery}
-                onSearch={handleSearch}
-                onSearchSourceChange={setSearchSource}
-                onDownload={triggerDownload}
-                fetchTopDl={fetchTopDl}
-                highlightMatch={highlightMatch}
-                onClearHistory={() => setSearchHistory([])}
-                renderStatusText={renderStatusText}
-                getDownloadState={getDownloadState}
-                getStatusClass={getStatusClass}
-              />
-            </div>
-          )}
-
-        </div>
+        {/* Content View Routing */}
+        {activeSeriesItem ? (
+          <SeriesDetailView
+            series={activeSeriesItem}
+            onClose={() => setActiveSeriesItem(null)}
+            onPlay={playLocalLibrary}
+            onDownloadStream={triggerStreamDownload}
+            onBatchDownload={triggerStreamBatchDownload}
+            onPlaySeasonVlc={openSeasonInVlc}
+            onCopyUrl={copyStreamUrl}
+            onCheckNow={handleCheckNow}
+            autoDownloads={autoDownloads}
+            checkingShowId={checkingShowId}
+            xtreamEpisodes={xtreamEpisodes}
+            loadingXtreamEpisodes={loadingXtreamEpisodes}
+            settings={settings}
+          />
+        ) : currentView === 'browse' ? (
+          <NetflixBrowse
+            showLocalFiles={showLocalFiles}
+            toggleLocalFiles={toggleLocalFiles}
+            onPlay={playLocalLibrary}
+            onDownloadStream={triggerStreamDownload}
+            onCopyUrl={copyStreamUrl}
+            onSeriesClick={setActiveSeriesItem}
+            onToggleFavorite={toggleFavorite}
+            settings={settings}
+          />
+        ) : (currentView === 'movies' || currentView === 'series' || currentView === 'livetv' || currentView === 'library') ? (
+          <MediaLibrary
+            viewMode={currentView === 'library' ? 'all' : currentView}
+            mediaLibrary={mediaLibrary}
+            selectedCategory={selectedCategory}
+            selectedSubcategory={selectedSubcategory}
+            loadingLibrary={loadingLibrary}
+            totalPages={totalPages}
+            totalItems={totalItems}
+            currentPage={currentPage}
+            counts={categoryCounts}
+            serverSubcategories={serverSubcategories}
+            activeSeriesItem={activeSeriesItem}
+            activeSeries={activeSeries}
+            librarySearchQuery={librarySearchQuery}
+            debouncedSearchQuery={debouncedSearchQuery}
+            favoritesFilter={favoritesFilter}
+            wsConnected={wsConnected}
+            xtreamEpisodes={xtreamEpisodes}
+            loadingXtreamEpisodes={loadingXtreamEpisodes}
+            continueWatchingItems={continueWatchingItems}
+            onToggleWatched={toggleWatched}
+            settings={settings}
+            onSelectCategory={handleSelectCategory}
+            onSelectSubcategory={handleSelectSubcategory}
+            onSearchChange={setLibrarySearchQuery}
+            onPageChange={setCurrentPage}
+            onToggleFavorite={toggleFavorite}
+            onDelete={handleDeleteMediaFile}
+            onDeleteFile={handleDeleteMediaFile}
+            onPlay={playLocalLibrary}
+            onPlaySeason={openSeasonInVlc}
+            onCopyUrl={copyStreamUrl}
+            onScroll={handleScroll}
+            onSeriesClick={setActiveSeriesItem}
+            onRefresh={(force) => { fetchMediaLibrary(force); fetchContinueWatching(); }}
+            onClearFilters={() => {
+              setSelectedCategory(currentView === 'movies' ? (settings?.xtreamEnabled ? 'Filme_all' : 'Filme') : currentView === 'series' ? (settings?.xtreamEnabled ? 'Serien_all' : 'Serien') : 'all');
+              setSelectedSubcategory('all');
+              setLibrarySearchQuery('');
+            }}
+            onXtreamDownload={triggerStreamDownload}
+            onXtreamBatchDownload={triggerStreamBatchDownload}
+            renderFavoritesOverview={renderFavoritesOverview}
+            autoDownloads={autoDownloads}
+            checkingShowId={checkingShowId}
+            onCheckNow={handleCheckNow}
+            onToggleAutoDownload={handleToggleAutoDownload}
+          />
+        ) : currentView === 'xdcc' ? (
+          <div className="card" style={{ width: '100%' }}>
+            <SearchPanel
+              query={query}
+              results={results}
+              loading={loading}
+              error={error}
+              searchSource={searchSource}
+              searchHistory={searchHistory}
+              topDlResults={topDlResults}
+              topDlLoading={topDlLoading}
+              topDlError={topDlError}
+              onQueryChange={setQuery}
+              onSearch={handleSearch}
+              onSearchSourceChange={setSearchSource}
+              onDownload={triggerDownload}
+              fetchTopDl={fetchTopDl}
+              highlightMatch={highlightMatch}
+              onClearHistory={() => setSearchHistory([])}
+              renderStatusText={renderStatusText}
+              getDownloadState={getDownloadState}
+              getStatusClass={getStatusClass}
+            />
+          </div>
+        ) : currentView === 'downloads' ? (
+          <div className="card" style={{ width: '100%' }}>
+            <DownloadsQueue
+              downloads={downloads}
+              downloadLogs={downloadLogs}
+              expandedLogs={expandedLogs}
+              autoDownloads={autoDownloads}
+              checkingShowId={checkingShowId}
+              onPause={handlePause}
+              onResume={handleResume}
+              onCancel={handleCancel}
+              onDelete={handleDelete}
+              onDeleteFile={handleDeleteFile}
+              onConfirmFilename={confirmFilename}
+              onPlayLocal={playLocal}
+              onCopyUrl={copyStreamUrl}
+              onToggleLogs={toggleLogs}
+              onToggleAutoDownload={handleToggleAutoDownload}
+              onCheckNow={handleCheckNow}
+            />
+          </div>
+        ) : currentView === 'explorer' ? (
+          <div className="card" style={{ width: '100%' }}>
+            <FileExplorer
+              explorerPath={explorerPath}
+              explorerFiles={explorerFiles}
+              explorerLoading={explorerLoading}
+              explorerError={explorerError}
+              showNewFolderModal={showNewFolderModal}
+              newFolderName={newFolderName}
+              showMoveModal={showMoveModal}
+              movingItem={movingItem}
+              moveDestination={moveDestination}
+              onNavigate={fetchExplorerFiles}
+              onCreateFolder={handleCreateFolder}
+              onDelete={handleDeleteExplorerItem}
+              onMove={handleMoveExplorerItem}
+              onCloseNewFolder={() => setShowNewFolderModal(false)}
+              onCloseMove={() => setShowMoveModal(false)}
+              onNewFolderNameChange={setNewFolderName}
+              onMoveDestinationChange={setMoveDestination}
+              onOpenNewFolder={() => setShowNewFolderModal(true)}
+              onOpenMove={(item) => { setMovingItem(item); setShowMoveModal(true); setMoveDestination(item.name); }}
+            />
+          </div>
+        ) : null}
 
         <SettingsModal
           showSettings={showSettings}

@@ -865,11 +865,20 @@ export function registerAllRoutes(app) {
       });
     }
 
+    const countFilme = filteredRaw.filter(item => item.isXtream && (item.category === 'Filme' || item.type === 'movie')).length;
+    const countSerien = filteredRaw.filter(item => item.isXtream && (item.category === 'Serien' || item.type === 'series')).length;
+    const countLokalFilme = filteredRaw.filter(item => !item.isXtream && !item.isGroup && item.metadata?.originalCategory !== 'Musik' && item.metadata?.originalCategory !== 'Hörbücher').length;
+    const countLokalSerien = filteredRaw.filter(item => !item.isXtream && (item.isGroup || item.metadata?.originalCategory === 'Serien' || item.metadata?.type === 'series')).length;
+
     const counts = {
       all: filteredRaw.length,
       Lokal: filteredRaw.filter(item => !item.isXtream).length,
-      Filme: filteredRaw.filter(item => item.isXtream && (item.category === 'Filme' || item.type === 'movie')).length,
-      Serien: filteredRaw.filter(item => item.isXtream && (item.category === 'Serien' || item.type === 'series')).length,
+      Lokal_Filme: countLokalFilme,
+      Lokal_Serien: countLokalSerien,
+      Filme: countFilme,
+      Serien: countSerien,
+      Filme_all: countFilme + countLokalFilme,
+      Serien_all: countSerien + countLokalSerien,
       'Live TV': filteredRaw.filter(item => item.isXtream && (item.category === 'Live TV' || item.type === 'live')).length,
       Videos: filteredRaw.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Videos' || item.metadata?.category === 'Videos')).length,
       Musik: filteredRaw.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Musik' || item.metadata?.category === 'Musik')).length,
@@ -982,6 +991,10 @@ export function registerAllRoutes(app) {
       });
     } else if (category === 'Lokal') {
       filteredGrouped = groupedItems.filter(item => !item.isXtream);
+    } else if (category === 'Filme_all') {
+      filteredGrouped = groupedItems.filter(item => (item.isXtream && (item.category === 'Filme' || item.type === 'movie')) || (!item.isXtream && !item.isGroup && item.metadata?.originalCategory !== 'Musik' && item.metadata?.originalCategory !== 'Hörbücher'));
+    } else if (category === 'Serien_all') {
+      filteredGrouped = groupedItems.filter(item => (item.isXtream && (item.category === 'Serien' || item.type === 'series')) || (!item.isXtream && item.isGroup));
     } else if (category === 'Lokal_Filme') {
       filteredGrouped = groupedItems.filter(item => !item.isXtream && !item.isGroup && item.metadata?.originalCategory !== 'Musik' && item.metadata?.originalCategory !== 'Hörbücher');
     } else if (category === 'Lokal_Serien') {
@@ -992,6 +1005,20 @@ export function registerAllRoutes(app) {
       filteredGrouped = groupedItems.filter(item => item.isXtream && (item.category === 'Serien' || item.type === 'series'));
     } else if (category === 'Live TV') {
       filteredGrouped = groupedItems.filter(item => item.isXtream && (item.category === 'Live TV' || item.type === 'live'));
+    } else if (category === 'Favoriten_Filme') {
+      filteredGrouped = groupedItems.filter(item => {
+        const isFav = appState.favorites.has(String(item.filename || item.title));
+        const isMovie = (item.isXtream && (item.category === 'Filme' || item.type === 'movie')) || (!item.isXtream && !item.isGroup && item.metadata?.originalCategory !== 'Musik');
+        return isFav && isMovie;
+      });
+    } else if (category === 'Favoriten_Serien') {
+      filteredGrouped = groupedItems.filter(item => {
+        const key = String(item.xtreamSeriesId || item.imdbId || item.title || item.metadata?.imdbId || item.metadata?.title);
+        const isFav = appState.favorites.has(key);
+        const isWatchingSeries = item.isGroup && Array.isArray(item.files) && item.files.some(ep => appState.playProgress[ep.filename]);
+        const isSeries = item.isGroup || item.category === 'Serien' || item.type === 'series';
+        return (isFav || isWatchingSeries) && isSeries;
+      });
     } else if (category === 'Musik') {
       filteredGrouped = groupedItems.filter(item => !item.isXtream && (item.metadata?.originalCategory === 'Musik' || item.metadata?.category === 'Musik'));
     } else if (category === 'Hörbücher') {
@@ -1101,6 +1128,84 @@ export function registerAllRoutes(app) {
       currentPage,
       counts,
       availableSubcategories
+    });
+  });
+
+  app.get('/api/media/categories', async (req, res) => {
+    if (appState.cachedLocalFiles === null) {
+      await updateLocalMappedList(false);
+    }
+    const rawItems = appState.cachedRawItems || [];
+    
+    const movieSubcats = new Set();
+    const seriesSubcats = new Set();
+    const liveSubcats = new Set();
+    
+    let movieCount = 0;
+    let seriesCount = 0;
+    let localMovieCount = 0;
+    let localSeriesCount = 0;
+    let liveCount = 0;
+    let musicCount = 0;
+    let audiobooksCount = 0;
+
+    for (const item of rawItems) {
+      if (item.isXtream) {
+        if (item.category === 'Filme' || item.type === 'movie') {
+          movieCount++;
+          const sub = item.metadata?.subcategory || item.subcategory;
+          if (sub) movieSubcats.add(sub);
+        } else if (item.category === 'Serien' || item.type === 'series') {
+          seriesCount++;
+          const sub = item.metadata?.subcategory || item.subcategory;
+          if (sub) seriesSubcats.add(sub);
+        } else if (item.category === 'Live TV' || item.type === 'live') {
+          liveCount++;
+          const sub = item.metadata?.category || item.category;
+          if (sub) liveSubcats.add(sub);
+        }
+      } else {
+        const orig = item.metadata?.originalCategory || item.category;
+        if (orig === 'Filme' || item.metadata?.type === 'movie') {
+          localMovieCount++;
+          const sub = item.metadata?.subcategory || item.subcategory;
+          if (sub) movieSubcats.add(sub);
+        } else if (orig === 'Serien' || item.isGroup || item.metadata?.type === 'series' || item.metadata?.isSeries) {
+          localSeriesCount++;
+          const sub = item.metadata?.subcategory || item.subcategory;
+          if (sub) seriesSubcats.add(sub);
+        } else if (orig === 'Musik') {
+          musicCount++;
+        } else if (orig === 'Hörbücher') {
+          audiobooksCount++;
+        }
+      }
+    }
+
+    return res.json({
+      success: true,
+      counts: {
+        total: rawItems.length,
+        movies: movieCount,
+        series: seriesCount,
+        localMovies: localMovieCount,
+        localSeries: localSeriesCount,
+        live: liveCount,
+        music: musicCount,
+        audiobooks: audiobooksCount
+      },
+      movies: {
+        categories: Array.from(movieSubcats).sort(),
+        count: movieCount + localMovieCount
+      },
+      series: {
+        categories: Array.from(seriesSubcats).sort(),
+        count: seriesCount + localSeriesCount
+      },
+      liveTv: {
+        categories: Array.from(liveSubcats).sort(),
+        count: liveCount
+      }
     });
   });
 
