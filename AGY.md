@@ -119,9 +119,45 @@ flowchart TD
 
 ---
 
-## 5. Verifikationsplan
+## 5. On-the-Fly Audio-Transkodierung für den Webplayer (Browser-Kompatibilität)
+
+### 5.1 Problemstellung
+Browser wie Google Chrome, Mozilla Firefox und Safari unterstützen im nativen HTML5 `<video>`-Element keine Audio-Codecs wie Dolby Digital (AC-3, E-AC-3), DTS, TrueHD oder DCA in MP4/MKV-Containern. Dies führte bei lokalen Mediendateien zu stummer Wiedergabe im Webplayer.
+
+### 5.2 Architektur & Streaming-Pipeline
+Um die CPU-Last minimal zu halten und volle Browser-Kompatibilität zu garantieren, wurde eine schlanke On-the-Fly Pipeline implementiert:
+
+```mermaid
+flowchart LR
+    Client["Browser / Webplayer"] -->|GET /api/media/transcode/*<br/>oder ?transcode=audio| Backend["PulseCast Express Server"]
+    Backend -->|spawn ffmpeg| FFmpeg["FFmpeg Process"]
+    FFmpeg -->|Video: -c:v copy| Out["Fragmented MP4 Stream"]
+    FFmpeg -->|Audio: -c:a aac 192k| Out
+    Out -->|pipe:1 / Transfer-Encoding: chunked| Client
+```
+
+- **Video Passthrough (Zero-CPU):** `-c:v copy` schleift den Videostream unberührt durch.
+- **Audio Transkodierung:** `-c:a aac -b:a 192k` kodiert den Audiostream universell kompatibel in AAC Stereo/Surround.
+- **Fragmented MP4 (fMP4):** `-f mp4 -movflags frag_keyframe+empty_moov+default_base_moof` ermöglicht das direkte Abspielen über HTTP Chunked Transfer ohne vorherigen Download.
+- **Fast Seeking:** Übergabe des Query-Parameters `ss` (z. B. `?ss=120`) direkt vor `-i` für schnelles Springen an Keyframes.
+- **Prozesssicherheit & Orphan-Schutz:**
+  - Registrierung von `req.on('close')` und `res.on('error')`, die den FFmpeg-Prozess via `ffmpeg.kill('SIGKILL')` sofort terminieren, sobald der Client die Wiedergabe stoppt.
+  - Automatischer Non-blocking Drain von `ffmpeg.stderr`, um Puffer-Deadlocks bei längeren Videos zu verhindern.
+
+### 5.3 Bereitgestellte Endpoints
+1. `GET /api/media/transcode/*` bzw. `/api/media/transcode/:filename`:
+   Direkter Stream-Endpoint für Audio-transkodierte MP4-Ausgabe.
+2. `GET /api/media/stream/*?transcode=audio`:
+   Transkodierungs-Modus auf dem regulären Streaming-Endpoint.
+3. `GET /api/media/probe/*`:
+   Analysiert die Datei mittels `ffprobe` und liefert JSON `{ filename, needsAudioTranscode: true/false }` zurück.
+
+---
+
+## 6. Verifikationsplan
 1. `npm run build:frontend`: Fehlerfreier Produktions-Build des Client-Bundles.
-2. `npm test`: Ausführen der Vitest-Suite.
+2. `npm test`: Ausführen der Vitest-Suite inklusive aller Audio-Transcode- und Probing-Tests.
 3. MCP-Server-Funktionstest via Stdio-Transport.
 4. Systemd-Neustart: `systemctl --user restart pulsecast.service` und Verifikation der Verfügbarkeit.
 5. Saubere Git-Commits und Push auf den Tracking-Branch `main`.
+

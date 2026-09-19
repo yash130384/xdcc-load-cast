@@ -1663,7 +1663,102 @@ export function registerAllRoutes(app) {
   });
 
   // 3. Reliable Native HTTP Range Streaming for /api/media/stream/:filename
+  // On-the-Fly Audio Transcoding for Webplayer (converting incompatible audio like AC-3/E-AC-3/DTS to AAC)
+  const handleAudioTranscode = (req, res) => {
+    let rawFilename = req.params[0] !== undefined ? req.params[0] : (req.params.filename || req.query.filename || '');
+    if (!rawFilename) {
+      return res.status(400).send('Dateiname fehlt');
+    }
+
+    let filename;
+    try {
+      filename = decodeURIComponent(rawFilename);
+    } catch (e) {
+      filename = rawFilename;
+    }
+
+    const filePath = getSafeFilePath(filename);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).send('Datei nicht gefunden');
+    }
+
+    let stat;
+    try {
+      stat = fs.statSync(filePath);
+    } catch (e) {
+      return res.status(404).send('Datei konnte nicht gelesen werden');
+    }
+
+    if (!stat.isFile()) {
+      return res.status(404).send('Keine reguläre Datei');
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'video/mp4',
+      'Transfer-Encoding': 'chunked',
+      'Cache-Control': 'no-cache'
+    });
+
+    if (req.method === 'HEAD') {
+      return res.end();
+    }
+
+    const ffmpegArgs = [];
+    if (req.query.ss !== undefined && req.query.ss !== '') {
+      ffmpegArgs.push('-ss', String(req.query.ss));
+    }
+    ffmpegArgs.push(
+      '-i', filePath,
+      '-c:v', 'copy',
+      '-c:a', 'aac',
+      '-b:a', '192k',
+      '-f', 'mp4',
+      '-movflags', 'frag_keyframe+empty_moov+default_base_moof',
+      'pipe:1'
+    );
+
+    console.log(`[Transcode] Starting on-the-fly audio transcode for ${filePath}${req.query.ss ? ` (ss=${req.query.ss})` : ''}`);
+    const ffmpeg = spawn('ffmpeg', ffmpegArgs);
+
+    ffmpeg.stdout.pipe(res);
+    ffmpeg.stderr.resume();
+
+    req.on('close', () => {
+      try {
+        ffmpeg.kill('SIGKILL');
+      } catch (e) {}
+    });
+
+    res.on('error', () => {
+      try {
+        ffmpeg.kill('SIGKILL');
+      } catch (e) {}
+    });
+
+    ffmpeg.on('error', (err) => {
+      console.error(`[Transcode Error] ${filePath}:`, err.message);
+      try {
+        ffmpeg.kill('SIGKILL');
+      } catch (e) {}
+      if (!res.headersSent) {
+        res.status(500).send(`Transcoding-Fehler: ${err.message}`);
+      } else {
+        res.end();
+      }
+    });
+
+    ffmpeg.on('close', (code) => {
+      if (code !== 0 && code !== null) {
+        console.warn(`[Transcode] ffmpeg exited with code ${code} for ${filePath}`);
+      }
+    });
+  };
+
   const handleRangeStreaming = (req, res) => {
+    if (req.query.transcode === 'audio' || req.query.transcode === 'true' || req.query.transcode === '1') {
+      return handleAudioTranscode(req, res);
+    }
+
     let rawFilename = req.params[0] !== undefined ? req.params[0] : (req.params.filename || '');
     if (!rawFilename) {
       return res.status(400).send('Dateiname fehlt');
@@ -1765,12 +1860,43 @@ export function registerAllRoutes(app) {
     }
   };
 
+  // Audio Transcode endpoints for Webplayer compatibility
+  app.get('/api/media/transcode', handleAudioTranscode);
+  app.head('/api/media/transcode', handleAudioTranscode);
+  app.get('/api/media/transcode/*', handleAudioTranscode);
+  app.head('/api/media/transcode/*', handleAudioTranscode);
+  app.get('/api/media/transcode/:filename', handleAudioTranscode);
+  app.head('/api/media/transcode/:filename', handleAudioTranscode);
+
+  // Audio Transcode probe endpoint
+  app.get('/api/media/probe/*', async (req, res) => {
+    let rawFilename = req.params[0] !== undefined ? req.params[0] : (req.params.filename || req.query.filename || '');
+    if (!rawFilename) {
+      return res.status(400).json({ error: 'Dateiname fehlt' });
+    }
+    let filename;
+    try {
+      filename = decodeURIComponent(rawFilename);
+    } catch (e) {
+      filename = rawFilename;
+    }
+    const filePath = getSafeFilePath(filename);
+    if (!filePath || !fs.existsSync(filePath)) {
+      return res.status(404).json({ error: 'Datei nicht gefunden' });
+    }
+    const needsAudioTranscode = await checkAudioTranscodeNeeded(filePath);
+    return res.json({ filename, needsAudioTranscode });
+  });
+
   app.get('/api/media/stream/*', handleRangeStreaming);
   app.head('/api/media/stream/*', handleRangeStreaming);
   app.get('/api/media/stream/:filename', handleRangeStreaming);
   app.head('/api/media/stream/:filename', handleRangeStreaming);
 
   app.get('/api/media/*', async (req, res) => {
+    if (req.query.transcode === 'audio' || req.query.transcode === 'true' || req.query.transcode === '1') {
+      return handleAudioTranscode(req, res);
+    }
     const filename = req.params[0];
     const isUrl = filename.startsWith('http://') || filename.startsWith('https://');
     let filePath;
