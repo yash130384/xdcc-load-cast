@@ -350,7 +350,59 @@ server.tool(
 );
 
 /**
- * TOOL 5: pulsecast_start_download
+ * TOOL 5: pulsecast_get_top_downloads
+ * Ruft die aktuellen Top-Downloads / Favoriten von Moviegods IRC ab.
+ */
+server.tool(
+  'pulsecast_get_top_downloads',
+  'Ruft die aktuellen Top-Downloads und Favoriten aus dem Moviegods-IRC-Netzwerk ab, optional gefiltert nach Suchbegriff (z.B. german).',
+  {
+    filter: z.string().optional().describe('Optionaler Filterbegriff für Top-Downloads (z.B. "german", "1080p")')
+  },
+  async ({ filter } = {}) => {
+    try {
+      const cleanFilter = filter ? filter.trim() : '';
+      const query = cleanFilter
+        ? (cleanFilter.toLowerCase().startsWith('!topdl') || cleanFilter.toLowerCase().startsWith('.topdl')
+            ? cleanFilter
+            : `!topdl ${cleanFilter}`)
+        : '!topdl';
+
+      const data = await apiRequest(`/api/search?q=${encodeURIComponent(query)}&source=moviegods`);
+      const rawList = Array.isArray(data?.results) ? data.results : (Array.isArray(data) ? data : []);
+
+      const items = rawList.map((item, index) => ({
+        rank: index + 1,
+        gets: item.gets !== undefined && item.gets !== null ? item.gets : '',
+        filename: item.filename || item.name || '',
+        size: item.sizeStr || item.size || '',
+        sizeStr: item.sizeStr || item.size || ''
+      }));
+
+      return {
+        content: [{
+          type: 'text',
+          text: JSON.stringify({
+            success: true,
+            query,
+            filter: cleanFilter || null,
+            totalFound: items.length,
+            topDownloads: items,
+            results: items
+          }, null, 2)
+        }]
+      };
+    } catch (error) {
+      return {
+        isError: true,
+        content: [{ type: 'text', text: JSON.stringify({ success: false, error: error.message }) }]
+      };
+    }
+  }
+);
+
+/**
+ * TOOL 6: pulsecast_start_download
  * Startet einen Download für einen VOD-Stream (stream_id / title / type) oder ein XDCC-Paket (bot, pack).
  */
 server.tool(
@@ -449,7 +501,7 @@ server.tool(
 );
 
 /**
- * TOOL 6: pulsecast_control_download
+ * TOOL 7: pulsecast_control_download
  * Steuert Downloads (action: 'pause' | 'resume' | 'cancel', id: string).
  */
 server.tool(
